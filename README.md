@@ -1,8 +1,8 @@
 # uberblick skills
 
-Guided `/uberblick` workflow for opinionated PRDs, RFCs, and implementation review using [uberblick.ai](https://uberblick.ai).
+Guided `/uberblick` (Claude Code) and `$uberblick` (Codex) workflow for opinionated PRDs, RFCs, and implementation review using [uberblick.ai](https://uberblick.ai).
 
-The `/uberblick` command gives Claude Code and Codex a structured planning workflow: load a PRD or RFC, run the right role (critic, architect, reviewer), write outputs back through MCP, and manage completion gates before marking work done.
+The skill gives Claude Code and Codex a structured planning workflow: load a PRD or RFC, run the right role (critic, architect, reviewer), write outputs back through MCP, and manage completion gates before marking work done.
 
 The MCP-only baseline works without installing anything. This skill pack is an optional accelerator.
 
@@ -32,10 +32,14 @@ To update, pull the latest repo and repeat the copy step.
 
 ```bash
 git clone https://github.com/uberblick-ai/skills.git
-cp -r skills/plugins/uberblick/codex/. .codex/skills/uberblick/
+cp -r skills/plugins/uberblick/codex/. ~/.agents/skills/uberblick/
 ```
 
-Restart Codex, then type `/uberblick`.
+Restart Codex, then type `$uberblick` to start a session.
+
+To install via the built-in installer: `$skill-installer uberblick-ai/uberblick`.
+
+To update, pull the latest repo and repeat the copy step.
 
 ## Updating
 
@@ -43,7 +47,7 @@ For Claude Code marketplace installs, auto-update handles this. For manual insta
 
 ## MCP-only baseline (no installation required)
 
-You do not need to install this skill pack to use uberblick. Ask your AI assistant to follow `uberblick://docs/workflow` and `uberblick://docs/workflow-roles` directly. The skill pack adds the `/uberblick` command and guided stage flow — it is not a required control plane.
+You do not need to install this skill pack to use uberblick. Ask your AI assistant to follow `uberblick://docs/workflow` and `uberblick://docs/workflow-roles` directly. The skill pack adds the `/uberblick` (Claude Code) or `$uberblick` (Codex) command and guided stage flow — it is not a required control plane.
 
 ## Issues and feedback
 

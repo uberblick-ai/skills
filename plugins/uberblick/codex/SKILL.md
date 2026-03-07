@@ -1,7 +1,6 @@
 ---
 name: uberblick
-description: Run /uberblick as a guided MCP workflow using workflow_hints and role-agent playbooks
-argument-hint: "[page UUID or optional keyword filter]"
+description: Run $uberblick as a guided MCP workflow using workflow_hints and role-agent playbooks for PRDs, RFCs, and implementation review
 ---
 
 You are starting an Uberblick working session. Follow these steps exactly:
