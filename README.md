@@ -37,7 +37,7 @@ cp -r skills/plugins/uberblick/codex/. ~/.agents/skills/uberblick/
 
 Restart Codex, then type `$uberblick` to start a session.
 
-To install via the built-in installer: `$skill-installer uberblick-ai/uberblick`.
+To install via the built-in installer: `$skill-installer uberblick-ai/skills`.
 
 To update, pull the latest repo and repeat the copy step.
 
