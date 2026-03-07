@@ -1,0 +1,7 @@
+interface:
+  display_name: "uberblick"
+  short_description: "Guided workflow for PRDs, RFCs, and implementation review using uberblick.ai."
+  default_prompt: "Start an uberblick planning session"
+
+policy:
+  allow_implicit_invocation: false
