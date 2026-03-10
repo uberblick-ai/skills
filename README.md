@@ -6,6 +6,26 @@ The skill gives Claude Code and Codex a structured planning workflow: load a PRD
 
 The MCP-only baseline works without installing anything. This skill pack is an optional accelerator.
 
+## MCP client setup
+
+Connect your client to the hosted uberblick MCP server at `https://uberblick.ai/mcp`.
+
+### Claude Code
+
+```bash
+claude mcp add --transport http uberblick https://uberblick.ai/mcp
+```
+
+Claude Code will open a browser for OAuth on first use.
+
+### Codex
+
+```bash
+codex mcp add uberblick --url https://uberblick.ai/mcp
+```
+
+After either command, the MCP-only baseline works immediately. You only need the skill pack if you want the guided `/uberblick` or `$uberblick` command.
+
 ## Install for Claude Code
 
 ```
@@ -31,15 +51,20 @@ To update, pull the latest repo and repeat the copy step.
 ## Install for Codex
 
 ```bash
-git clone https://github.com/uberblick-ai/skills.git
-cp -r skills/plugins/uberblick/codex/. ~/.agents/skills/uberblick/
+$skill-installer install https://github.com/uberblick-ai/skills/tree/main/plugins/uberblick/codex
 ```
 
 Restart Codex, then type `$uberblick` to start a session.
 
-To install via the built-in installer: `$skill-installer uberblick-ai/skills`.
+### Manual install (fallback)
 
-To update, pull the latest repo and repeat the copy step.
+```bash
+git clone https://github.com/uberblick-ai/skills.git
+mkdir -p ~/.codex/skills/uberblick
+cp -r skills/plugins/uberblick/codex/. ~/.codex/skills/uberblick/
+```
+
+To update, re-run the installer command or repeat the copy step with the latest repo contents.
 
 ## Updating
 
