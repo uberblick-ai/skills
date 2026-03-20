@@ -8,6 +8,14 @@ You are starting an Uberblick working session. Follow these steps exactly:
 ## Step 0 — Check for a direct page ID
 If `$ARGUMENTS` looks like a UUID (e.g. `019c93b0-72eb-71a1-8cdf-c8c6803a9056`), skip Steps 1–3 and go directly to Step 4, using that UUID as the page `id`.
 
+## Step 0.5 — Route bug intake directly when appropriate
+If the user's request, or a newly discovered issue during the session, is primarily about broken behavior now, a regression, or triage intake rather than planning/execution work:
+
+1. Fetch `uberblick://docs/bug-guide`.
+2. Use `list_bugs` to check for existing similar bugs.
+3. Use `create_bug_tool` when a new bug is the right artifact.
+4. If bug filing fully resolves the request, stop. Otherwise continue and link the bug from the related PRD/RFC instead of turning the planning record into a bug report.
+
 ## Step 1 — List workspaces
 Call the `list_workspaces` MCP tool to get all workspaces.
 
@@ -104,6 +112,12 @@ When relevant, include:
 
 Follow the active role's agent file output contract for content structure and decision-handling rules.
 
+Page Impact rule for PRD writes:
+
+- If touching `## Page Impact`, keep every entry in validator-compatible checklist form from `uberblick://docs/markdown-spec`.
+- Actionable entries must contain `[Title](page:UUID)` or `uberblick://docs/...`; if none apply, use exactly one checked no-update line.
+- Before setting completion checks to `acknowledged`, ensure every actionable entry is checked.
+
 Active comment-anchor migration rule:
 
 - When rewriting/removing text that contains active `{comment:thread_uuid}...{/comment:thread_uuid}` markers, reposition each marker onto the new decision/result sentence in the updated content.
@@ -134,7 +148,7 @@ Do not move one linked PRD/RFC to `Done` while another linked record is still bl
 When coding is in scope:
 
 1. ALWAYS work in a branch.
-2. Follow repository instructions.
+2. Follow repository instructions (`docs/instructions/`).
 3. Before the first code edit, enforce execution-entry status:
    - if current `parent_status` is not `"in_progress"`:
      - call `list_statuses` with `parent: "in_progress"`,
@@ -160,23 +174,41 @@ Do this when implementation is complete.
    - if PR is open: use the highest `in_progress` status (typically `In Review`),
    - if PR is merged: use the default complete status (typically `Done`).
 2. If PR is draft, mark it ready for review.
-3. Audit only likely-drift docs:
+3. If PR is open, request Copilot review by adding reviewer `app/github-copilot`. If this fails, note the error and continue.
+4. Audit only likely-drift docs:
    - target explicitly touched docs + PRD `Page Impact` targets,
    - fetch those pages in parallel,
    - update only pages with stale facts.
-4. Status sync in one pass (parallel where safe):
+5. Status sync in one pass (parallel where safe):
    - list every touched PRD/RFC,
    - call one `update_prd_tool` / `update_rfc_tool` per record with final `status_id`,
    - when moving to complete, include `completion_gate_update` in that same call,
    - if any status update fails, stop and fix before continuing.
-5. Verification gate (required):
+6. Verification gate (required):
    - call `get_page` once per touched PRD/RFC after status updates,
-   - verify each record is in intended handoff status.
-6. Report a final status summary in the handoff message.
+   - verify each record is in intended handoff status,
+   - verify linked PRD/RFC statuses are intentionally aligned (no accidental mixed final states).
+7. Report a final status summary in the handoff message:
+   - `record_id`
+   - `record_type` (`prd`/`rfc`)
+   - `final_status_name`
 
-## Step 12 — Claude/Codex parity check
+## Step 12 — Monitor CI and PR comments
+
+Run this step only while the PR is open. If the PR is already merged, skip to Step 13.
+
+1. Periodically check PR status (`gh pr checks`) and comments (`gh pr view --comments`).
+2. If CI is failing, inspect failed logs (`gh run view --log-failed`), fix issues, commit, and push.
+3. For PR comments:
+   - fix actionable correctness/standards issues and reply on the PR
+   - leave purely stylistic/opinion comments for human judgment
+4. Continue until CI is green and no actionable comments remain.
+
+## Step 13 — Claude/Codex parity check
 Before final signoff, ensure this session did not violate policy parity:
 
 - gate behavior and `completion_gate_update` rules match MCP responses,
 - `workflow_hints` stage/role sequence was respected,
 - manual web UI status remains authoritative and is not auto-reverted.
+
+Report the final PR URL to the user.
