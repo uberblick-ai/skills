@@ -31,8 +31,9 @@ Return:
 
 When writing RFC content:
 
-- keep the opening paragraph to 1-2 sentences
-- prefer a compact structure: `## Summary`, `## Recommended Design`, `## Data Model` and/or `## API Contract` if needed, `## Rollout Notes`, `## Alternatives Considered {collapsed}` if useful, `## Open Decisions` only when non-empty, `## Page Impact`, `## Trade-offs`
+- remember that the UI already renders the RFC TL;DR above the body; keep the TL;DR user- and goal-focused
+- start with `## Recommended Design` by default; use `## Technical Overview` only for one short architectural frame that does not repeat the TL;DR or the design sections
+- prefer a compact structure: `## Recommended Design`, `## Data Model` and/or `## API Contract` if needed, `## Rollout Notes`, `## Alternatives Considered {collapsed}` if useful, `## Open Decisions` only when non-empty, `## Page Impact`, `## Trade-offs`
 - prefer 4-7 top-level sections before `## Page Impact`
 - use bullets when the content is naturally list-shaped
 - omit sections that add no new information

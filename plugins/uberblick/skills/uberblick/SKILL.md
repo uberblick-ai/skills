@@ -10,6 +10,14 @@ You are starting an Uberblick working session. Follow these steps exactly:
 ## Step 0 — Check for a direct page ID
 If `$ARGUMENTS` looks like a UUID (e.g. `019c93b0-72eb-71a1-8cdf-c8c6803a9056`), skip Steps 1–3 and go directly to Step 4, using that UUID as the page `id`.
 
+## Step 0.5 — Route bug intake directly when appropriate
+If the user's request, or a newly discovered issue during the session, is primarily about broken behavior now, a regression, or triage intake rather than planning/execution work:
+
+1. Fetch `uberblick://docs/bug-guide`.
+2. Use `list_bugs` to check for existing similar bugs.
+3. Use `create_bug_tool` when a new bug is the right artifact.
+4. If bug filing fully resolves the request, stop. Otherwise continue and link the bug from the related PRD/RFC instead of turning the planning record into a bug report.
+
 ## Step 1 — List workspaces
 Call the `list_workspaces` MCP tool to get all workspaces.
 
@@ -105,6 +113,12 @@ When relevant, include:
 - `completion_gate_update` for `page_sync_handoff` / `docs_drift_audit`.
 
 Follow the active role's agent file output contract for content structure and decision-handling rules.
+
+Page Impact rule for PRD writes:
+
+- If touching `## Page Impact`, keep every entry in validator-compatible checklist form from `uberblick://docs/markdown-spec`.
+- Actionable entries must contain `[Title](page:UUID)` or `uberblick://docs/...`; if none apply, use exactly one checked no-update line.
+- Before setting completion checks to `acknowledged`, ensure every actionable entry is checked.
 
 Active comment-anchor migration rule:
 
