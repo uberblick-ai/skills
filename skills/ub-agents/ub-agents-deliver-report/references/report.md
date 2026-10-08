@@ -27,8 +27,9 @@ roles said about themselves. `scripts/review.py render` lays it out from
    first and the costliest first: the item with links to its PRs and
    retrospectives, one chip per run in role order (P preparer, Q issue
    reviewer, I implementer, R reviewer, G integrator; green moved forward,
-   amber sent back, red blocked, retried or no report), lines changed, lead
-   time from filing to merge, and the note naming what cost runs.
+   amber sent back, red blocked, retried or no report), lines changed, three
+   durations (lead: filed to merged; wall: first run to delivery; agent: run
+   minutes summed), and the note naming what cost runs.
 6. **Retrospectives.** Every board post from that day, as written, linked to
    its source, or a line saying none was posted or which board could not be
    read.
@@ -58,7 +59,7 @@ shape.
              "headline": "...", "causes": [], "lessons": []},
  "issues": [{"repo": "owner/name", "day": "2026-10-07", "number": 227, "title": "...", "url": "...",
              "delivered": true, "prs": [], "runs": [], "extra_runs": 1, "resets": 0, "notices": 0,
-             "lead": 410.5, "agent_minutes": 52.0, "retrospectives": [], "note": "..."}],
+             "lead": 410.5, "wall": 96.0, "agent_minutes": 52.0, "retrospectives": [], "note": "..."}],
  "retrospectives": {"errors": [], "in_window": []}}
 ```
 
@@ -74,6 +75,8 @@ shape.
 ```
 
 Minutes are minutes; `lead` is from the item's creation to its merge or
-close; `agent_hours` sums run durations and is not elapsed time; `first_pass`
+close; `wall` is from its first run's start to its delivery, the last run's
+end or a later merge or close; `agent_minutes` and `agent_hours` sum run
+durations and are not elapsed time; `first_pass`
 counts deliveries where no role ran twice. Keep these definitions when a
 producer derives charts from the records.
