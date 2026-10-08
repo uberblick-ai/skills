@@ -19,9 +19,10 @@ roles said about themselves. `scripts/review.py render` lays it out from
    title, the change in one or two sentences quoting any line it would
    change, where it lives, what it cost, and the items that are its evidence.
    Never a new role, label, gate, review round or checklist.
-4. **Where extra runs went.** A table of causes grouped by mechanism, each
-   with its cost in runs or hours waited, the items it touched, and its state
-   (fixed by a merged PR, covered by an open issue, or open).
+4. **Where extra runs went.** One card per cause, grouped by mechanism and
+   costliest first: the cost in runs or hours waited as the card's label, the
+   cause in one or two sentences, its state in a muted line (fixed by a merged
+   PR, covered by an open issue, or open), and the items it touched.
 5. **Each delivery.** One row per item the loop touched on that day, delivered
    first and the costliest first: the item with links to its PRs and
    retrospectives, one chip per run in role order (P preparer, Q issue

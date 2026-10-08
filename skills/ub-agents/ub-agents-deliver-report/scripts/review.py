@@ -199,6 +199,7 @@ a { color: var(--accent); } h1, h2, h3 { font-family: var(--head); margin: 0; te
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .label { text-transform: uppercase; letter-spacing: .07em; font-size: 12px; color: var(--muted); }
 .box { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+.box p { margin: 6px 0; } .muted { color: var(--muted); }
 .run { display: inline-block; font: 11px/1 var(--mono); padding: 4px 5px; margin: 1px; border-radius: 4px; color: var(--bg); text-decoration: none; }
 .ok { background: var(--ok); } .back { background: var(--back); } .fail { background: var(--fail); }
 .wrap { max-width: 1080px; margin: 0 auto; padding-inline: 20px; padding-block: 32px 56px; display: grid; gap: 36px; }
@@ -254,10 +255,11 @@ def report(data, notes):
     out += [f'<div class="box"><div class="label">{esc(LEVERS.get(l["lever"], l["lever"]))}</div><h3>{esc(l["title"])}</h3>'
             f'<p>{esc(l["change"])}</p><div class="label">{esc(l.get("where", ""))} · {esc(l.get("cost", ""))} · '
             f'{refs(repo, l.get("evidence", []))}</div></div>' for l in notes.get("lessons", [])]
-    out.append('</section><section><h2>Where extra runs went</h2><div class="scroll box"><table><tr><th>Cause</th><th>Cost</th><th>Items</th><th>State</th></tr>')
-    out += [f'<tr><td>{esc(c["cause"])}</td><td class="r">{esc(c["cost"])}</td><td>{refs(repo, c["items"])}</td>'
-            f'<td>{esc(c.get("state", ""))}</td></tr>' for c in notes.get("causes", [])]
-    out.append('</table></div></section><section><h2>Each delivery</h2><div class="label">P preparer · Q issue reviewer · I implementer · '
+    out.append('</section><section><h2>Where extra runs went</h2>')
+    out += [f'<div class="box"><div class="label">{esc(c["cost"])}</div><p>{esc(c["cause"])}</p>'
+            f'<p class="muted">{esc(c.get("state", ""))}</p><div class="label">{refs(repo, c["items"])}</div></div>'
+            for c in notes.get("causes", [])]
+    out.append('</section><section><h2>Each delivery</h2><div class="label">P preparer · Q issue reviewer · I implementer · '
                'R reviewer · G integrator; green moved forward, amber sent back, red blocked, retried or no report</div>'
                '<div class="scroll box"><table><tr><th>Item</th><th>Runs</th><th>Lines</th><th>Lead</th><th>Note</th></tr>')
     for d in sorted(data["issues"], key=lambda d: (not d["delivered"], -d["extra_runs"])):
