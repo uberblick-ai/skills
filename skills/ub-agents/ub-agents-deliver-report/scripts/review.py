@@ -60,8 +60,8 @@ def minutes(start, end):
     return round((when(end) - when(start)).total_seconds() / 60, 1) if start and end else None
 
 
-def wall(runs, done):
-    """First run start to delivery: the last run's end, or the merge or close when that came later."""
+def cycle(runs, done):
+    """Cycle time, first run start to delivery: the last run's end, or the merge or close when that came later."""
     started = [r["started"] for r in runs if r["started"]]
     if not started:
         return None
@@ -165,7 +165,7 @@ def collect(repo, day, zone, since, until):
             "runs": runs, "extra_runs": max(0, len(runs) - len({r["agent"] for r in runs})),
             "resets": sum(1 for r in items[key]["records"] if r.get("kind") == "reset"),
             "notices": sum(items[n]["notices"] for n in members),
-            "lead": minutes(head["created_at"], done), "wall": wall(runs, done), "agent_minutes": round(sum(r["minutes"] or 0 for r in runs), 1),
+            "lead": minutes(head["created_at"], done), "cycle": cycle(runs, done), "run_minutes": round(sum(r["minutes"] or 0 for r in runs), 1),
             "retrospectives": [p | {"items": sorted(p["items"])} for p in posts if p["items"] & set(members)]})
 
     window = [r for d in issues for r in d["runs"] if inside(r["started"])]
@@ -182,7 +182,7 @@ def collect(repo, day, zone, since, until):
             "issues_closed": sum(1 for r in rows if "pull_request" not in r and inside(r.get("closed_at"))),
             "issues_opened": sum(1 for r in rows if "pull_request" not in r and inside(r["created_at"])),
             "runs": len(window), "runs_accepted": sum(r["accepted"] for r in window),
-            "agent_hours": round(sum(r["minutes"] or 0 for r in window) / 60, 1),
+            "run_hours": round(sum(r["minutes"] or 0 for r in window) / 60, 1),
             "deliveries": sum(1 for d in issues if d["delivered"] and d["runs"]),
             "first_pass": sum(1 for d in issues if d["delivered"] and d["runs"] and not d["extra_runs"]),
             "denials": sum(len(r["denied"]) for r in window)},
@@ -246,7 +246,7 @@ def figures(t):
     return [(t["prs_merged"], "PRs merged", f'{t["prs_merged_by_loop"]} by the integrator'),
             (f'+{t["additions"]:,}', "lines", f'−{t["deletions"]:,} · {t["files"]} files'),
             (t["issues_closed"], "issues closed", f'{t["issues_opened"]} opened'),
-            (t["runs"], "agent runs", f'{t["runs_accepted"]} accepted · {t["agent_hours"]}h'),
+            (t["runs"], "agent runs", f'{t["runs_accepted"]} accepted · {t["run_hours"]}h'),
             (f'{t["first_pass"]}/{t["deliveries"]}', "first pass", "each role ran once"),
             (t["denials"], "denied commands", "in this day's runs")]
 
@@ -270,14 +270,14 @@ def report(data, notes):
             for c in notes.get("causes", [])]
     out.append('</section><section><h2>Each delivery</h2><div class="label">P preparer · Q issue reviewer · I implementer · '
                'R reviewer · G integrator; green moved forward, amber sent back, red blocked, retried or no report. '
-               'Lead: filed to merged · Wall: first run to delivery · Agent: run minutes summed</div>'
-               '<div class="scroll box"><table><tr><th>Item</th><th>Runs</th><th>Lines</th><th>Lead</th><th>Wall</th><th>Agent</th><th>Note</th></tr>')
+               'Lead: filed to merged · Cycle: first run to delivery · Run time: run minutes summed</div>'
+               '<div class="scroll box"><table><tr><th>Item</th><th>Runs</th><th>Lines</th><th>Lead</th><th>Cycle</th><th>Run time</th><th>Note</th></tr>')
     for d in sorted(data["issues"], key=lambda d: (not d["delivered"], -d["extra_runs"])):
         extra = [f'<a href="{esc(p["url"])}">PR #{p["number"]}</a>' for p in d["prs"] if p["number"] != d["number"]]
         extra += [f'<a href="{esc(r["url"])}">retro</a>' for r in d["retrospectives"]] + ["in flight"] * (not d["delivered"])
         out.append(f'<tr><td><a href="{esc(d["url"])}">#{d["number"]}</a> {esc(d["title"])}<div class="label">{" · ".join(extra)}</div></td>'
                    f'<td>{chips(d["runs"])}</td><td class="r">{sum(p["additions"] + p["deletions"] for p in d["prs"]):,}</td>'
-                   f'<td class="r">{span(d["lead"])}</td><td class="r">{span(d["wall"])}</td><td class="r">{span(d["agent_minutes"])}</td>'
+                   f'<td class="r">{span(d["lead"])}</td><td class="r">{span(d["cycle"])}</td><td class="r">{span(d["run_minutes"])}</td>'
                    f'<td>{esc(d.get("note", ""))}</td></tr>')
     out.append("</table></div></section><section><h2>Retrospectives</h2>")
     retro = data["retrospectives"]
