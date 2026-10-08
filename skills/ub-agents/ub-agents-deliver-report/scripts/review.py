@@ -5,6 +5,7 @@ standard library and `gh`.
     review.py collect --repo OWNER/NAME [--day YYYY-MM-DD] > data.json
     review.py render data.json notes.json OUT_DIR [--no-open]   # writes report.html and report.json
     review.py records report.json > operations.json             # update_data operations for the day
+    review.py document dataset.json report.json > sections.json # the dataset document's generated sections
 
 The day runs from local midnight to local midnight; the default is yesterday. Only runs that started
 before the day ended count, so a day reads the same whenever it is collected.
@@ -33,7 +34,7 @@ ROLES = {"issue-preparer": "P", "issue-reviewer": "Q", "implementer": "I", "pr-r
          "integrator": "G"}
 ORDER = "PQIRG"
 REVIEWERS = {"Q", "R"}
-MARK = {"forward": "", "back": "<", "stop": "!", "waste": "x"}
+MARK = {"forward": "", "back": "<", "stop": "!", "waste": "x", "pending": "?"}
 # Used only when ub-agents.yaml declares no outcomes for a role.
 FALLBACK = {"needs-human": "stop", "maintainer-merge": "stop", "changes": "back", "changes-requested": "back",
             "returned": "back"}
@@ -42,7 +43,7 @@ CLASSES = ["launcher", "environment", "context", "sandbox", "scheduling", "routi
 STATES = ["open", "fixed", "accepted"]
 LEVERS = {"authority": "Clearer authority", "wording": "Better wording",
           "fewer-instructions": "Fewer instructions", "autonomy": "More autonomy"}
-LESSON_STATES = ["proposed", "applied", "rejected"]
+LESSON_STATES = ["proposed", "tracked", "applied", "rejected"]
 
 
 def public(text, limit):
@@ -89,6 +90,10 @@ def median(values):
 
 def share(part, whole):
     return round(part / whole, 2) if whole else None
+
+
+def percent(part, whole):
+    return round(100 * part / whole, 1) if whole else None
 
 
 def cycle(runs, done):
@@ -155,6 +160,8 @@ def classifier(agents, stop):
             triggered.setdefault(label, []).append(rank(name))
 
     def kind(run):
+        if run.get("pending"):
+            return "pending"
         declared = agents.get(run["agent"], {}).get("outcomes")
         if not declared:
             return "waste" if not run["accepted"] else FALLBACK.get(run["result"], "forward")
@@ -174,8 +181,9 @@ def runs_of(records):
     runs = []
     for run in leases.keys() | outcomes.keys():
         lease, out = leases.get(run, {}), outcomes.get(run, {})
-        if lease.get("result") == "withdrawn":
-            continue
+        if lease.get("result") == "withdrawn" or (out.get("status") == "success" and not out.get("outcome")) or \
+                (not out and lease.get("state") in ("withdrawn", "claiming")):
+            continue  # withdrawn, a claim that never started, or a recovery lease re-posting another run's report
         result = out.get("outcome") if out.get("status") == "success" else out.get("status")
         runs.append({"agent": lease.get("agent") or out.get("agent"),
                      "runtime": lease.get("runtime") or out.get("runtime"),
@@ -185,7 +193,9 @@ def runs_of(records):
                      "accepted": bool(out.get("accepted")),
                      "denied": [public(f'{d.get("tool")}: {d.get("command")}', 160) for d in out.get("denials") or []],
                      "summary": public(out.get("summary") or lease.get("summary"), 400),
-                     "url": out.get("url") or lease.get("url")})
+                     "url": out.get("url") or lease.get("url"),
+                     "pending": not out and lease.get("state") == "running" and bool(lease.get("expires"))
+                     and when(lease["expires"]) > dt.datetime.now(dt.timezone.utc)})
     return sorted(runs, key=lambda r: r["started"] or "")
 
 
@@ -291,8 +301,8 @@ def collect(repo, day, zone, since, until):
         "since": stamp(since), "until": stamp(until),
         "summary": {
             "repo": repo, "day": day.isoformat(),
-            "deliveries": len(loop), "autonomous": autonomous, "autonomous_share": share(autonomous, len(loop)),
-            "runs": len(window), "wasted_runs": wasted, "wasted_share": share(wasted, len(window)),
+            "deliveries": len(loop), "autonomous": autonomous, "autonomous_pct": percent(autonomous, len(loop)),
+            "runs": len(window), "wasted_runs": wasted, "wasted_pct": percent(wasted, len(window)),
             "run_h": hours(sum(r["minutes"] or 0 for r in window)),
             "human_stops": sum(d["human_stops"] for d in loop),
             "human_stops_per_delivery": share(sum(d["human_stops"] for d in loop), len(loop)),
@@ -302,7 +312,7 @@ def collect(repo, day, zone, since, until):
             "loop_cycle_h_median": median(d["loop_cycle_h"] for d in loop),
             "run_h_median": median(d["run_h"] for d in loop),
             "claude_runs": len(claude), "runs_with_denials": sum(bool(r["denied"]) for r in claude),
-            "denial_share": share(sum(bool(r["denied"]) for r in claude), len(claude)),
+            "denial_pct": percent(sum(bool(r["denied"]) for r in claude), len(claude)),
             "denials": sum(len(r["denied"]) for r in window),
             "prs_merged": len(merged), "prs_merged_by_loop": sum(p["by_loop"] for p in merged),
             "additions": sum(p["additions"] for p in merged), "deletions": sum(p["deletions"] for p in merged),
@@ -330,7 +340,7 @@ a { color: var(--accent); } h1, h2, h3 { font-family: var(--head); margin: 0; te
 .box { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
 .box p { margin: 6px 0; } .muted { color: var(--muted); }
 .run { display: inline-block; font: 11px/1 var(--mono); padding: 4px 5px; margin: 1px; border-radius: 4px; color: var(--bg); text-decoration: none; }
-.ok { background: var(--ok); } .back { background: var(--back); } .fail { background: var(--fail); }
+.ok { background: var(--ok); } .back { background: var(--back); } .fail { background: var(--fail); } .wait { background: var(--muted); }
 .wrap { max-width: 1080px; margin: 0 auto; padding-inline: 20px; padding-block: 32px 56px; display: grid; gap: 36px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
 .grid .num { font-size: 26px; } section { display: grid; gap: 12px; min-width: 0; }
@@ -338,7 +348,7 @@ a { color: var(--accent); } h1, h2, h3 { font-family: var(--head); margin: 0; te
 th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 td.r { text-align: right; white-space: nowrap; }
 """
-TONE = {"forward": "ok", "back": "back", "stop": "fail", "waste": "fail"}
+TONE = {"forward": "ok", "back": "back", "stop": "fail", "waste": "fail", "pending": "wait"}
 
 
 def esc(value):
@@ -354,7 +364,7 @@ def spanh(h):
 
 
 def pct(value):
-    return "–" if value is None else f"{value:.0%}"
+    return "–" if value is None else f"{value:.0f}%"
 
 
 def chips(runs):
@@ -367,12 +377,12 @@ def refs(repo, numbers):
 
 
 def figures(t):
-    return [(f'{t["autonomous"]}/{t["deliveries"]}', "autonomous", f'{pct(t["autonomous_share"])} of loop deliveries'),
-            (t["wasted_runs"], "wasted runs", f'{pct(t["wasted_share"])} of {t["runs"]} runs'),
+    return [(f'{t["autonomous"]}/{t["deliveries"]}', "autonomous", f'{pct(t["autonomous_pct"])} of loop deliveries'),
+            (t["wasted_runs"], "wasted runs", f'{pct(t["wasted_pct"])} of {t["runs"]} runs'),
             (t["human_stops"], "human stops", f'{spanh(t["human_wait_h"])} waited'),
             (spanh(t["loop_cycle_h_median"]), "cycle", f'median without human wait · {spanh(t["cycle_h_median"])} with'),
             (spanh(t["run_h_median"]), "run time", f'median per delivery · {spanh(t["run_h"])} all runs'),
-            (pct(t["denial_share"]), "runs with denials", f'{t["runs_with_denials"]} of {t["claude_runs"]} Claude runs'),
+            (pct(t["denial_pct"]), "runs with denials", f'{t["runs_with_denials"]} of {t["claude_runs"]} Claude runs'),
             (t["prs_merged"], "PRs merged", f'+{t["additions"]:,} −{t["deletions"]:,} · {t["files"]} files'),
             (t["issues_closed"], "issues closed", f'{t["issues_opened"]} opened')]
 
@@ -396,7 +406,7 @@ def report(data):
             f'{esc(" by " + f["fixed_by"]) if f.get("fixed_by") else ""}.</p>'
             f'<div class="label">{refs(repo, f["items"])}</div></div>' for f in data["findings"]]
     out.append('</section><section><h2>Each delivery</h2><div class="label">P preparer · Q issue reviewer · I implementer · '
-               'R reviewer · G integrator; green moved forward, amber sent back, red stopped for a person or wasted. '
+               'R reviewer · G integrator; green moved forward, amber sent back, red stopped for a person or wasted, grey still running. '
                'Autonomous: through the loop with no wasted run or human stop; reviewer send-backs allowed · '
                'Wasted: runs without an accepted outcome · Lead: filed to merged · Cycle: first run to delivery '
                'without human wait · Run time: run minutes summed</div>'
@@ -413,14 +423,20 @@ def report(data):
                    f'<td class="r">{spanh(d["lead_h"])}</td><td class="r" title="with human wait: {spanh(d["cycle_h"])}">'
                    f'{spanh(d["loop_cycle_h"])}</td><td class="r">{spanh(d["run_h"])}</td><td>{esc(d.get("note", ""))}</td></tr>')
     out.append("</table></div></section><section><h2>Retrospectives</h2>")
-    retro = data["retrospectives"]
-    out += [f'<div class="box"><a class="label" href="{esc(r["url"])}">{esc(r["agent"])}</a><p>{esc(r["body"])}</p></div>' for r in retro["in_window"]]
-    out.append(f'<p>Boards not read: {esc(retro["errors"][0])}</p>' if retro["errors"] else "" if retro["in_window"] else "<p>None posted on this day.</p>")
+    retro, posts = data["retrospectives"], {r["url"]: r for r in data["retrospectives"]["in_window"]}
+    groups = list(data["retrospective_groups"])
+    rest = [u for u in posts if not any(u in g["posts"] for g in groups)]
+    groups += [{"summary": "Not grouped.", "posts": rest}] * bool(rest)
+    links = lambda urls: " · ".join(f'<a href="{esc(u)}">{esc(posts[u]["agent"])}</a>' for u in urls)
+    out += [f'<div class="box"><div class="label">{len(g["posts"])} posts{esc(" · " + g["cause"]) if g.get("cause") else ""}</div>'
+            f'<p>{esc(g["summary"])}</p><div class="label">{links(g["posts"])}</div></div>' for g in groups]
+    out.append(f'<p>Boards not read: {esc(retro["errors"][0])}</p>' if retro["errors"] else "" if posts else "<p>None posted on this day.</p>")
     return "\n".join(out + ["</section></main>"])
 
 
 FINDING = {"cause", "class", "mechanism", "state", "example", "items"}
 LESSON = {"id", "lever", "title", "change"}
+CHANGE = {"ref", "day", "title", "why"}
 
 
 def check(notes):
@@ -441,6 +457,18 @@ def check(notes):
                  for l in notes.get("lessons", []) if l.get("lever") not in LEVERS]
     problems += [f'lesson {l.get("id")!r}: id must be a lowercase-hyphenated id'
                  for l in notes.get("lessons", []) if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", l.get("id") or "")]
+    problems += [f'lesson {l.get("id")}: state {l.get("state")!r} is not one of {LESSON_STATES}'
+                 for l in lessons if l.get("state", "proposed") not in LESSON_STATES]
+    problems += [f'lesson {l.get("id")}: state tracked or applied needs addressed_by'
+                 for l in lessons if l.get("state") in ("tracked", "applied") and not l.get("addressed_by")]
+    problems += [f'change {c.get("ref")!r} lacks {", ".join(sorted(CHANGE - c.keys()))}'
+                 for c in notes.get("changes", []) if CHANGE - c.keys()]
+    grouped = [u for g in notes.get("retrospectives", []) for u in g.get("posts", [])]
+    problems += [f'retrospective {u} is in more than one group' for u in sorted(set(grouped)) if grouped.count(u) > 1]
+    problems += [f'action {a!r}: a lesson in these notes that is not proposed' for a in notes.get("actions", [])
+                 if any(l.get("id") == a and l.get("state", "proposed") != "proposed" for l in lessons)]
+    if len(notes.get("actions", [])) > 5:
+        problems.append("at most five actions")
     if problems:
         sys.exit("notes.json: " + "; ".join(problems))
 
@@ -451,6 +479,12 @@ def merge(data, notes):
     data["summary"]["headline"] = notes["headline"]
     data["findings"] = notes.get("findings", [])
     data["lessons"] = [l | {"state": l.get("state", "proposed")} for l in notes.get("lessons", [])]
+    data["changes"], data["actions"] = notes.get("changes", []), notes.get("actions", [])
+    known = {r["url"] for r in data["retrospectives"]["in_window"]}
+    unknown = [u for g in notes.get("retrospectives", []) for u in g["posts"] if u not in known]
+    if unknown:
+        sys.exit("notes.json: retrospectives not posted on this day: " + ", ".join(unknown))
+    data["retrospective_groups"] = notes.get("retrospectives", [])
     for issue in data["issues"]:
         issue["note"] = notes.get("items", {}).get(str(issue["number"]), "")
     return data
@@ -461,8 +495,8 @@ def collection(required, **fields):
 
 
 TEXT, DAY = {"type": "string"}, {"type": "string", "minLength": 10, "maxLength": 10}
-COUNT, HOURS, SHARE = {"type": "integer", "minimum": 0}, {"type": ["number", "null"], "minimum": 0}, \
-    {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+COUNT, HOURS, PERCENT = {"type": "integer", "minimum": 0}, {"type": ["number", "null"], "minimum": 0}, \
+    {"type": ["number", "null"], "minimum": 0, "maximum": 100}
 NUMBERS, IDS = {"type": "array", "items": {"type": "integer"}}, {"type": "array", "items": {"type": "string"}}
 SCHEMAS = {
     "days": collection(
@@ -470,7 +504,7 @@ SCHEMAS = {
         **dict.fromkeys(["deliveries", "autonomous", "runs", "wasted_runs", "human_stops", "claude_runs",
                          "runs_with_denials", "denials", "prs_merged", "prs_merged_by_loop", "additions",
                          "deletions", "files", "issues_closed", "issues_opened", "retrospectives"], COUNT),
-        **dict.fromkeys(["autonomous_share", "wasted_share", "denial_share"], SHARE),
+        **dict.fromkeys(["autonomous_pct", "wasted_pct", "denial_pct"], PERCENT),
         **dict.fromkeys(["run_h", "human_wait_h", "human_stops_per_delivery", "review_rounds_per_delivery",
                          "lead_h_median", "cycle_h_median", "loop_cycle_h_median", "run_h_median"], HOURS)),
     "items": collection(
@@ -487,8 +521,10 @@ SCHEMAS = {
         state={"type": "string", "enum": STATES}, **{"class": {"type": "string", "enum": CLASSES}}),
     "lessons": collection(
         ["day", "lever", "title", "change", "state"], day=DAY, title=TEXT, change=TEXT, where=TEXT, cost=TEXT,
-        causes=IDS, evidence=NUMBERS, lever={"type": "string", "enum": list(LEVERS)},
+        causes=IDS, evidence=NUMBERS, addressed_by=TEXT, lever={"type": "string", "enum": list(LEVERS)},
         state={"type": "string", "enum": LESSON_STATES}),
+    "changes": collection(
+        ["day", "title", "why"], day=DAY, title=TEXT, why=TEXT, url=TEXT, causes=IDS, lessons=IDS),
 }
 ITEM_FIELDS = ["day", "number", "title", "url", "loop", "autonomous", "sequence", "attempts", "wasted_runs",
                "review_rounds", "human_stops", "human_wait_h", "lead_h", "cycle_h", "loop_cycle_h", "run_h",
@@ -508,9 +544,61 @@ def records(data):
         "causes": [{"id": f["cause"], "value": {k: f[k] for k in ("class", "mechanism", "state", "fixed_by") if f.get(k)}}
                    for f in data["findings"]],
         "lessons": [{"id": l["id"], "value": {"day": day} | {
-            k: l[k] for k in ("lever", "title", "change", "where", "cost", "causes", "evidence", "state") if k in l}}
-            for l in data["lessons"]]}
+            k: l[k] for k in ("lever", "title", "change", "where", "cost", "causes", "evidence", "state", "addressed_by")
+            if k in l}} for l in data["lessons"]],
+        "changes": [{"id": c["ref"], "value": {k: c[k] for k in ("day", "title", "why", "url", "causes", "lessons") if k in c}}
+                    for c in data.get("changes", [])]}
     return [{"collection": name, "schema": SCHEMAS[name], "upsert": rows[name]} for name in SCHEMAS if rows[name]]
+
+
+def link(ref):
+    """GitHub link for an owner/name#number reference; None for a bare commit."""
+    found = re.fullmatch(r"([\w.-]+/[\w.-]+)#(\d+)", ref)
+    return f"https://github.com/{found.group(1)}/issues/{found.group(2)}" if found else None
+
+
+def values(collection):
+    """Records as get_data returns them, or a plain list of {id, value}."""
+    rows = collection.get("records", []) if isinstance(collection, dict) else collection or []
+    return {r["id"]: r["value"] for r in rows}
+
+
+def document(dataset, data):
+    """The dataset document's generated sections as insert_block arguments: recent days, the top actions
+    and the changelog. See references/report.md."""
+    repo, days = data["repo"], values(dataset.get("days"))
+    lessons = {l["id"]: l for l in data["lessons"]} | values(dataset.get("lessons"))
+    changes = values(dataset.get("changes")) | {c["ref"]: c for c in data.get("changes", [])}
+    pc = lambda v: "–" if v is None else f"{v:.0f}%"
+    hr = lambda v: "–" if v is None else f"{v:.1f} h"
+    rows = ["| Day | Deliveries | Autonomous | Wasted runs | Human stops | Cycle | Run time | Runs with denials |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+    rows += [f'| {d} | {v["deliveries"]} | {v["autonomous"]} ({pc(v.get("autonomous_pct"))}) | '
+             f'{v["wasted_runs"]} ({pc(v.get("wasted_pct"))}) | {v.get("human_stops", 0)}, {hr(v.get("human_wait_h"))} waited | '
+             f'{hr(v.get("loop_cycle_h_median"))} | {hr(v.get("run_h_median"))} | {pc(v.get("denial_pct"))} |'
+             for d, v in sorted(days.items())[-7:]]
+    ranked = data.get("actions") or sorted((i for i, l in lessons.items() if l.get("state") == "proposed"),
+                                           key=lambda i: lessons[i].get("day", ""), reverse=True)
+    actions = [{"type": "paragraph", "text": "The most valuable changes not yet taken up, most runs saved first. An action "
+                "leaves this list once an issue or PR addresses it."}]
+    for n, key in enumerate([k for k in ranked if lessons.get(k, {}).get("state", "proposed") == "proposed"][:5], 1):
+        l = lessons[key]
+        meta = " · ".join(filter(None, [LEVERS[l["lever"]], l.get("where"), l.get("cost"),
+                                        "causes: " + ", ".join(l.get("causes", [])) if l.get("causes") else None]))
+        evidence = [{"text": f" · evidence: ", "marks": {}}] * bool(l.get("evidence"))
+        for i, number in enumerate(l.get("evidence", [])):
+            evidence += [{"text": ", " * bool(i), "marks": {}}] * bool(i)
+            evidence.append({"text": f"#{number}", "marks": {"link": f"https://github.com/{repo}/issues/{number}"}})
+        actions += [{"type": "heading", "level": 3, "text": f'{n}. {l["title"]}'},
+                    {"type": "paragraph", "text": l["change"]},
+                    {"type": "paragraph", "inline": [{"text": meta, "marks": {"italic": True}}] + evidence}]
+    log = ["| Day | Change | Why |", "| --- | --- | --- |"]
+    for ref, c in sorted(changes.items(), key=lambda kv: kv[1]["day"], reverse=True)[:5]:
+        url = c.get("url") or link(ref)
+        title, why = (c[k].replace("|", "\\|") for k in ("title", "why"))
+        log.append(f'| {c["day"]} | {f"[{title}]({url})" if url else title} ({ref}) | {why} |')
+    return {"recent": [{"type": "table", "text": "\n".join(rows)}], "actions": actions,
+            "changelog": [{"type": "table", "text": "\n".join(log)}]}
 
 
 def main():
@@ -524,11 +612,17 @@ def main():
     r.add_argument("--no-open", action="store_true", help="do not open the report in the default browser")
     s = commands.add_parser("records")
     s.add_argument("report", help="report.json written by render")
+    d = commands.add_parser("document")
+    d.add_argument("dataset", help="days, lessons and changes as read with get_data")
+    d.add_argument("report", help="report.json written by render")
     args = parser.parse_args()
     if args.command == "collect":
         print(json.dumps(collect(args.repo, *day_window(args.day)), indent=1))
     elif args.command == "records":
         print(json.dumps(records(json.loads(Path(args.report).read_text())), indent=1))
+    elif args.command == "document":
+        print(json.dumps(document(json.loads(Path(args.dataset).read_text()), json.loads(Path(args.report).read_text())),
+                         indent=1, ensure_ascii=False))
     else:
         data = merge(json.loads(Path(args.data).read_text()), json.loads(Path(args.notes).read_text()))
         out = Path(args.out)

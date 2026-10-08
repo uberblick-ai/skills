@@ -41,26 +41,33 @@ classes, the page and the records are defined in
    collected.
 
 2. Find the project's delivery dataset: an Uberblick document holding the
-   `days`, `items`, `findings`, `causes` and `lessons` collections (search for
-   "Delivery Report"); call it `DOC`. With `DOC`, read its `causes` and
-   `lessons` with `get_data` before naming anything.
+   `days`, `items`, `findings`, `causes`, `lessons` and `changes` collections
+   (search for "Delivery Report"); call it `DOC`. With `DOC`, read its `causes`
+   and `lessons` with `get_data` before naming anything.
 
 3. For each loop delivery that is not autonomous, each wasted run and each
    reviewer send-back, name the cause from run summaries, denied commands and
    retrospectives. Reuse a cause id when the mechanism matches; create one only
    when none fits, named for the mechanism, not the incident. Count the runs
    each cause cost on this day, and mark it fixed, naming the change, when
-   `main` or ub-agents already fixed it. A retrospective is a claim; count it
-   only where the records agree.
+   `main` or ub-agents already fixed it; record each such change that landed on
+   this day in `changes` with why it was made. A retrospective is a claim;
+   count it only where the records agree. Group the day's retrospectives by
+   cause, one summary sentence per group.
 
 4. Propose at most four changes, each giving clearer authority, better wording,
    fewer instructions or more autonomy. Quote any line you would change. Never
    add a role, label, gate, review round or checklist, and prefer deleting text
    or moving a step into config or tooling over adding prose. Reuse a lesson id
-   the registry already has.
+   the registry already has. Then search the repositories' issues and PRs for
+   one that addresses each proposed lesson, new or registered: mark it
+   `tracked` with `addressed_by` when an open one does, `applied` when a merged
+   one did. Rank up to five still-proposed lessons, most runs saved first, as
+   the day's `actions`.
 
 5. Write `DIR/notes.json` in the shape `references/report.md` gives (headline,
-   one note per item, findings, lessons) and render:
+   one note per item, findings, lessons, actions, changes, retrospective
+   groups) and render:
 
    ```sh
    python3 scripts/review.py render DIR/data.json DIR/notes.json DIR
@@ -82,6 +89,20 @@ classes, the page and the records are defined in
    Storing a day again overwrites its records; delete a finding that no
    longer applies with `deleteRecords`.
 
-7. Reply with the headline, the KPIs and one line per change. The page and the
+7. With `DOC`, refresh its generated sections. Read `days` (with `ids` for
+   the last seven dates), `lessons` and `changes` with `get_data` and write
+   them to `DIR/dataset.json` as `{"days": [...], "lessons": [...],
+   "changes": [...]}`, each a list of `{id, value}`. Then:
+
+   ```sh
+   python3 scripts/review.py document DIR/dataset.json DIR/report.json > DIR/sections.json
+   ```
+
+   In `DOC`, replace the blocks under the "Recent days", "Actions" and
+   "Changelog" headings with the `recent`, `actions` and `changelog` blocks:
+   delete the old ones, then insert the new ones in order after the heading.
+   Leave every other block, including the chart blocks, as it is.
+
+8. Reply with the headline, the KPIs and one line per change. The page and the
    records may be shared: keep credentials, local paths and hostnames out of
    the notes.

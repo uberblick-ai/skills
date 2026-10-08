@@ -20,6 +20,11 @@ G integrator.
 - **stop**: an outcome that adds a stop label (`needs-human` by default).
 - **waste**: no accepted outcome the role declares: `retry`, `no report`,
   `blocked`, a deferral.
+- **pending**: still running when the day was collected, with an unexpired
+  lease. It counts toward nothing until a later collection sees its outcome.
+
+A withdrawn lease, a claim that never started and a recovery lease that only
+re-posts another run's report are not runs.
 
 A **loop delivery** is an item delivered on the day that an implementer worked
 on. Work that came from outside the loop, such as a PR written in an attended
@@ -29,18 +34,20 @@ session, is shown but not counted.
 
 | KPI | Goal | Definition | Fields |
 | --- | --- | --- | --- |
-| Autonomous deliveries | up | Loop deliveries the integrator merged with no wasted run, no stop and no action-needed notice. A send-back from the issue reviewer or the reviewer still counts; one from the implementer or integrator does not. | `autonomous`, `autonomous_share` |
-| Wasted runs | down | Runs started on the day that were wasted. | `wasted_runs`, `wasted_share` |
+| Autonomous deliveries | up | Loop deliveries the integrator merged with no wasted run, no stop and no action-needed notice. A send-back from the issue reviewer or the reviewer still counts; one from the implementer or integrator does not. | `autonomous`, `autonomous_pct` |
+| Wasted runs | down | Runs started on the day that were wasted. | `wasted_runs`, `wasted_pct` |
 | Human stops | down | Action-needed notices on loop deliveries, and the hours from each to the next run on the item. | `human_stops`, `human_stops_per_delivery`, `human_wait_h` |
 | Cycle | down | First run to delivery, without the human wait. | `loop_cycle_h_median` (`cycle_h_median` with the wait) |
 | Run time | down | Run minutes summed per delivery, the touch time. | `run_h_median` (`run_h` for all runs on the day) |
-| Runs with denials | down | Claude runs on the day with a permission denial. ub-agents records denials from Claude output only, at most ten a run. | `denial_share`, `runs_with_denials`, `claude_runs` |
+| Runs with denials | down | Claude runs on the day with a permission denial. ub-agents records denials from Claude output only, at most ten a run. | `denial_pct`, `runs_with_denials`, `claude_runs` |
 
-For context only: `review_rounds_per_delivery`, `lead_h_median` (filed to
+Shares are percentages, 0 to 100, so a chart plots them as stored. For
+context only: `review_rounds_per_delivery`, `lead_h_median` (filed to
 merged), PRs merged, lines, issues opened and closed. Run figures count runs
 started on the day; delivery figures count a loop delivery's runs up to the end
 of the day. Overnight launcher pauses still count toward cycle; ub-agents does
-not record them yet.
+not record them yet. Collect a day a few hours after midnight, so runs still
+going at midnight have reported.
 
 ## Causes
 
@@ -92,11 +99,12 @@ same gap recurring is worth fixing.
 5. **Each delivery.** One row per item the loop touched on that day,
    delivered first, then the costliest: the item with links to its PRs and
    retrospectives, one chip per run in order (green forward, amber back, red
-   stop or waste), autonomous, wasted runs, review rounds, human stops, lines
+   stop or waste, grey pending), autonomous, wasted runs, review rounds, human stops, lines
    changed, lead, cycle without the wait, run time, and the note.
-6. **Retrospectives.** Every board post from that day, as written, linked to
-   its source, or a line saying none was posted or which board could not be
-   read.
+6. **Retrospectives.** The day's board posts grouped by cause: one card per
+   group with the number of posts, the cause, a one-sentence summary and links
+   to the posts by role. Posts the notes did not group share one last card. A
+   line says when none was posted or which board could not be read.
 
 Nothing on the page or in the records is a secret: no credentials, local paths
 or hostnames. The script replaces local paths in run summaries; the notes must
@@ -105,7 +113,9 @@ not add any.
 ## Notes
 
 The reviewing agent writes `notes.json`; `render` refuses notes with an
-unknown class, state or lever, a missing field, or one cause in two findings.
+unknown class, state or lever, a missing field, one cause in two findings, a
+retrospective in two groups or not posted that day, a tracked or applied
+lesson without `addressed_by`, or more than five actions.
 
 ```json
 {"headline": "One sentence: how the day went and the biggest lesson.",
@@ -117,8 +127,23 @@ unknown class, state or lever, a missing field, or one cause in two findings.
                "example": "#1308's reviewer ran five times without a report, holding the review for nine hours."}],
  "lessons": [{"id": "launcher-installs-dependencies", "lever": "authority | wording | fewer-instructions | autonomy",
               "title": "...", "change": "...", "where": "file", "cost": "...",
-              "causes": ["checkout-deps-stale"], "evidence": [1072], "state": "proposed"}]}
+              "causes": ["checkout-deps-stale"], "evidence": [1072], "state": "applied",
+              "addressed_by": "uberblick-ai/uberblick-2#1448"}],
+ "actions": ["review-runtime-from-author", "ci-leaves-readable-summary"],
+ "changes": [{"ref": "uberblick-ai/ub-agents#361", "day": "2026-10-07",
+              "title": "Keep in-run commands and helpers on the launcher's startup code",
+              "why": "Upgrading ub-agents mid-run removed the report command, so runs ended without an outcome.",
+              "causes": ["report-lost-on-upgrade"], "lessons": []}],
+ "retrospectives": [{"cause": "report-lost-on-upgrade", "summary": "One sentence for the group.",
+                     "posts": ["https://github.com/owner/name/discussions/1014#discussioncomment-1"]}]}
 ```
+
+A lesson is `proposed` until an issue or PR addresses it: `tracked` while that
+is open, `applied` once it merged, `rejected` when a person declines it.
+`addressed_by` names it as `owner/name#number`. `actions` ranks up to five
+proposed lessons, from any day, most runs saved first. A change is anything
+that landed on this day to fix a cause or apply a lesson; `ref` is
+`owner/name#number` or a commit, with `url` for a commit.
 
 `runs` counts the runs the cause cost on this day: wasted runs, and the
 correction and re-review runs a send-back caused. A cause that cost minutes
@@ -134,12 +159,12 @@ rather than runs has `runs: 0` and says so in `cost`.
  "repo": "owner/name", "day": "2026-10-07", "timezone": "CEST +0200",
  "since": "2026-10-06T22:00:00Z", "until": "2026-10-07T22:00:00Z",
  "summary": {"repo": "owner/name", "day": "2026-10-07", "headline": "...",
-             "deliveries": 5, "autonomous": 2, "autonomous_share": 0.4,
-             "runs": 54, "wasted_runs": 12, "wasted_share": 0.22, "run_h": 8.51,
+             "deliveries": 5, "autonomous": 2, "autonomous_pct": 40,
+             "runs": 54, "wasted_runs": 12, "wasted_pct": 22.2, "run_h": 8.51,
              "human_stops": 2, "human_stops_per_delivery": 0.4, "human_wait_h": 26.92,
              "review_rounds_per_delivery": 1.4, "lead_h_median": 55.05, "cycle_h_median": 20.13,
              "loop_cycle_h_median": 3.83, "run_h_median": 1.76,
-             "claude_runs": 40, "runs_with_denials": 28, "denial_share": 0.7, "denials": 54,
+             "claude_runs": 40, "runs_with_denials": 28, "denial_pct": 70, "denials": 54,
              "prs_merged": 7, "prs_merged_by_loop": 6, "additions": 4346, "deletions": 735, "files": 106,
              "issues_closed": 8, "issues_opened": 11, "retrospectives": 10},
  "issues": [{"number": 1281, "title": "...", "url": "...", "delivered": true, "loop": true, "autonomous": true,
@@ -147,12 +172,12 @@ rather than runs has `runs: 0` and says so in `cost`.
              "human_stops": 0, "human_wait_h": 0, "lead_h": 55.05, "cycle_h": 1.85, "loop_cycle_h": 1.85,
              "run_h": 1.55, "denials": 4, "runs_with_denials": 3, "lines": 889, "note": "...",
              "prs": [], "runs": [], "retrospectives": []}],
- "findings": [], "lessons": [],
+ "findings": [], "lessons": [], "actions": [], "changes": [], "retrospective_groups": [],
  "retrospectives": {"errors": [], "in_window": []}}
 ```
 
-`sequence` writes the runs as role letters, marking `<` sent back, `x` wasted
-and `!` stopped. Durations are hours.
+`sequence` writes the runs as role letters, marking `<` sent back, `x` wasted,
+`!` stopped and `?` pending. Durations are hours.
 
 `records` turns `report.json` into one `update_data` batch for the dataset
 document, each collection with its schema:
@@ -163,10 +188,41 @@ document, each collection with its schema:
 | `items` | `1281` | delivered item, written on its delivery day |
 | `findings` | `2026-10-07/report-lost-on-upgrade` | day and cause |
 | `causes` | `report-lost-on-upgrade` | cause: class, mechanism, state, `fixed_by` |
-| `lessons` | `launcher-installs-dependencies` | lesson: lever, change, causes, state |
+| `lessons` | `launcher-installs-dependencies` | lesson: lever, change, causes, state, `addressed_by` |
+| `changes` | `uberblick-ai/ub-agents#361` | change that landed: day, title, why, causes, lessons |
 
 Storing a day again overwrites its records; a finding that no longer applies
 stays until `deleteRecords` removes it. A person's verdict on a cause or
 lesson belongs in a separate `verdicts` collection keyed by the same id; the
 skill never writes it, so a refresh cannot overwrite it. A document's data is
 limited to 4 MiB; a day with five deliveries takes about 7.5 KB.
+
+## Document
+
+The dataset document reads top to bottom:
+
+1. **Intro.** What the loop is, what the report measures, and where the skill
+   lives.
+2. **KPIs.** The table above in short: each KPI, its goal and one line of
+   definition.
+3. **Data.** Chart blocks bound to `days`, then a "Recent days" table of the
+   last seven days. Each chart is a version-1 line mapping, for example:
+
+   ```json
+   {"version": 1, "type": "line", "collection": "days", "title": "Autonomy and waste",
+    "x": {"field": "day", "type": "date"},
+    "y": [{"field": "autonomous_pct", "label": "Autonomous", "unit": "%"},
+          {"field": "wasted_pct", "label": "Wasted runs", "unit": "%"},
+          {"field": "denial_pct", "label": "Runs with denials", "unit": "%"}]}
+   ```
+
+4. **Actions.** The day's `actions`: up to five proposed lessons, each a
+   heading, the change, and a line with the lever, where it lives, its cost,
+   its causes and its evidence. A lesson leaves the list once an issue or PR
+   addresses it.
+5. **Changelog.** The five latest `changes`: the day, the change linked, and
+   why.
+
+The skill rewrites the "Recent days", "Actions" and "Changelog" sections from
+`document`'s output after each stored day. Everything else is written once by
+a person or agent and left alone; the charts follow the data by themselves.
