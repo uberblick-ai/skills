@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Facts and pages for the ub-agents-deliver-report skill. Read-only; standard library and `gh` only.
+"""Facts and the page for the ub-agents-deliver-report skill. Read-only; standard library and `gh` only.
 
+    review.py collect --repo OWNER/NAME [--day YYYY-MM-DD] > data.json
+    review.py render data.json notes.json OUT_DIR [--no-open]   # writes report.html and report.json
+
+The day runs from local midnight to local midnight; the default is yesterday.
 Works on any repository that runs ub-agents (https://agents.uberblick.ai): the role
 names come from the repository's ub-agents.yaml, and ROLES maps the common ones to a letter.
-
-    review.py collect --repo OWNER/NAME [--since ISO] [--until ISO] > data.json
-    review.py render data.json notes.json OUT_DIR    # writes report.html and slides.html
 """
 
 import argparse
@@ -15,8 +16,10 @@ import html
 import json
 import re
 import subprocess
+import webbrowser
 from pathlib import Path
 
+SCHEMA = "ub-agents-deliver-report/1"
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
 RECORD = re.compile(r"<!-- ub-agents:v3 -->.*?```json\n(.*?)\n```", re.S)
 CLOSES = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)", re.I)
@@ -50,11 +53,19 @@ def when(text):
 
 
 def stamp(moment):
-    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return moment.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def minutes(start, end):
     return round((when(end) - when(start)).total_seconds() / 60, 1) if start and end else None
+
+
+def day_window(text):
+    """Local midnight to local midnight for the given day; yesterday when none is given."""
+    zone = dt.datetime.now().astimezone().tzinfo
+    day = dt.date.fromisoformat(text) if text else dt.datetime.now(zone).date() - dt.timedelta(days=1)
+    since = dt.datetime.combine(day, dt.time.min, zone)
+    return day, zone, since, since + dt.timedelta(days=1)
 
 
 def runs_of(records):
@@ -93,7 +104,7 @@ def board_posts(repo, boards):
     return posts, errors
 
 
-def collect(repo, since, until):
+def collect(repo, day, zone, since, until):
     inside = lambda text: bool(text) and since <= when(text) < until
     config = base64.b64decode(gh(f"repos/{repo}/contents/ub-agents.yaml")["content"]).decode()
     boards, agent = {}, None
@@ -123,7 +134,7 @@ def collect(repo, since, until):
             groups.setdefault(number, set()).update(int(r["handoff"]) for r in item["records"] if r.get("handoff"))
 
     posts, errors = board_posts(repo, boards)
-    deliveries = []
+    issues = []
     for key, prs in sorted(groups.items()):
         members = [key] + sorted(p for p in prs - {key} if p in items)
         head = items[key]["row"]
@@ -139,20 +150,23 @@ def collect(repo, since, until):
         delivered = any(inside(p["merged"]) for p in pulls) or ("pull_request" not in head and inside(head.get("closed_at")))
         if not delivered and not any(inside(r["started"]) for r in runs):
             continue
-        deliveries.append({
-            "key": key, "title": head["title"], "url": head["html_url"], "delivered": delivered, "prs": pulls,
+        issues.append({
+            "repo": repo, "day": day.isoformat(), "number": key, "title": head["title"], "url": head["html_url"],
+            "delivered": delivered, "prs": pulls,
             "runs": runs, "extra_runs": max(0, len(runs) - len({r["agent"] for r in runs})),
             "resets": sum(1 for r in items[key]["records"] if r.get("kind") == "reset"),
             "notices": sum(items[n]["notices"] for n in members),
             "lead": minutes(head["created_at"], done), "agent_minutes": round(sum(r["minutes"] or 0 for r in runs), 1),
             "retrospectives": [p | {"items": sorted(p["items"])} for p in posts if p["items"] & set(members)]})
 
-    window = [r for d in deliveries for r in d["runs"] if inside(r["started"])]
-    merged = {p["number"]: p for d in deliveries for p in d["prs"] if inside(p["merged"])}.values()
+    window = [r for d in issues for r in d["runs"] if inside(r["started"])]
+    merged = {p["number"]: p for d in issues for p in d["prs"] if inside(p["merged"])}.values()
     rows = [i["row"] for i in items.values()]
     return {
-        "repo": repo, "since": stamp(since), "until": stamp(until),
-        "totals": {
+        "schema": SCHEMA, "repo": repo, "day": day.isoformat(), "timezone": since.strftime("%Z %z"),
+        "since": stamp(since), "until": stamp(until),
+        "summary": {
+            "repo": repo, "day": day.isoformat(),
             "prs_merged": len(merged), "prs_merged_by_loop": sum(p["by_loop"] for p in merged),
             "additions": sum(p["additions"] for p in merged), "deletions": sum(p["deletions"] for p in merged),
             "files": sum(p["files"] for p in merged),
@@ -160,11 +174,11 @@ def collect(repo, since, until):
             "issues_opened": sum(1 for r in rows if "pull_request" not in r and inside(r["created_at"])),
             "runs": len(window), "runs_accepted": sum(r["accepted"] for r in window),
             "agent_hours": round(sum(r["minutes"] or 0 for r in window) / 60, 1),
-            "deliveries": sum(1 for d in deliveries if d["delivered"] and d["runs"]),
-            "first_pass": sum(1 for d in deliveries if d["delivered"] and d["runs"] and not d["extra_runs"]),
+            "deliveries": sum(1 for d in issues if d["delivered"] and d["runs"]),
+            "first_pass": sum(1 for d in issues if d["delivered"] and d["runs"] and not d["extra_runs"]),
             "denials": sum(len(r["denied"]) for r in window)},
         "retrospectives": {"errors": errors, "in_window": [p | {"items": sorted(p["items"])} for p in posts if inside(p["created"])]},
-        "deliveries": deliveries}
+        "issues": issues}
 
 
 ROLES = {"issue-preparer": "P", "issue-reviewer": "Q", "implementer": "I", "pr-reviewer": "R", "reviewer": "R",
@@ -224,16 +238,18 @@ def figures(t):
             (t["issues_closed"], "issues closed", f'{t["issues_opened"]} opened'),
             (t["runs"], "agent runs", f'{t["runs_accepted"]} accepted · {t["agent_hours"]}h'),
             (f'{t["first_pass"]}/{t["deliveries"]}', "first pass", "each role ran once"),
-            (t["denials"], "denied commands", "in this window's runs")]
+            (t["denials"], "denied commands", "in this day's runs")]
 
 
 def report(data, notes):
+    """The page follows references/report.md: header, figures, what to change, where extra runs went,
+    each delivery, retrospectives."""
     repo = data["repo"]
-    out = [f'<title>Delivery review {data["until"][:10]}</title>', CSS, "</style><main class=\"wrap\">",
-           f'<header><div class="label">{esc(repo)} · {data["since"][:16].replace("T", " ")} to {data["until"][:16].replace("T", " ")} UTC</div>'
-           f'<h1>Delivery review</h1><p>{esc(notes["headline"])}</p></header><section class="grid">']
+    out = [f'<title>Delivery report {data["day"]}</title>', CSS, "</style><main class=\"wrap\">",
+           f'<header><div class="label">{esc(repo)} · {esc(data["day"])} · {esc(data["timezone"])}</div>'
+           f'<h1>Delivery report</h1><p>{esc(notes["headline"])}</p></header><section class="grid">']
     out += [f'<div class="box"><div class="label">{l}</div><div class="num">{esc(v)}</div><div class="label">{esc(s)}</div></div>'
-            for v, l, s in figures(data["totals"])]
+            for v, l, s in figures(data["summary"])]
     out.append("</section><section><h2>What to change</h2>")
     out += [f'<div class="box"><div class="label">{esc(LEVERS.get(l["lever"], l["lever"]))}</div><h3>{esc(l["title"])}</h3>'
             f'<p>{esc(l["change"])}</p><div class="label">{esc(l.get("where", ""))} · {esc(l.get("cost", ""))} · '
@@ -244,52 +260,25 @@ def report(data, notes):
     out.append('</table></div></section><section><h2>Each delivery</h2><div class="label">P preparer · Q issue reviewer · I implementer · '
                'R reviewer · G integrator; green moved forward, amber sent back, red blocked, retried or no report</div>'
                '<div class="scroll box"><table><tr><th>Item</th><th>Runs</th><th>Lines</th><th>Lead</th><th>Note</th></tr>')
-    for d in sorted(data["deliveries"], key=lambda d: (not d["delivered"], -d["extra_runs"])):
-        extra = [f'<a href="{esc(p["url"])}">PR #{p["number"]}</a>' for p in d["prs"] if p["number"] != d["key"]]
+    for d in sorted(data["issues"], key=lambda d: (not d["delivered"], -d["extra_runs"])):
+        extra = [f'<a href="{esc(p["url"])}">PR #{p["number"]}</a>' for p in d["prs"] if p["number"] != d["number"]]
         extra += [f'<a href="{esc(r["url"])}">retro</a>' for r in d["retrospectives"]] + ["in flight"] * (not d["delivered"])
-        out.append(f'<tr><td><a href="{esc(d["url"])}">#{d["key"]}</a> {esc(d["title"])}<div class="label">{" · ".join(extra)}</div></td>'
+        out.append(f'<tr><td><a href="{esc(d["url"])}">#{d["number"]}</a> {esc(d["title"])}<div class="label">{" · ".join(extra)}</div></td>'
                    f'<td>{chips(d["runs"])}</td><td class="r">{sum(p["additions"] + p["deletions"] for p in d["prs"]):,}</td>'
-                   f'<td class="r">{span(d["lead"])}</td><td>{esc(notes.get("items", {}).get(str(d["key"]), ""))}</td></tr>')
+                   f'<td class="r">{span(d["lead"])}</td><td>{esc(d.get("note", ""))}</td></tr>')
     out.append("</table></div></section><section><h2>Retrospectives</h2>")
     retro = data["retrospectives"]
     out += [f'<div class="box"><a class="label" href="{esc(r["url"])}">{esc(r["agent"])}</a><p>{esc(r["body"])}</p></div>' for r in retro["in_window"]]
-    out.append(f'<p>Boards not read: {esc(retro["errors"][0])}</p>' if retro["errors"] else "" if retro["in_window"] else "<p>None posted in this window.</p>")
+    out.append(f'<p>Boards not read: {esc(retro["errors"][0])}</p>' if retro["errors"] else "" if retro["in_window"] else "<p>None posted on this day.</p>")
     return "\n".join(out + ["</section></main>"])
 
 
-def slides(data, notes):
-    repo, t = data["repo"], data["totals"]
-    foot = f'{esc(repo)} · {data["since"][:10]} to {data["until"][:10]}'
-    tally = {}
-    for run in (r for d in data["deliveries"] for r in d["runs"] if data["since"] <= (r["started"] or "") < data["until"]):
-        tally.setdefault(run["agent"], {"ok": 0, "back": 0, "fail": 0})[tone(run)] += 1
-    most = max([sum(v.values()) for v in tally.values()] or [1])
-    bars = "".join(f'<div class="bar"><span>{esc(a)}</span><div class="track">' + "".join(
-        f'<span class="{k}" style="width:{100 * n / most:.0f}%"></span>' for k, n in v.items() if n) + f'</div><span class="num">{sum(v.values())}</span></div>'
-        for a, v in sorted(tally.items(), key=lambda kv: list(ROLES).index(kv[0]) if kv[0] in ROLES else 9))
-    bodies = [
-        ("Delivery review", f'<p class="lead">{esc(notes["headline"])}</p>'),
-        ("What shipped", '<div class="grid">' + "".join(f'<div><div class="num big">{esc(v)}</div><div class="label">{l}<br>{esc(s)}</div></div>' for v, l, s in figures(t)) + "</div>"),
-        ("Where the runs went", f'<div class="bars">{bars}<div class="label">green forward · amber sent back · red blocked, retried or no report</div></div>'),
-        ("What cost extra runs", "<ul>" + "".join(f'<li>{esc(c["cause"])}<div class="label">{esc(c["cost"])} · {esc(c.get("state", ""))}</div></li>' for c in notes.get("causes", [])[:4]) + "</ul>"),
-        ("What to change", "<ul>" + "".join(f'<li>{esc(l["title"])}<div class="label">{esc(LEVERS.get(l["lever"], ""))}</div></li>' for l in notes.get("lessons", [])[:4]) + "</ul>"),
-    ]
-    style = """html, body { height: 100%; } .deck { height: 100%; overflow-y: auto; scroll-snap-type: y mandatory; }
-.slide { height: 100%; scroll-snap-align: start; display: grid; place-items: center; padding-inline: 16px; box-sizing: border-box; }
-.frame { width: min(100%, 1100px); aspect-ratio: 16 / 9; max-height: 94%; box-sizing: border-box; padding: clamp(18px, 4vw, 56px);
-  display: grid; grid-template-rows: auto 1fr auto; gap: 16px; overflow: hidden; }
-.frame h2 { font-size: clamp(24px, 4vw, 48px); } .frame > div:nth-child(2) { align-self: center; font-size: clamp(14px, 2vw, 24px); }
-.lead { font-size: clamp(18px, 2.6vw, 32px); max-width: 36ch; } .big { font-size: clamp(28px, 5vw, 64px); }
-ul { display: grid; gap: 14px; margin: 0; } .bars { display: grid; gap: 14px; }
-.bar { display: grid; grid-template-columns: 9em 1fr 3em; gap: 12px; align-items: center; }
-.track { display: flex; height: 1.1em; background: var(--bg); border-radius: 4px; overflow: hidden; }
-</style>"""
-    frames = [f'<section class="slide"><div class="frame box"><h2>{title}</h2><div>{body}</div>'
-              f'<div class="label">{foot} · {i}</div></div></section>' for i, (title, body) in enumerate(bodies, 1)]
-    keys = ("<script>addEventListener('keydown', e => { const d = document.querySelector('.deck'), s = "
-            "{ArrowRight: 1, ArrowDown: 1, PageDown: 1, ' ': 1, ArrowLeft: -1, ArrowUp: -1, PageUp: -1}[e.key]; "
-            "if (s) { e.preventDefault(); d.scrollBy({ top: s * d.clientHeight }); } });</script>")
-    return "\n".join([f'<title>Delivery slides {data["until"][:10]}</title>', CSS, style, '<main class="deck">', *frames, "</main>", keys])
+def merge(data, notes):
+    """The day's record: the summary carries the reading, each issue its note. See references/report.md."""
+    data["summary"] |= {"headline": notes["headline"], "causes": notes.get("causes", []), "lessons": notes.get("lessons", [])}
+    for issue in data["issues"]:
+        issue["note"] = notes.get("items", {}).get(str(issue["number"]), "")
+    return data
 
 
 def main():
@@ -297,20 +286,23 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     c = commands.add_parser("collect")
     c.add_argument("--repo", required=True)
-    c.add_argument("--until", help="window end, ISO 8601 UTC (default now)")
-    c.add_argument("--since", help="window start (default 24 hours before --until)")
+    c.add_argument("--day", help="calendar day, YYYY-MM-DD, local time (default yesterday)")
     r = commands.add_parser("render")
     r.add_argument("data"), r.add_argument("notes"), r.add_argument("out")
+    r.add_argument("--no-open", action="store_true", help="do not open the report in the default browser")
     args = parser.parse_args()
     if args.command == "collect":
-        until = when(args.until) if args.until else dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
-        since = when(args.since) if args.since else until - dt.timedelta(hours=24)
-        print(json.dumps(collect(args.repo, since, until), indent=1))
+        print(json.dumps(collect(args.repo, *day_window(args.day)), indent=1))
     else:
-        data, notes, out = json.loads(Path(args.data).read_text()), json.loads(Path(args.notes).read_text()), Path(args.out)
+        data = merge(json.loads(Path(args.data).read_text()), json.loads(Path(args.notes).read_text()))
+        out = Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
-        (out / "report.html").write_text(report(data, notes))
-        (out / "slides.html").write_text(slides(data, notes))
+        page = out / "report.html"
+        page.write_text(report(data, data["summary"]))
+        (out / "report.json").write_text(json.dumps(data, indent=1))
+        print(page.resolve())
+        if not args.no_open:
+            webbrowser.open(page.resolve().as_uri())
 
 
 if __name__ == "__main__":

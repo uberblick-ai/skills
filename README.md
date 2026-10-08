@@ -32,7 +32,7 @@ the full list.
 
 Skills for repositories that run the [ub-agents](https://agents.uberblick.ai) loop.
 
-- **[ub-agents-deliver-report](skills/ub-agents/ub-agents-deliver-report/SKILL.md)**: Review one day of loop deliveries: what shipped, what cost extra runs, and the few changes that would have saved them. Needs `python3` and an authenticated `gh`.
+- **[ub-agents-deliver-report](skills/ub-agents/ub-agents-deliver-report/SKILL.md)**: Report one calendar day of loop deliveries: what shipped, what cost extra runs, and the few changes that would have saved them. Opens the report in your browser. Needs `python3` and an authenticated `gh`.
 
 ## Contributing
 
