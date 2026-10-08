@@ -162,9 +162,10 @@ def collect(repo, day, zone, since, until):
         issues.append({
             "repo": repo, "day": day.isoformat(), "number": key, "title": head["title"], "url": head["html_url"],
             "delivered": delivered, "prs": pulls,
-            "runs": runs, "extra_runs": max(0, len(runs) - len({r["agent"] for r in runs})),
+            "runs": runs, "attempts": len(runs), "extra_runs": max(0, len(runs) - len({r["agent"] for r in runs})),
+            "first_pass": bool(delivered and runs and len(runs) == len({r["agent"] for r in runs})),
             "resets": sum(1 for r in items[key]["records"] if r.get("kind") == "reset"),
-            "notices": sum(items[n]["notices"] for n in members),
+            "human_stops": sum(items[n]["notices"] for n in members),
             "lead": minutes(head["created_at"], done), "cycle": cycle(runs, done), "run_minutes": round(sum(r["minutes"] or 0 for r in runs), 1),
             "retrospectives": [p | {"items": sorted(p["items"])} for p in posts if p["items"] & set(members)]})
 
@@ -184,7 +185,7 @@ def collect(repo, day, zone, since, until):
             "runs": len(window), "runs_accepted": sum(r["accepted"] for r in window),
             "run_hours": round(sum(r["minutes"] or 0 for r in window) / 60, 1),
             "deliveries": sum(1 for d in issues if d["delivered"] and d["runs"]),
-            "first_pass": sum(1 for d in issues if d["delivered"] and d["runs"] and not d["extra_runs"]),
+            "first_pass": sum(d["first_pass"] for d in issues),
             "denials": sum(len(r["denied"]) for r in window)},
         "retrospectives": {"errors": errors, "in_window": [p | {"items": sorted(p["items"])} for p in posts if inside(p["created"])]},
         "issues": issues}
@@ -270,13 +271,15 @@ def report(data, notes):
             for c in notes.get("causes", [])]
     out.append('</section><section><h2>Each delivery</h2><div class="label">P preparer · Q issue reviewer · I implementer · '
                'R reviewer · G integrator; green moved forward, amber sent back, red blocked, retried or no report. '
+               'Attempts: runs on the item · Human stops: times the loop asked a person · First pass: delivered with no role run twice · '
                'Lead: filed to merged · Cycle: first run to delivery · Run time: run minutes summed</div>'
-               '<div class="scroll box"><table><tr><th>Item</th><th>Runs</th><th>Lines</th><th>Lead</th><th>Cycle</th><th>Run time</th><th>Note</th></tr>')
+               '<div class="scroll box"><table><tr><th>Item</th><th>Runs</th><th>Attempts</th><th>Human stops</th><th>First pass</th><th>Lines</th><th>Lead</th><th>Cycle</th><th>Run time</th><th>Note</th></tr>')
     for d in sorted(data["issues"], key=lambda d: (not d["delivered"], -d["extra_runs"])):
         extra = [f'<a href="{esc(p["url"])}">PR #{p["number"]}</a>' for p in d["prs"] if p["number"] != d["number"]]
         extra += [f'<a href="{esc(r["url"])}">retro</a>' for r in d["retrospectives"]] + ["in flight"] * (not d["delivered"])
         out.append(f'<tr><td><a href="{esc(d["url"])}">#{d["number"]}</a> {esc(d["title"])}<div class="label">{" · ".join(extra)}</div></td>'
-                   f'<td>{chips(d["runs"])}</td><td class="r">{sum(p["additions"] + p["deletions"] for p in d["prs"]):,}</td>'
+                   f'<td>{chips(d["runs"])}</td><td class="r">{d["attempts"] or "–"}</td><td class="r">{d["human_stops"] or "–"}</td>'
+                   f'<td class="r">{"✓" if d["first_pass"] else "–"}</td><td class="r">{sum(p["additions"] + p["deletions"] for p in d["prs"]):,}</td>'
                    f'<td class="r">{span(d["lead"])}</td><td class="r">{span(d["cycle"])}</td><td class="r">{span(d["run_minutes"])}</td>'
                    f'<td>{esc(d.get("note", ""))}</td></tr>')
     out.append("</table></div></section><section><h2>Retrospectives</h2>")

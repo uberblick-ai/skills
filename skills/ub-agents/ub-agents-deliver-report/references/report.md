@@ -27,7 +27,9 @@ roles said about themselves. `scripts/review.py render` lays it out from
    first and the costliest first: the item with links to its PRs and
    retrospectives, one chip per run in role order (P preparer, Q issue
    reviewer, I implementer, R reviewer, G integrator; green moved forward,
-   amber sent back, red blocked, retried or no report), lines changed, three
+   amber sent back, red blocked, retried or no report), attempts (runs on the
+   item), human stops (times the loop stopped and asked a person), first pass
+   (delivered with no role run twice), lines changed, three
    durations (lead: filed to merged; cycle: first run to delivery; run time:
    run minutes summed), and the note naming what cost runs.
 6. **Retrospectives.** Every board post from that day, as written, linked to
@@ -58,7 +60,8 @@ shape.
              "deliveries": 4, "first_pass": 2, "denials": 1,
              "headline": "...", "causes": [], "lessons": []},
  "issues": [{"repo": "owner/name", "day": "2026-10-07", "number": 227, "title": "...", "url": "...",
-             "delivered": true, "prs": [], "runs": [], "extra_runs": 1, "resets": 0, "notices": 0,
+             "delivered": true, "prs": [], "runs": [], "attempts": 5, "extra_runs": 1, "first_pass": false,
+             "human_stops": 0, "resets": 0,
              "lead": 410.5, "cycle": 96.0, "run_minutes": 52.0, "retrospectives": [], "note": "..."}],
  "retrospectives": {"errors": [], "in_window": []}}
 ```
