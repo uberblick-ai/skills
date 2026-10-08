@@ -26,10 +26,6 @@ installed, where the group folder is gone. Every skill appears in its group's
 Keep `SKILL.md` under 500 lines and move detail into `references/`; reference
 files by their path relative to the skill folder, one level deep.
 
-`plugins/uberblick/` is the Claude Code plugin for the guided `/uberblick`
-workflow, with its Codex copy; it predates `skills/` and keeps its own install
-route through `.claude-plugin/marketplace.json`.
-
 ## Writing a skill
 
 - `description` says what the skill does and when to use it, with the words a
