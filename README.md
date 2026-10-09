@@ -1,79 +1,53 @@
-# uberblick skills
+# Uberblick skills
 
-Guided `/uberblick` (Claude Code) and `$uberblick` (Codex) workflow for opinionated PRDs, RFCs, and implementation review using [uberblick.ai](https://uberblick.ai).
+Agent skills for working with [Uberblick](https://github.com/uberblick-ai/uberblick-2)
+and [ub-agents](https://agents.uberblick.ai). Each skill is a folder with a
+`SKILL.md` that follows the
+[Agent Skills specification](https://agentskills.io/specification), so it works
+in Claude Code, Codex, Cursor, OpenCode and every other agent the
+[`skills` CLI](https://github.com/vercel-labs/skills) supports.
 
-The skill gives Claude Code and Codex a structured planning workflow: load a PRD or RFC, run the right role (critic, architect, reviewer), write outputs back through MCP, and manage completion gates before marking work done.
+## Install
 
-The MCP-only baseline works without installing anything. This skill pack is an optional accelerator.
-
-## MCP client setup
-
-Connect your client to the hosted uberblick MCP server at `https://uberblick.ai/mcp`.
-
-### Claude Code
-
-```bash
-claude mcp add --transport http uberblick https://uberblick.ai/mcp
+```sh
+npx skills@latest add uberblick-ai/skills
 ```
 
-Claude Code will open a browser for OAuth on first use.
+Pick the skills and agents in the prompt, or install one skill for one agent
+without prompts:
 
-### Codex
-
-```bash
-codex mcp add uberblick --url https://uberblick.ai/mcp
+```sh
+npx skills@latest add uberblick-ai/skills --skill ub-agents-deliver-report -a claude-code -y
 ```
 
-After either command, the MCP-only baseline works immediately. You only need the skill pack if you want the guided `/uberblick` or `$uberblick` command.
+Add `-g` to install for every project on your machine instead of the current
+one. `npx skills update` brings installed skills to the latest version.
 
-## Install for Claude Code
+In Claude Code, each group is also a plugin in this repository's marketplace:
 
 ```
-/plugin marketplace add uberblick-ai/skills
-/plugin install uberblick@uberblick-ai
+/plugin install ub-agents --marketplace uberblick-ai/skills
 ```
 
-Then type `/uberblick` to start a session.
+Before Claude Code 2.1.275, add the marketplace first with
+`/plugin marketplace add uberblick-ai/skills`, then
+`/plugin install ub-agents@uberblick-ai`.
 
-Claude Code will keep the plugin up to date automatically if marketplace auto-update is enabled.
+## Skills
 
-### Manual install (fallback)
+Skills are grouped by what they work on. Each group has its own README with
+the full list.
 
-```bash
-git clone https://github.com/uberblick-ai/skills.git
-cp -r skills/plugins/uberblick/. .claude/plugins/uberblick/
-```
+### [UB Agents](skills/ub-agents/README.md)
 
-Restart Claude Code, then type `/uberblick`.
+Skills for repositories that run the [ub-agents](https://agents.uberblick.ai) loop. Plugin: `ub-agents`.
 
-To update, pull the latest repo and repeat the copy step.
+- **[ub-agents-deliver-report](skills/ub-agents/ub-agents-deliver-report/SKILL.md)**: Report one calendar day of loop deliveries: how many the loop delivered on its own, which runs were wasted, where a person stepped in, the causes and the few changes that would have saved runs. Opens the report in your browser and leaves a JSON record of the day. Needs only `python3` and an authenticated `gh`; with the Uberblick MCP server it also stores each day in an Uberblick document to track KPIs over time.
 
-## Install for Codex
+## Contributing
 
-```bash
-$skill-installer install https://github.com/uberblick-ai/skills/tree/main/plugins/uberblick/codex
-```
+Read [AGENTS.md](AGENTS.md) for the layout and the checks a change must pass.
 
-Restart Codex, then type `$uberblick` to start a session.
+## License
 
-### Manual install (fallback)
-
-```bash
-git clone https://github.com/uberblick-ai/skills.git
-mkdir -p ~/.codex/skills/uberblick
-cp -r skills/plugins/uberblick/codex/. ~/.codex/skills/uberblick/
-```
-
-To update, re-run the installer command or repeat the copy step with the latest repo contents.
-
-## Updating
-
-For Claude Code marketplace installs, auto-update handles this. For manual installs, the skill notifies you at session start if a newer version is available — re-run the copy step with the latest repo contents to update.
-
-## MCP-only baseline (no installation required)
-
-You do not need to install this skill pack to use uberblick. Ask your AI assistant to follow `uberblick://docs/workflow` and `uberblick://docs/workflow-roles` directly. The skill pack adds the `/uberblick` (Claude Code) or `$uberblick` (Codex) command and guided stage flow — it is not a required control plane.
-
-## Issues and feedback
-
-[Open an issue](https://github.com/uberblick-ai/skills/issues) for bug reports, feature requests, or questions.
+[MIT](LICENSE)

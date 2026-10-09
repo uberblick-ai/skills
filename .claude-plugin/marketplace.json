@@ -4,14 +4,17 @@
     "name": "uberblick"
   },
   "metadata": {
-    "description": "Guided /uberblick workflow for opinionated PRDs, RFCs, and implementation review using uberblick.ai."
+    "description": "Agent skills for Uberblick and the ub-agents loop, one plugin per skill group."
   },
   "plugins": [
     {
-      "name": "uberblick",
-      "source": "./plugins/uberblick",
-      "description": "Guided /uberblick workflow for opinionated PRDs, RFCs, and implementation review using uberblick.ai.",
-      "version": "1.0.0"
+      "name": "ub-agents",
+      "description": "Skills for repositories that run the ub-agents loop: the daily delivery report.",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/ub-agents/ub-agents-deliver-report"
+      ]
     }
   ]
 }
