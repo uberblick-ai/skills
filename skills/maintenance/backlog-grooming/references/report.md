@@ -14,6 +14,7 @@ No or Blocked. Show explicit non-default priority using its tracker label color
 below the issue, alongside workflow labels. Each independently challenged item
 has a visible label. Summarize the independent challenge below the table.
 
+Draft items carry a visible Draft label and remain ideas, not queue authorization.
 Closed issues disappear unless an open linked PR or a named remaining concern
 makes them actionable. Retained closed rows must explain why. All input rows
 remain in JSON for traceability. Counts describe visible rows; do not invent
@@ -47,7 +48,7 @@ Each item requires:
 
 | Field | Meaning |
 | --- | --- |
-| `id`, `title`, `url` | Qualified identity, title, and absolute HTTP(S) tracker URL |
+| `id`, `title` | Qualified identity and title; draft items may use a project-item ID |
 | `state` | `open`, `closed`, or `draft` |
 | `treatment` | `keep`, `narrow`, `combine`, `defer`, `close delivered`, `close unnecessary`, `track only` |
 | `summary` | Actionable recommendation or pending scope choice, one short paragraph |
@@ -56,11 +57,15 @@ Each item requires:
 | `challenge` | `{status, summary?}`; status `completed`, `not-needed`, `pending`, or `unavailable`; summary required except for not-needed |
 
 Optional per-item fields:
+- `url`: absolute HTTP(S) tracker URL when one exists. Do not invent links for
+  drafts, offline backlogs or tracker items without a permalink.
 - `workflow_labels`: string array. Do not repeat priority here.
 - `priority`: `{name, rank, color?, is_default?}`. Lower numeric rank sorts first;
   use the repository's ranking, normalizing its default to 2 (the rank for omitted
   priority). `color` is the tracker's six-digit hex color without `#`, never a
-  guessed semantic color. Medium/default priority is not displayed.
+  guessed semantic color. Set `is_default` only from the repository policy or an
+  explicit display preference. Medium is hidden where it is the established
+  default, not because of its spelling; an unknown priority is not a default.
 - `blockers`: `[{id, state, source, url?}]`; source identifies native or proposed
   dependency. Only open blockers display in the compact column; explain closed
   prerequisites and mere overlap in evidence if useful.

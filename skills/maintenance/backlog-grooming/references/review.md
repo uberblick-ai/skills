@@ -59,7 +59,8 @@ A real blocker supplies missing behavior required by the issue. Shared files,
 an optional improvement or an already closed prerequisite are not open blockers.
 Keep native relationships distinguishable from proposed dependencies. For GitHub
 priority labels, read their actual `color` metadata. Display non-default priority
-below the issue with that color; omit medium/default. Do not guess colors or infer
+below the issue with that color; omit only the established default (often medium).
+Do not assume a shared default across repositories. Do not guess colors or infer
 priority from effort. Without readable label metadata, show plain priority text.
 
 ## Optional ub-agents integration

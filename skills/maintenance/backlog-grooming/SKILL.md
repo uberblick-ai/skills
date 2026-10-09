@@ -13,7 +13,7 @@ compatibility: >-
   Product corpus and ub-agents integrations are optional. No runtime packages.
 metadata:
   author: uberblick-ai
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Backlog grooming

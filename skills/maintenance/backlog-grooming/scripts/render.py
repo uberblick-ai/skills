@@ -53,7 +53,8 @@ def validate(data):
         seen.add(ident)
         for k in ('title', 'summary'):
             text(item, k)
-        url(item['url'])
+        if item.get('url'):
+            url(item['url'])
         if item['state'] not in {'open', 'closed', 'draft'}:
             raise ValueError(f'{ident}: invalid state')
         if item['treatment'] not in TREATMENTS:
@@ -101,7 +102,7 @@ def visible(item):
     return item['state'] != 'closed' or bool(item.get('open_prs') or item.get('highlight_reason'))
 
 def priority_badge(priority):
-    if not priority or priority.get('is_default') or priority['name'].lower() in {'medium', 'priority:medium'}:
+    if not priority or priority.get('is_default'):
         return ''
     color = priority.get('color')
     style = ''
@@ -147,8 +148,8 @@ def render(data):
             badge = f'<small class="challenge">{label}</small>'
             evidence.append(f'<p><strong>Challenge:</strong> {esc(c["summary"])}</p>')
         previous = item['effort'].get('previous')
-        labels = ' · '.join(item.get('workflow_labels', []))
-        rows.append(f'''<tr><td>{link(item['id'], item['url'])}<strong class="issue-title">{esc(item['title'])}</strong><small>{esc(labels)}</small>{priority_badge(item.get('priority'))}{badge}</td><td><span class="treatment">{esc(item['treatment'].capitalize())}</span></td><td>{esc(item['effort']['estimate'])}{('<small>Was '+esc(previous)+'</small>') if previous else ''}</td><td>{status}</td><td><p>{esc(item['summary'])}</p><details><summary>Evidence and scope</summary>{''.join(evidence)}</details></td></tr>''')
+        labels = ' · '.join(([item['state'].capitalize()] if item['state'] != 'open' else []) + item.get('workflow_labels', []))
+        rows.append(f'''<tr><td>{link(item['id'], item.get('url'))}<strong class="issue-title">{esc(item['title'])}</strong><small>{esc(labels)}</small>{priority_badge(item.get('priority'))}{badge}</td><td><span class="treatment">{esc(item['treatment'].capitalize())}</span></td><td>{esc(item['effort']['estimate'])}{('<small>Was '+esc(previous)+'</small>') if previous else ''}</td><td>{status}</td><td><p>{esc(item['summary'])}</p><details><summary>Evidence and scope</summary>{''.join(evidence)}</details></td></tr>''')
     scope = data['scope']
     baselines = '; '.join(f'{b["repository"]}@{b["revision"]}' for b in data.get('baselines', []))
     limitations = ''.join(f'<li>{esc(x)}</li>' for x in data.get('limitations', []))

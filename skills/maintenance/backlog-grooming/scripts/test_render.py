@@ -30,11 +30,27 @@ class ReportTests(unittest.TestCase):
 
     def test_priority_sort_color_and_default_suppression(self):
         self.data['items'].reverse()
-        self.data['items'][0]['priority'] = {'name':'priority:medium','rank':2,'color':'FBCA04'}
+        self.data['items'][0]['priority'] = {'name':'priority:medium','rank':2,'color':'FBCA04','is_default':True}
         page = render.render(self.data)
         self.assertLess(page.index('Install at the project root'), page.index('Improve the sync summary'))
         self.assertIn('background:#D93F0B', page)
         self.assertNotIn('priority:medium', page)
+
+    def test_tracker_defines_default_not_priority_name(self):
+        item=self.data["items"][0]
+        item["priority"]={"name":"medium","rank":1,"is_default":False}
+        self.assertIn(">medium<",render.render(self.data))
+        item["priority"]={"name":"P3","rank":2,"is_default":True}
+        self.assertNotIn(">P3<",render.render(self.data))
+
+    def test_draft_without_permalink(self):
+        item=self.data["items"][0]
+        item["state"]="draft"
+        item["id"]="planning-board:draft-17"
+        item.pop("url")
+        page=render.render(self.data)
+        self.assertIn("planning-board:draft-17",page)
+        self.assertIn("<small>Draft</small>",page)
 
     def test_loop_is_optional_and_negative_status_needs_evidence(self):
         self.data['items'][0]['loop'].pop('short_reason')
