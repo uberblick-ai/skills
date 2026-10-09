@@ -15,6 +15,15 @@
       "skills": [
         "./skills/ub-agents/ub-agents-deliver-report"
       ]
+    },
+    {
+      "name": "maintenance",
+      "description": "Repository-agnostic backlog grooming and scope reduction.",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/maintenance/backlog-grooming"
+      ]
     }
   ]
 }

@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-10-09T12:00:00+02:00",
+  "scope": {
+    "kind": "milestone",
+    "label": "Example: core reliability",
+    "goal": "Illustrative data. Reduce unnecessary setup work while retaining actionable recovery."
+  },
+  "items": [
+    {
+      "id": "example/app#1",
+      "title": "Install at the project root",
+      "url": "https://github.com/example/app/issues/1",
+      "state": "open",
+      "treatment": "keep",
+      "summary": "Use the existing project binding to choose the configuration directory.",
+      "effort": {
+        "estimate": "S",
+        "basis": "Bounded path resolution and focused verification; tentative."
+      },
+      "workflow_labels": [],
+      "evidence": [
+        {
+          "text": "Illustrative evidence only: installation currently uses the invoking subdirectory."
+        }
+      ],
+      "challenge": {
+        "status": "not-needed"
+      },
+      "loop": {
+        "state": "no",
+        "reason": "No configured trigger is present. High priority does not queue work.",
+        "short_reason": "No preparation label",
+        "checked_at": "2026-10-09T12:00:00+02:00",
+        "config_source": "Fictional example config"
+      },
+      "priority": {
+        "name": "priority:high",
+        "rank": 1,
+        "color": "D93F0B"
+      }
+    },
+    {
+      "id": "example/app#2",
+      "title": "Avoid duplicate retry logic",
+      "url": "https://github.com/example/app/issues/2",
+      "state": "closed",
+      "treatment": "track only",
+      "summary": "Retained because an obsolete implementation PR remains open.",
+      "effort": {
+        "estimate": "none",
+        "basis": "Reconcile the open PR; no second implementation."
+      },
+      "workflow_labels": [],
+      "evidence": [
+        {
+          "text": "Illustrative evidence only: installation currently uses the invoking subdirectory."
+        }
+      ],
+      "challenge": {
+        "status": "not-needed"
+      },
+      "loop": null,
+      "open_prs": [
+        {
+          "id": "example/app#8",
+          "url": "https://github.com/example/app/pull/8"
+        }
+      ]
+    },
+    {
+      "id": "example/app#3",
+      "title": "Improve the sync summary",
+      "url": "https://github.com/example/app/issues/3",
+      "state": "open",
+      "treatment": "narrow",
+      "summary": "Keep recovery guidance; preserve last-sync reporting already delivered.",
+      "effort": {
+        "estimate": "S",
+        "basis": "Bounded path resolution and focused verification; tentative."
+      },
+      "workflow_labels": [],
+      "evidence": [
+        {
+          "text": "Fictional review: the current implementation already reports last sync."
+        }
+      ],
+      "challenge": {
+        "status": "completed",
+        "summary": "The independent challenge found that replacing lastSync with null would regress shipped behavior."
+      },
+      "loop": {
+        "state": "blocked",
+        "reason": "The native prerequisite remains open.",
+        "short_reason": "Waiting for #4",
+        "checked_at": "2026-10-09T12:00:00+02:00",
+        "config_source": "Fictional example config"
+      },
+      "blockers": [
+        {
+          "id": "example/app#4",
+          "state": "open",
+          "source": "native",
+          "url": "https://github.com/example/app/issues/4"
+        }
+      ]
+    }
+  ],
+  "challenge_summary": "One illustrative independent challenge retained delivered last-sync behavior.",
+  "limitations": [
+    "Fictional example; no repository was reviewed and no external changes were made."
+  ],
+  "decisions": [],
+  "actions": []
+}

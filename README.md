@@ -44,6 +44,12 @@ Skills for repositories that run the [ub-agents](https://agents.uberblick.ai) lo
 
 - **[ub-agents-deliver-report](skills/ub-agents/ub-agents-deliver-report/SKILL.md)**: Report one calendar day of loop deliveries: how many the loop delivered on its own, which runs were wasted, where a person stepped in, the causes and the few changes that would have saved runs. Opens the report in your browser and leaves a JSON record of the day. Needs only `python3` and an authenticated `gh`; with the Uberblick MCP server it also stores each day in an Uberblick document to track KPIs over time.
 
+### [Maintenance](skills/maintenance/README.md)
+
+Repository maintenance, with no release or delivery-loop requirement. Plugin: `maintenance`.
+
+- **[backlog-grooming](skills/maintenance/backlog-grooming/SKILL.md)**: Review all issues, a milestone or a project against current deliveries and available product intent. Challenge duplication and excess scope, resolve decisions in chat, and produce the “Less work. More value.” report with estimates, blockers and optional loop eligibility.
+
 ## Contributing
 
 Read [AGENTS.md](AGENTS.md) for the layout and the checks a change must pass.
