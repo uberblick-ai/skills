@@ -89,19 +89,18 @@ classes, the page and the records are defined in
    Storing a day again overwrites its records; delete a finding that no
    longer applies with `deleteRecords`.
 
-7. With `DOC`, refresh its generated sections. Read `days` (with `ids` for
-   the last seven dates), `lessons` and `changes` with `get_data` and write
-   them to `DIR/dataset.json` as `{"days": [...], "lessons": [...],
-   "changes": [...]}`, each a list of `{id, value}`. Then:
+7. With `DOC`, refresh its Actions section. Read `lessons` with `get_data`
+   and write them to `DIR/dataset.json` as `{"lessons": [...]}`, a list of
+   `{id, value}`. Then:
 
    ```sh
    python3 scripts/review.py document DIR/dataset.json DIR/report.json > DIR/sections.json
    ```
 
-   In `DOC`, replace the blocks under the "Recent days", "Actions" and
-   "Changelog" headings with the `recent`, `actions` and `changelog` blocks:
-   delete the old ones, then insert the new ones in order after the heading.
-   Leave every other block, including the chart blocks, as it is.
+   In `DOC`, replace the blocks under the "Actions" heading with the
+   `actions` blocks: delete the old ones, then insert the new ones in order
+   after the heading. Leave every other block as it is; the charts and the
+   Recent days and Changelog tables follow the data by themselves.
 
 8. Reply with the headline, the KPIs and one line per change. The page and the
    records may be shared: keep credentials, local paths and hostnames out of

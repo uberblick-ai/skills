@@ -5,7 +5,7 @@ standard library and `gh`.
     review.py collect --repo OWNER/NAME [--day YYYY-MM-DD] > data.json
     review.py render data.json notes.json OUT_DIR [--no-open]   # writes report.html and report.json
     review.py records report.json > operations.json             # update_data operations for the day
-    review.py document dataset.json report.json > sections.json # the dataset document's generated sections
+    review.py document dataset.json report.json > sections.json # the dataset document's Actions section
 
 The day runs from local midnight to local midnight; the default is yesterday. Only runs that started
 before the day ended count, so a day reads the same whenever it is collected.
@@ -546,7 +546,8 @@ def records(data):
         "lessons": [{"id": l["id"], "value": {"day": day} | {
             k: l[k] for k in ("lever", "title", "change", "where", "cost", "causes", "evidence", "state", "addressed_by")
             if k in l}} for l in data["lessons"]],
-        "changes": [{"id": c["ref"], "value": {k: c[k] for k in ("day", "title", "why", "url", "causes", "lessons") if k in c}}
+        "changes": [{"id": c["ref"], "value": {k: c[k] for k in ("day", "title", "why", "causes", "lessons") if k in c} | (
+            {"url": c.get("url") or link(c["ref"])} if c.get("url") or link(c["ref"]) else {})}
                     for c in data.get("changes", [])]}
     return [{"collection": name, "schema": SCHEMAS[name], "upsert": rows[name]} for name in SCHEMAS if rows[name]]
 
@@ -564,19 +565,10 @@ def values(collection):
 
 
 def document(dataset, data):
-    """The dataset document's generated sections as insert_block arguments: recent days, the top actions
-    and the changelog. See references/report.md."""
-    repo, days = data["repo"], values(dataset.get("days"))
+    """The dataset document's Actions section as insert_block arguments: up to five proposed lessons.
+    Recent days and the changelog are table blocks bound to the data. See references/report.md."""
+    repo = data["repo"]
     lessons = {l["id"]: l for l in data["lessons"]} | values(dataset.get("lessons"))
-    changes = values(dataset.get("changes")) | {c["ref"]: c for c in data.get("changes", [])}
-    pc = lambda v: "–" if v is None else f"{v:.0f}%"
-    hr = lambda v: "–" if v is None else f"{v:.1f} h"
-    rows = ["| Day | Deliveries | Autonomous | Wasted runs | Human stops | Cycle | Run time | Runs with denials |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- |"]
-    rows += [f'| {d} | {v["deliveries"]} | {v["autonomous"]} ({pc(v.get("autonomous_pct"))}) | '
-             f'{v["wasted_runs"]} ({pc(v.get("wasted_pct"))}) | {v.get("human_stops", 0)}, {hr(v.get("human_wait_h"))} waited | '
-             f'{hr(v.get("loop_cycle_h_median"))} | {hr(v.get("run_h_median"))} | {pc(v.get("denial_pct"))} |'
-             for d, v in sorted(days.items())[-7:]]
     ranked = data.get("actions") or sorted((i for i, l in lessons.items() if l.get("state") == "proposed"),
                                            key=lambda i: lessons[i].get("day", ""), reverse=True)
     actions = [{"type": "paragraph", "text": "The most valuable changes not yet taken up, most runs saved first. An action "
@@ -585,20 +577,14 @@ def document(dataset, data):
         l = lessons[key]
         meta = " · ".join(filter(None, [LEVERS[l["lever"]], l.get("where"), l.get("cost"),
                                         "causes: " + ", ".join(l.get("causes", [])) if l.get("causes") else None]))
-        evidence = [{"text": f" · evidence: ", "marks": {}}] * bool(l.get("evidence"))
+        evidence = [{"text": " · evidence: ", "marks": {}}] * bool(l.get("evidence"))
         for i, number in enumerate(l.get("evidence", [])):
-            evidence += [{"text": ", " * bool(i), "marks": {}}] * bool(i)
+            evidence += [{"text": ", ", "marks": {}}] * bool(i)
             evidence.append({"text": f"#{number}", "marks": {"link": f"https://github.com/{repo}/issues/{number}"}})
         actions += [{"type": "heading", "level": 3, "text": f'{n}. {l["title"]}'},
                     {"type": "paragraph", "text": l["change"]},
                     {"type": "paragraph", "inline": [{"text": meta, "marks": {"italic": True}}] + evidence}]
-    log = ["| Day | Change | Why |", "| --- | --- | --- |"]
-    for ref, c in sorted(changes.items(), key=lambda kv: kv[1]["day"], reverse=True)[:5]:
-        url = c.get("url") or link(ref)
-        title, why = (c[k].replace("|", "\\|") for k in ("title", "why"))
-        log.append(f'| {c["day"]} | {f"[{title}]({url})" if url else title} ({ref}) | {why} |')
-    return {"recent": [{"type": "table", "text": "\n".join(rows)}], "actions": actions,
-            "changelog": [{"type": "table", "text": "\n".join(log)}]}
+    return {"actions": actions}
 
 
 def main():
@@ -613,7 +599,7 @@ def main():
     s = commands.add_parser("records")
     s.add_argument("report", help="report.json written by render")
     d = commands.add_parser("document")
-    d.add_argument("dataset", help="days, lessons and changes as read with get_data")
+    d.add_argument("dataset", help="lessons as read with get_data")
     d.add_argument("report", help="report.json written by render")
     args = parser.parse_args()
     if args.command == "collect":

@@ -143,7 +143,8 @@ is open, `applied` once it merged, `rejected` when a person declines it.
 `addressed_by` names it as `owner/name#number`. `actions` ranks up to five
 proposed lessons, from any day, most runs saved first. A change is anything
 that landed on this day to fix a cause or apply a lesson; `ref` is
-`owner/name#number` or a commit, with `url` for a commit.
+`owner/name#number` or a commit, with `url` for a commit. `records` gives every
+change a `url`, derived from `ref` when the notes give none.
 
 `runs` counts the runs the cause cost on this day: wasted runs, and the
 correction and re-review runs a send-back caused. A cause that cost minutes
@@ -205,8 +206,9 @@ The dataset document reads top to bottom:
    lives.
 2. **KPIs.** The table above in short: each KPI, its goal and one line of
    definition.
-3. **Data.** Chart blocks bound to `days`, then a "Recent days" table of the
-   last seven days. Each chart is a version-1 line mapping, for example:
+3. **Data.** Line charts bound to `days`, then a "Recent days" table of the
+   last seven days. Both are `chart` blocks holding a version-1 mapping, for
+   example:
 
    ```json
    {"version": 1, "type": "line", "collection": "days", "title": "Autonomy and waste",
@@ -216,13 +218,21 @@ The dataset document reads top to bottom:
           {"field": "denial_pct", "label": "Runs with denials", "unit": "%"}]}
    ```
 
+   ```json
+   {"version": 1, "type": "table", "collection": "days", "title": "Recent days",
+    "columns": [{"field": "day", "label": "Day", "format": "date"},
+                {"field": "autonomous", "label": "Autonomous", "format": "number"},
+                {"field": "wasted_pct", "label": "Wasted share", "format": "number", "unit": "%", "decimals": 0}],
+    "sort": {"field": "day", "direction": "desc"}, "pageSize": 7}
+   ```
+
 4. **Actions.** The day's `actions`: up to five proposed lessons, each a
    heading, the change, and a line with the lever, where it lives, its cost,
    its causes and its evidence. A lesson leaves the list once an issue or PR
    addresses it.
-5. **Changelog.** The five latest `changes`: the day, the change linked, and
-   why.
+5. **Changelog.** A table block over `changes`, latest first, five to a page:
+   the day, the change, why, and its `url` as a link.
 
-The skill rewrites the "Recent days", "Actions" and "Changelog" sections from
-`document`'s output after each stored day. Everything else is written once by
-a person or agent and left alone; the charts follow the data by themselves.
+The skill rewrites only the "Actions" section, from `document`'s output, after
+each stored day. Everything else is written once by a person or agent; the
+charts and tables follow the data by themselves.
