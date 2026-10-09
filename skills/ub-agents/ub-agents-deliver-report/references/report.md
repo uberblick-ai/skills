@@ -24,7 +24,9 @@ G integrator.
   lease. It counts toward nothing until a later collection sees its outcome.
 
 A withdrawn lease, a claim that never started and a recovery lease that only
-re-posts another run's report are not runs.
+re-posts another run's report are not runs. Every record version the loop has
+written (`ub-agent:v1`, `ub-agent:v2`, `ub-agents:v2`, `ub-agents:v3`) carries the
+same JSON record, and all are read.
 
 A **loop delivery** is an item delivered on the day that an implementer worked
 on. Work that came from outside the loop, such as a PR written in an attended
@@ -39,7 +41,7 @@ session, is shown but not counted.
 | Human stops | down | Action-needed notices on loop deliveries, and the hours from each to the next run on the item. | `human_stops`, `human_stops_per_delivery`, `human_wait_h` |
 | Cycle | down | First run to delivery, without the human wait. | `loop_cycle_h_median` (`cycle_h_median` with the wait) |
 | Run time | down | Run minutes summed per delivery, the touch time. | `run_h_median` (`run_h` for all runs on the day) |
-| Runs with denials | down | Claude runs on the day with a permission denial. ub-agents records denials from Claude output only, at most ten a run. | `denial_pct`, `runs_with_denials`, `claude_runs` |
+| Runs with denials | down | Claude runs on the day with a permission denial. ub-agents records denials from Claude output only, at most ten a run, and records before about 5 October 2026 carry none, so `denial_pct` is null for those days rather than zero. | `denial_pct`, `runs_with_denials`, `claude_runs` |
 
 Shares are percentages, 0 to 100, so a chart plots them as stored. For
 context only: `review_rounds_per_delivery`, `lead_h_median` (filed to

@@ -28,7 +28,9 @@ from pathlib import Path
 
 SCHEMA = "ub-agents-deliver-report/1"
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
-RECORD = re.compile(r"<!-- ub-agents:v3 -->.*?```json\n(.*?)\n```", re.S)
+# Every record version (ub-agent:v1, ub-agent:v2, ub-agents:v2, ub-agents:v3) carries the same JSON record.
+RECORD = re.compile(r"<!-- ub-agents?:v\d+ -->.*?```json\n(.*?)\n```", re.S)
+NOTICE = re.compile(r"<!-- ub-agents?:action-needed")
 CLOSES = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)", re.I)
 LOCAL = re.compile(r"(?<![\w.~])/(?:Users|home|srv|mnt|tmp|private|var|opt|root)/\S*")
 ROLES = {"issue-preparer": "P", "issue-reviewer": "Q", "implementer": "I", "pr-reviewer": "R", "reviewer": "R",
@@ -193,6 +195,7 @@ def runs_of(records):
                      "result": result or lease.get("result") or "no report",
                      "accepted": bool(out.get("accepted")),
                      "denied": [public(f'{d.get("tool")}: {d.get("command")}', 160) for d in out.get("denials") or []],
+                     "denials_recorded": "denials" in out,
                      "summary": public(out.get("summary") or lease.get("summary"), 400),
                      "url": out.get("url") or lease.get("url"),
                      "pending": not out and lease.get("state") == "running" and bool(lease.get("expires"))
@@ -230,7 +233,7 @@ def collect(repo, day, zone, since, until):
                 continue
             if found := RECORD.search(c["body"] or ""):
                 records.append(json.loads(found.group(1)) | {"url": c["html_url"]})
-            if (c["body"] or "").startswith("<!-- ub-agents:action-needed"):
+            if NOTICE.match(c["body"] or ""):
                 notices.append(c["created_at"])
         items[row["number"]] = {"row": row, "records": records, "notices": notices}
 
@@ -290,7 +293,8 @@ def collect(repo, day, zone, since, until):
             "retrospectives": [p | {"items": sorted(p["items"])} for p in posts if p["items"] & set(members)]})
 
     window = [r for d in issues for r in d["runs"] if inside(r["started"])]
-    claude = [r for r in window if (r["runtime"] or "").startswith("claude")] or window
+    # Older records carry no denials at all: count only runs that recorded them, so a gap is not a zero.
+    claude = [r for r in window if (r["runtime"] or "").startswith("claude") and r.get("denials_recorded")]
     loop = [d for d in issues if d["loop"]]
     merged = {p["number"]: p for d in issues for p in d["prs"] if inside(p["merged"])}.values()
     rows = [i["row"] for i in items.values()]
