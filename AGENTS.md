@@ -22,7 +22,8 @@ Skills sit in groups named for what they work on: `ub-agents/` for
 repositories that run the ub-agents loop, later `uberblick/` for the product.
 One skill per folder; the folder name is the skill name, and the name carries
 the group as a prefix (`ub-agents-deliver-report`) so it reads right once
-installed, where the group folder is gone. Every skill appears in its group's
+installed, where the group folder is gone. The repository-agnostic maintenance
+skill `backlog-grooming` intentionally keeps its standalone name. Every skill appears in its group's
 `README.md` and in the top-level `README.md`, name linked to its `SKILL.md`,
 and in `.claude-plugin/marketplace.json` under the plugin named for its group
 (`source: "./"`, `strict: false`, the skill folder in `skills`).

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Less work. More value. | @@SCOPE@@</title>
+<style>
+:root{color-scheme:light dark;--paper:light-dark(#fbfaf7,#191c21);--ink:light-dark(#202b32,#e7ecee);--muted:light-dark(#59676d,#a5b2ba);--rule:light-dark(#dce2df,#384149);--wash:light-dark(#eef2ef,#293139);--link:light-dark(#315d91,#a5c4ef)}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}main{max-width:1500px;margin:auto;padding:32px 36px}header{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;padding-bottom:20px;border-bottom:1px solid var(--rule)}header span{color:var(--muted);font-size:12px}.kicker{margin-top:26px;font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}h1{font-size:42px;line-height:1.12;letter-spacing:-.045em;font-weight:600;margin:12px 0}h2{font-size:19px;font-weight:600}p{margin:0 0 10px}.scope{color:var(--muted);max-width:950px;margin:16px 0 24px}.count{font-size:12px;border-top:1px solid var(--rule);padding:12px 0}.table-wrap{overflow-x:auto}table{width:100%;min-width:780px;table-layout:fixed;border-collapse:collapse;font-size:13px}th{text-align:left;font-size:11px;letter-spacing:.04em;color:var(--muted);text-transform:uppercase}th,td{padding:16px 10px;vertical-align:top;border-bottom:1px solid var(--rule);overflow-wrap:anywhere}th:first-child,td:first-child{padding-left:0}th:last-child,td:last-child{padding-right:0}a{color:var(--link);text-underline-offset:3px}.issue-title{display:block;font-weight:600;margin:4px 0}small{display:block;font-size:11px;color:var(--muted);margin-top:5px}.priority{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:12px;margin-top:5px}.challenge,.treatment{display:inline-block;background:var(--wash);padding:3px 7px;border-radius:5px;font-size:11px}.challenge{display:table}.treatment{color:var(--ink)}summary{color:var(--link);padding:6px 0;font-size:12px;cursor:pointer}details p{font-size:12px;color:var(--muted);margin:8px 0}details strong{color:var(--ink)}section{margin-top:28px}section p,section li,.note{font-size:12px;color:var(--muted)}ul{padding-left:20px}footer{border-top:1px solid var(--rule);margin-top:25px;padding-top:15px;font-size:11px;color:var(--muted)}@media(max-width:650px){main{padding:24px 18px}h1{font-size:34px}}@media(pointer:coarse){summary{min-height:44px}}@media print{main{padding:0}details::details-content{display:block;content-visibility:visible}table{min-width:0}a{color:inherit}}
+</style>
+</head>
+<body><main>
+<header><strong>Backlog grooming</strong><span>@@DATE@@</span></header>
+<div class="kicker">Maintenance · @@SCOPE@@</div>
+<h1>Less work. More value.</h1>
+<p class="scope">@@GOAL@@</p>
+<div class="count">@@COUNT@@ items in the decision table</div>
+<div class="table-wrap"><table aria-label="Backlog recommendations and evidence">
+<colgroup><col style="width:20%"><col style="width:11%"><col style="width:7%"><col style="width:18%"><col style="width:44%"></colgroup>
+<thead><tr><th>Issue</th><th>Treatment</th><th>Est.</th><th>@@LOOP_HEADER@@</th><th>Finding &amp; evidence</th></tr></thead>
+<tbody>@@ROWS@@</tbody></table></div>
+@@TAIL@@
+<footer>Recommendations, recorded decisions and applied actions remain distinct in <a href="report.json">the structured report</a>.</footer>
+</main></body></html>
