@@ -7,6 +7,7 @@ standard library and `gh`.
     review.py records report.json > operations.json             # update_data operations for the day
     review.py document dataset.json report.json > sections.json # the dataset document's Actions and Changelog
     review.py create report.json > create.json                  # create_doc arguments for a new dataset document
+    review.py queue --repo OWNER/NAME [--day YYYY-MM-DD]         # only the open-queue figures for a day
 
 The day runs from local midnight to local midnight; the default is yesterday. Only runs that started
 before the day ended count, so a day reads the same whenever it is collected.
@@ -793,7 +794,7 @@ def create_document(data):
                            column("run_h_median", "Run time", **hours), column("denial_pct", "Denials", **percent),
                            column("backlog", "Actionable queue"), column("waiting_to_start", "Waiting to start"),
                            column("open_issues", "Open issues"), column("machines", "Machines")],
-               "sort": {"field": "day", "direction": "desc"}, "pageSize": 7}),
+               "sort": {"field": "day", "direction": "desc"}}),
         {"type": "heading", "level": 2, "text": "Actions"},
         *sections["actions"],
         {"type": "heading", "level": 2, "text": "Changelog"},

@@ -2,8 +2,9 @@
 
 This repository publishes agent skills for Uberblick and ub-agents. People
 install them with `npx skills@latest add uberblick-ai/skills`, which reads
-`skills/<group>/<name>/SKILL.md`; the website and any plugin manifest are
-derived from the same files.
+`skills/<group>/<name>/SKILL.md`. Claude Code users can also install a group
+as a plugin from the marketplace in `.claude-plugin/marketplace.json`, which
+points at the same folders.
 
 ## Layout
 
@@ -22,7 +23,9 @@ repositories that run the ub-agents loop, later `uberblick/` for the product.
 One skill per folder; the folder name is the skill name, and the name carries
 the group as a prefix (`ub-agents-deliver-report`) so it reads right once
 installed, where the group folder is gone. Every skill appears in its group's
-`README.md` and in the top-level `README.md`, name linked to its `SKILL.md`.
+`README.md` and in the top-level `README.md`, name linked to its `SKILL.md`,
+and in `.claude-plugin/marketplace.json` under the plugin named for its group
+(`source: "./"`, `strict: false`, the skill folder in `skills`).
 Keep `SKILL.md` under 500 lines and move detail into `references/`; reference
 files by their path relative to the skill folder, one level deep.
 
@@ -45,6 +48,7 @@ Every change must pass, locally and in CI:
 pip install skills-ref                     # once
 for s in skills/*/*/; do agentskills validate "$s"; done
 python3 -m compileall -q skills
+python3 scripts/check_marketplace.py       # every skill in its group's plugin
 npx skills@latest add . --list             # every skill listed, none missing
 ```
 

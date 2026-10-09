@@ -25,8 +25,8 @@ G integrator.
 
 A withdrawn lease, a claim that never started and a recovery lease that only
 re-posts another run's report are not runs. Every record version the loop has
-written (`ub-agent:v1`, `ub-agent:v2`, `ub-agents:v2`, `ub-agents:v3`) carries the
-same JSON record, and all are read.
+written (`ub-agent:v1`, `ub-agent:v2`, `ub-agents:v2`, `ub-agents:v3`) carries
+the same JSON record, and all are read.
 
 A **loop delivery** is an item delivered on the day that an implementer worked
 on. Work that came from outside the loop, such as a PR written in an attended
@@ -60,7 +60,7 @@ Inflow and capacity, also context:
 | `backlog` | The two together: the actionable queue. |
 | `waiting_to_start` | Open issues no role can take until a person starts them: no workflow label (drafts, sub-issues not yet started, agent-filed follow-ups awaiting approval) or parked at a stop label. Parents with sub-issues are left out; their work counts in the children. |
 | `open_issues` | All open issues at the end of the day, parents included. Issues opened above deliveries day after day shows as this rising. |
-| `machines` | Distinct hosts that ran a role that day; absent for days whose records name no host (before 2 October) |
+| `machines` | Distinct hosts that ran a role that day; absent for days whose records name no host (before 2 October 2026) |
 | `loops` | Distinct loop checkouts that ran a role that day |
 | `peak_runs` | The most runs that overlapped at any moment that day |
 
@@ -123,8 +123,8 @@ same gap recurring is worth fixing.
 5. **Each delivery.** One row per item the loop touched on that day,
    delivered first, then the costliest: the item with links to its PRs and
    retrospectives, one chip per run in order (green forward, amber back, red
-   stop or waste, grey pending), autonomous, wasted runs, review rounds, human stops, lines
-   changed, lead, cycle without the wait, run time, and the note.
+   stop or waste, grey pending), autonomous, wasted runs, review rounds, human
+   stops, lines changed, lead, cycle without the wait, run time, and the note.
 6. **Retrospectives.** The day's board posts grouped by cause: one card per
    group with the number of posts, the cause, a one-sentence summary and links
    to the posts by role. Posts the notes did not group share one last card. A
@@ -166,8 +166,8 @@ A lesson is `proposed` until an issue or PR addresses it: `tracked` while that
 is open, `applied` once it merged, `rejected` when a person declines it.
 `addressed_by` names it as `owner/name#number`. `actions` ranks up to five
 proposed lessons proposed or re-proposed in the last 14 days, most runs saved
-first; an older lesson drops off until a day proposes it again. A change is anything
-that landed on this day to fix a cause or apply a lesson; `ref` is
+first; an older lesson drops off until a day proposes it again. A change is
+anything that landed on this day to fix a cause or apply a lesson; `ref` is
 `owner/name#number` or a commit, with `url` for a commit. `records` gives every
 change a `url`, derived from `ref` when the notes give none.
 
@@ -220,8 +220,11 @@ document, each collection with its schema:
 Storing a day again overwrites its records; a finding that no longer applies
 stays until `deleteRecords` removes it. A person's verdict on a cause or
 lesson belongs in a separate `verdicts` collection keyed by the same id; the
-skill never writes it, so a refresh cannot overwrite it. Item detail is a recent snapshot: each item leaves out zero, empty and derivable
-fields, and storing a day deletes `items` records older than 14 days. `days`,
+skill never writes it, so a refresh cannot overwrite it.
+
+Item detail is a recent snapshot: each item leaves out zero, empty and
+derivable fields, and storing a day deletes `items` records older than 14 days.
+`days`,
 `findings`, `causes`, `lessons` and `changes` stay, so trends cover 180 days
 and more. A document's data is limited to 4 MiB; a year of days and findings
 takes about 2 MB.
@@ -239,9 +242,8 @@ bottom:
    lives.
 2. **KPIs.** The table above in short: each KPI, its goal and one line of
    definition.
-3. **Data.** Line charts bound to `days`, then a "Recent days" table of the
-   last seven days. Both are `chart` blocks holding a version-1 mapping, for
-   example:
+3. **Data.** Line charts bound to `days`, then a "Recent days" table, newest
+   first. Both are `chart` blocks holding a version-1 mapping, for example:
 
    ```json
    {"version": 1, "type": "line", "collection": "days", "title": "Autonomy and waste",
@@ -256,7 +258,7 @@ bottom:
     "columns": [{"field": "day", "label": "Day", "format": "date"},
                 {"field": "autonomous", "label": "Autonomous", "format": "number"},
                 {"field": "wasted_pct", "label": "Wasted share", "format": "number", "unit": "%", "decimals": 0}],
-    "sort": {"field": "day", "direction": "desc"}, "pageSize": 7}
+    "sort": {"field": "day", "direction": "desc"}}
    ```
 
 4. **Actions.** The day's `actions`: up to five proposed lessons, each a
@@ -268,6 +270,7 @@ bottom:
    project, and why it was made.
 
 The skill rewrites the "Actions" and "Changelog" sections, from `document`'s
-output, after each stored day. Everything else is written once, by `create` or by a person,
-and may be edited by hand; the charts and tables follow the data by
-themselves.
+output, after each stored day. Everything else is written once, by `create`
+or by a person, and may be edited by hand; the charts and tables follow the
+data by themselves. A chart plots and a table lists every stored day: neither
+mapping has a window yet, so a year of days shows as one long table.

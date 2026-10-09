@@ -1,0 +1,20 @@
+{
+  "name": "uberblick-ai",
+  "owner": {
+    "name": "uberblick"
+  },
+  "metadata": {
+    "description": "Agent skills for Uberblick and the ub-agents loop, one plugin per skill group."
+  },
+  "plugins": [
+    {
+      "name": "ub-agents",
+      "description": "Skills for repositories that run the ub-agents loop: the daily delivery report.",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/ub-agents/ub-agents-deliver-report"
+      ]
+    }
+  ]
+}

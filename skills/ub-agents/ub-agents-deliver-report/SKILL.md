@@ -42,11 +42,11 @@ classes, the page and the records are defined in
    collected.
 
 2. Decide where the day will be kept. Uberblick is available when the
-   `uberblick` MCP tools (`search`, `get_data`, `update_data`, `create_doc`,
-   `insert_block`, `delete_block`) are in your tool list. Without them, the
-   page is the whole result: skip steps 6 and 7, say so in one line of the
-   reply, and add that `ub mcp install` registers the server for next time
-   when `ub` is on the PATH. With them, find the project's delivery dataset:
+   `uberblick` MCP tools (`search`, `get_doc`, `get_data`, `update_data`,
+   `create_doc`, `insert_block`, `delete_block`) are in your tool list.
+   Without them, the page is the whole result: skip steps 6 and 7, say so in
+   one line of the reply, and add that `ub mcp install` registers the server
+   for next time when `ub` is on the PATH. With them, find the project's delivery dataset:
    an Uberblick document holding the `days`, `items`, `findings`, `causes`,
    `lessons` and `changes` collections (search for "Delivery report"); call it
    `DOC`, and read its `causes` and `lessons` with `get_data` before naming

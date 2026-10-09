@@ -19,6 +19,7 @@ jobs:
       - run: python -m pip install skills-ref
       - run: for s in skills/*/*/; do agentskills validate "$s"; done
       - run: python -m compileall -q skills
+      - run: python scripts/check_marketplace.py
       - run: npx -y skills@latest add . --list
         env:
           DISABLE_TELEMETRY: "1"
