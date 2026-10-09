@@ -5,7 +5,7 @@ standard library and `gh`.
     review.py collect --repo OWNER/NAME [--day YYYY-MM-DD] > data.json
     review.py render data.json notes.json OUT_DIR [--no-open]   # writes report.html and report.json
     review.py records report.json > operations.json             # update_data operations for the day
-    review.py document dataset.json report.json > sections.json # the dataset document's Actions section
+    review.py document dataset.json report.json > sections.json # the dataset document's Actions and Changelog
     review.py create report.json > create.json                  # create_doc arguments for a new dataset document
 
 The day runs from local midnight to local midnight; the default is yesterday. Only runs that started
@@ -271,6 +271,9 @@ def collect(repo, day, zone, since, until):
             continue
         done = max(merged) if merged else head.get("closed_at") if closed else None
         stops = sorted(t for n in members for t in items[n]["notices"] if before(t))
+        # Early loop versions stopped for a person without posting an action-needed notice.
+        stopped = [stamp(when(r["started"]) + dt.timedelta(minutes=r["minutes"] or 0)) for r in runs if r["class"] == "stop"]
+        stops = stops if len(stops) >= len(stopped) else stopped
         loop = delivered and "I" in letters
         wait = waited(stops, runs, when(done) if done else until)
         took = cycle(runs, done)
@@ -569,16 +572,30 @@ def values(collection):
     return {r["id"]: r["value"] for r in rows}
 
 
+def changelog(changes, limit=5):
+    """The latest changes as list items: the day, the change linked, and why it was made."""
+    blocks = []
+    for ref, c in sorted(changes.items(), key=lambda kv: (kv[1]["day"], kv[0]), reverse=True)[:limit]:
+        url = c.get("url") or link(ref)
+        name = ref.split("/", 1)[1] if "/" in ref else ref
+        day = dt.date.fromisoformat(c["day"]).strftime("%-d %b")
+        title = {"text": c["title"], "marks": {"link": url} if url else {}}
+        blocks.append({"type": "list-item", "inline": [{"text": f"{day}: ", "marks": {}}, title,
+                                                       {"text": f" ({name}). {c['why']}", "marks": {}}]})
+    return blocks
+
+
 def document(dataset, data):
-    """The dataset document's Actions section as insert_block arguments: up to five proposed lessons.
-    Recent days and the changelog are table blocks bound to the data. See references/report.md."""
+    """The dataset document's generated sections as insert_block arguments: the Actions (up to five proposed
+    lessons) and the Changelog (the latest changes). Recent days is a table block bound to the data.
+    See references/report.md."""
     repo = data["repo"]
     lessons = {l["id"]: l for l in data["lessons"]} | values(dataset.get("lessons"))
     ranked = data.get("actions") or sorted((i for i, l in lessons.items() if l.get("state") == "proposed"),
                                            key=lambda i: lessons[i].get("day", ""), reverse=True)
     actions = [{"type": "paragraph", "text": "The most valuable changes not yet taken up, most runs saved first. An action "
                 "leaves this list once an issue or PR addresses it."}]
-    for n, key in enumerate([k for k in ranked if lessons.get(k, {}).get("state", "proposed") == "proposed"][:5], 1):
+    for n, key in enumerate([k for k in ranked if k in lessons and lessons[k].get("state", "proposed") == "proposed"][:5], 1):
         l = lessons[key]
         meta = " · ".join(filter(None, [LEVERS[l["lever"]], l.get("where"), l.get("cost"),
                                         "causes: " + ", ".join(l.get("causes", [])) if l.get("causes") else None]))
@@ -589,7 +606,8 @@ def document(dataset, data):
         actions += [{"type": "heading", "level": 3, "text": f'{n}. {l["title"]}'},
                     {"type": "paragraph", "text": l["change"]},
                     {"type": "paragraph", "inline": [{"text": meta, "marks": {"italic": True}}] + evidence}]
-    return {"actions": actions}
+    changes = values(dataset.get("changes")) | {c["ref"]: c for c in data.get("changes", [])}
+    return {"actions": actions, "changelog": changelog(changes)}
 
 
 KPIS = [("Autonomous deliveries", "up", "Loop deliveries the integrator merged with no wasted run, no stop and no "
@@ -613,8 +631,8 @@ def column(field, label, fmt="number", **extra):
 
 def create_document(data):
     """create_doc arguments for a new dataset document, laid out as references/report.md describes: intro, KPIs,
-    charts and a Recent days table bound to `days`, this day's Actions, and a Changelog table bound to `changes`."""
-    repo = data["repo"]
+    charts and a Recent days table bound to `days`, this day's Actions, and the Changelog."""
+    repo, sections = data["repo"], document({}, data)
     percent = {"unit": "%", "decimals": 0}
     hours = {"unit": "h", "decimals": 1}
     blocks = [
@@ -649,12 +667,9 @@ def create_document(data):
                            column("run_h_median", "Run time", **hours), column("denial_pct", "Denials", **percent)],
                "sort": {"field": "day", "direction": "desc"}, "pageSize": 7}),
         {"type": "heading", "level": 2, "text": "Actions"},
-        *document({}, data)["actions"],
+        *sections["actions"],
         {"type": "heading", "level": 2, "text": "Changelog"},
-        chart({"version": 1, "type": "table", "collection": "changes", "title": "Changes that landed",
-               "columns": [column("day", "Day", "date"), column("title", "Change", "text"),
-                           column("why", "Why", "text"), column("url", "Link", "link")],
-               "sort": {"field": "day", "direction": "desc"}, "pageSize": 5}),
+        *sections["changelog"],
     ]
     return {"title": f"Delivery report: {repo}",
             "description": f"Daily KPIs, causes and actions of the ub-agents loop in {repo}, stored by the "
@@ -674,7 +689,7 @@ def main():
     s = commands.add_parser("records")
     s.add_argument("report", help="report.json written by render")
     d = commands.add_parser("document")
-    d.add_argument("dataset", help="lessons as read with get_data")
+    d.add_argument("dataset", help="lessons and changes as read with get_data")
     d.add_argument("report", help="report.json written by render")
     n = commands.add_parser("create")
     n.add_argument("report", help="report.json written by render")

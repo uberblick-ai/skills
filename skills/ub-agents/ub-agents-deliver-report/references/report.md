@@ -237,10 +237,11 @@ bottom:
    heading, the change, and a line with the lever, where it lives, its cost,
    its causes and its evidence. A lesson leaves the list once an issue or PR
    addresses it.
-5. **Changelog.** A table block over `changes`, latest first, five to a page:
-   the day, the change, why, and its `url` as a link.
+5. **Changelog.** A bullet list of the five latest `changes`, newest first:
+   the day, the change linked to its issue, PR or commit in ub-agents or the
+   project, and why it was made.
 
-The skill rewrites only the "Actions" section, from `document`'s output, after
-each stored day. Everything else is written once, by `create` or by a person,
+The skill rewrites the "Actions" and "Changelog" sections, from `document`'s
+output, after each stored day. Everything else is written once, by `create` or by a person,
 and may be edited by hand; the charts and tables follow the data by
 themselves.
