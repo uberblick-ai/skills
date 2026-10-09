@@ -57,13 +57,17 @@ Inflow and capacity, also context:
 | --- | --- |
 | `backlog_unprepared` | Open issues at the end of the day waiting for preparation (the preparer's trigger labels) |
 | `backlog_prepared` | Open issues at the end of the day already prepared: waiting for issue review or ready to implement |
-| `backlog` | The two together. Issues opened above issues delivered day after day shows as this line rising. |
+| `backlog` | The two together: the actionable queue. |
+| `waiting_to_start` | Open issues no role can take until a person starts them: no workflow label (drafts, sub-issues not yet started, agent-filed follow-ups awaiting approval) or parked at a stop label. Parents with sub-issues are left out; their work counts in the children. |
+| `open_issues` | All open issues at the end of the day, parents included. Issues opened above deliveries day after day shows as this rising. |
 | `machines` | Distinct hosts that ran a role that day |
 | `loops` | Distinct loop checkouts that ran a role that day |
 | `peak_runs` | The most runs that overlapped at any moment that day |
 
 The queue is reconstructed from today's labels with every later label and
-state change undone, so a past day reads the same whenever it is collected.
+state change undone, so a past day reads the same whenever it is collected;
+parent links are today's. `review.py queue --repo REPO --day DAY` prints just
+these figures, from issue lists and events without run records.
 Hosts and checkouts are counted, never stored: the collector keys on short
 hashes.
 

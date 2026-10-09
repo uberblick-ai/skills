@@ -207,9 +207,25 @@ def events_since(repo, moment):
             return
 
 
+def parents(repo):
+    """Open issues with sub-issues: containers whose work is counted in their children."""
+    owner, name = repo.split("/")
+    found, cursor = set(), None
+    while True:
+        after = f', after: "{cursor}"' if cursor else ""
+        page = gh("graphql", "-f", f'query=query {{ repository(owner: "{owner}", name: "{name}") {{ issues(states: OPEN, '
+                  f'first: 100{after}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ number subIssues {{ totalCount }} }} }} }} }}'
+                  )["data"]["repository"]["issues"]
+        found |= {n["number"] for n in page["nodes"] if n["subIssues"]["totalCount"]}
+        if not page["pageInfo"]["hasNextPage"]:
+            return found
+        cursor = page["pageInfo"]["endCursor"]
+
+
 def queue(repo, until, rows, agents):
-    """Open issues at the end of the day that wait for preparation, and those already prepared: today's labels
-    and state with every later change undone."""
+    """Open issues at the end of the day: those waiting for preparation, those already prepared, all of them, and
+    those no role can take until a person starts them (no workflow label or parked; parents excluded). Today's
+    labels and state with every later change undone; parent links are today's."""
     rank = lambda name: ORDER.find(ROLES.get(name, "?"))
     waiting = {l for name, a in agents.items() if rank(name) == 0 for l in a["triggers"]}
     prepared = {l for name, a in agents.items() if rank(name) in (1, 2) for l in a["triggers"]} - waiting
@@ -229,9 +245,13 @@ def queue(repo, until, rows, agents):
             item["labels"].add(label)
         elif event["event"] in ("closed", "reopened"):
             item["open"] = event["event"] == "closed"
-    live = [i for i in state.values() if i["open"] and when(i["created"]) < until]
-    return sum(bool(i["labels"] & waiting) for i in live), sum(bool(i["labels"] & prepared) and not i["labels"] & waiting
-                                                                 for i in live)
+    containers = parents(repo)
+    live = {n: i for n, i in state.items() if i["open"] and when(i["created"]) < until}
+    unprepared = sum(bool(i["labels"] & waiting) for i in live.values())
+    ready = sum(bool(i["labels"] & prepared) and not i["labels"] & waiting for i in live.values())
+    return {"backlog": unprepared + ready, "backlog_unprepared": unprepared, "backlog_prepared": ready,
+            "open_issues": len(live),
+            "waiting_to_start": sum(not i["labels"] & (waiting | prepared) and n not in containers for n, i in live.items())}
 
 
 def runs_of(records):
@@ -308,7 +328,7 @@ def collect(repo, day, zone, since, until):
             groups.setdefault(number, set()).update(int(r["handoff"]) for r in item["records"] if r.get("handoff"))
 
     posts, errors = board_posts(repo, agents)
-    unprepared, prepared = queue(repo, until, [i["row"] for i in items.values()], agents)
+    open_queue = queue(repo, until, [i["row"] for i in items.values()], agents)
     issues = []
     for key, prs in sorted(groups.items()):
         members = [key] + sorted(p for p in prs - {key} if p in items)
@@ -388,7 +408,7 @@ def collect(repo, day, zone, since, until):
             "issues_closed": sum(1 for r in rows if "pull_request" not in r and inside(r.get("closed_at"))),
             "issues_opened": sum(1 for r in rows if "pull_request" not in r and inside(r["created_at"])),
             "retrospectives": len(retrospectives),
-            "backlog": unprepared + prepared, "backlog_unprepared": unprepared, "backlog_prepared": prepared,
+            **open_queue,
             "machines": len({r["machine"] for r in window if r["machine"]}),
             "loops": len({r["loop"] for r in window if r["loop"]}), "peak_runs": peak(window)},
         "retrospectives": {"errors": errors, "in_window": retrospectives},
@@ -457,7 +477,7 @@ def figures(t):
             (t["prs_merged"], "PRs merged", f'+{t["additions"]:,} −{t["deletions"]:,} · {t["files"]} files'),
             (t["issues_closed"], "issues closed", f'{t["issues_opened"]} opened'),
             (t.get("backlog", "–"), "open queue", f'{t.get("backlog_unprepared", "–")} to prepare · '
-             f'{t.get("backlog_prepared", "–")} prepared'),
+             f'{t.get("backlog_prepared", "–")} prepared · {t.get("waiting_to_start", "–")} not started'),
             (t.get("machines", "–"), "machines", f'{t.get("loops", "–")} loops · peak {t.get("peak_runs", "–")} parallel runs')]
 
 
@@ -582,7 +602,8 @@ SCHEMAS = {
         **dict.fromkeys(["deliveries", "autonomous", "runs", "wasted_runs", "human_stops", "claude_runs",
                          "runs_with_denials", "denials", "prs_merged", "prs_merged_by_loop", "additions",
                          "deletions", "files", "issues_closed", "issues_opened", "retrospectives", "backlog",
-                         "backlog_unprepared", "backlog_prepared", "machines", "loops", "peak_runs"], COUNT),
+                         "backlog_unprepared", "backlog_prepared", "open_issues", "waiting_to_start", "machines",
+                         "loops", "peak_runs"], COUNT),
         **dict.fromkeys(["autonomous_pct", "wasted_pct", "denial_pct"], PERCENT),
         **dict.fromkeys(["run_h", "human_wait_h", "human_stops_per_delivery", "review_rounds_per_delivery",
                          "lead_h_median", "cycle_h_median", "loop_cycle_h_median", "run_h_median"], HOURS)),
@@ -750,9 +771,11 @@ def create_document(data):
                "x": {"field": "day", "type": "date", "label": "Day"},
                "y": [{"field": "issues_opened", "label": "Issues opened"},
                      {"field": "deliveries", "label": "Loop deliveries"},
-                     {"field": "backlog", "label": "Open queue at day end"}]}),
-        {"type": "paragraph", "text": "When issues opened stay above loop deliveries, the open queue rises: work arrives "
-         "faster than the loop delivers it."},
+                     {"field": "backlog", "label": "Actionable queue at day end"},
+                     {"field": "waiting_to_start", "label": "Waiting to start at day end"}]}),
+        {"type": "paragraph", "text": "When issues opened stay above loop deliveries, open work piles up: in the actionable "
+         "queue the loop works through, or among issues waiting for a person to start them (no workflow label, or "
+         "parked). Parents are left out; their work counts in their sub-issues."},
         chart({"version": 1, "type": "line", "collection": "days", "title": "Capacity",
                "x": {"field": "day", "type": "date", "label": "Day"},
                "y": [{"field": "machines", "label": "Machines"}, {"field": "loops", "label": "Loops"},
@@ -762,7 +785,8 @@ def create_document(data):
                            column("autonomous", "Autonomous"), column("wasted_pct", "Wasted runs", **percent),
                            column("human_stops", "Human stops"), column("loop_cycle_h_median", "Cycle", **hours),
                            column("run_h_median", "Run time", **hours), column("denial_pct", "Denials", **percent),
-                           column("backlog", "Open queue"), column("machines", "Machines")],
+                           column("backlog", "Actionable queue"), column("waiting_to_start", "Waiting to start"),
+                           column("open_issues", "Open issues"), column("machines", "Machines")],
                "sort": {"field": "day", "direction": "desc"}, "pageSize": 7}),
         {"type": "heading", "level": 2, "text": "Actions"},
         *sections["actions"],
@@ -784,6 +808,9 @@ def main():
     r = commands.add_parser("render")
     r.add_argument("data"), r.add_argument("notes"), r.add_argument("out")
     r.add_argument("--no-open", action="store_true", help="do not open the report in the default browser")
+    q = commands.add_parser("queue", help="only the open-queue figures for a day: issue lists and events, no run records")
+    q.add_argument("--repo", required=True)
+    q.add_argument("--day", help="calendar day, YYYY-MM-DD, local time (default yesterday)")
     s = commands.add_parser("records")
     s.add_argument("report", help="report.json written by render")
     d = commands.add_parser("document")
@@ -794,6 +821,11 @@ def main():
     args = parser.parse_args()
     if args.command == "collect":
         print(json.dumps(collect(args.repo, *day_window(args.day)), indent=1))
+    elif args.command == "queue":
+        day, _, since, until = day_window(args.day)
+        agents, _ = config_of(base64.b64decode(gh(f"repos/{args.repo}/contents/ub-agents.yaml")["content"]).decode())
+        rows = list(pages(f"repos/{args.repo}/issues", state="all", since=stamp(since)))
+        print(json.dumps({"day": day.isoformat()} | queue(args.repo, until, rows, agents)))
     elif args.command == "records":
         print(json.dumps(records(json.loads(Path(args.report).read_text())), indent=1))
     elif args.command == "create":
