@@ -200,7 +200,12 @@ limited to 4 MiB; a day with five deliveries takes about 7.5 KB.
 
 ## Document
 
-The dataset document reads top to bottom:
+The dataset document is optional: the skill updates it when it exists,
+offers to create it when Uberblick is available but no document holds the
+collections above, and leaves the page as the whole result when Uberblick is
+not available. `scripts/review.py create` writes the `create_doc` arguments
+for a new one, from `report.json`, in the layout below. It reads top to
+bottom:
 
 1. **Intro.** What the loop is, what the report measures, and where the skill
    lives.
@@ -234,5 +239,6 @@ The dataset document reads top to bottom:
    the day, the change, why, and its `url` as a link.
 
 The skill rewrites only the "Actions" section, from `document`'s output, after
-each stored day. Everything else is written once by a person or agent; the
-charts and tables follow the data by themselves.
+each stored day. Everything else is written once, by `create` or by a person,
+and may be edited by hand; the charts and tables follow the data by
+themselves.

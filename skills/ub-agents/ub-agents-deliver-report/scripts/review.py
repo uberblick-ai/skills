@@ -6,6 +6,7 @@ standard library and `gh`.
     review.py render data.json notes.json OUT_DIR [--no-open]   # writes report.html and report.json
     review.py records report.json > operations.json             # update_data operations for the day
     review.py document dataset.json report.json > sections.json # the dataset document's Actions section
+    review.py create report.json > create.json                  # create_doc arguments for a new dataset document
 
 The day runs from local midnight to local midnight; the default is yesterday. Only runs that started
 before the day ended count, so a day reads the same whenever it is collected.
@@ -587,6 +588,76 @@ def document(dataset, data):
     return {"actions": actions}
 
 
+KPIS = [("Autonomous deliveries", "up", "Loop deliveries the integrator merged with no wasted run, no stop and no "
+         "action-needed notice; a reviewer send-back still counts."),
+        ("Wasted runs", "down", "Runs started on the day that ended without an accepted outcome."),
+        ("Human stops", "down", "Action-needed notices on loop deliveries, and the hours from each to the next run on "
+         "the item."),
+        ("Cycle", "down", "First run to delivery, without the human wait."),
+        ("Run time", "down", "Run minutes summed per delivery, the touch time."),
+        ("Runs with denials", "down", "Claude runs on the day with a permission denial.")]
+
+
+def chart(mapping):
+    """A chart block: a version-1 line or table mapping bound to a collection of the document's data."""
+    return {"type": "chart", "text": json.dumps(mapping, indent=1)}
+
+
+def column(field, label, fmt="number", **extra):
+    return {"field": field, "label": label, "format": fmt} | extra
+
+
+def create_document(data):
+    """create_doc arguments for a new dataset document, laid out as references/report.md describes: intro, KPIs,
+    charts and a Recent days table bound to `days`, this day's Actions, and a Changelog table bound to `changes`."""
+    repo = data["repo"]
+    percent = {"unit": "%", "decimals": 0}
+    hours = {"unit": "h", "decimals": 1}
+    blocks = [
+        {"type": "paragraph", "text": f"The ub-agents loop prepares, implements, reviews and integrates issues in "
+         f"{repo} on its own and asks a person only for a real decision. The delivery report measures how close each "
+         "day came: how many deliveries needed no wasted run and no person, where the extra runs went, and the few "
+         "changes that would have saved them."},
+        {"type": "paragraph", "text": "The ub-agents-deliver-report skill (npx skills@latest add uberblick-ai/skills) "
+         "stores one record per day in this document's data. The charts and tables below follow that data; the "
+         "Actions section is rewritten after each stored day."},
+        {"type": "heading", "level": 2, "text": "KPIs"},
+        {"type": "table", "text": "| KPI | Goal | Definition |\n| --- | --- | --- |\n" + "\n".join(
+            f"| {kpi} | {goal} | {definition} |" for kpi, goal, definition in KPIS)},
+        {"type": "heading", "level": 2, "text": "Data"},
+        chart({"version": 1, "type": "line", "collection": "days", "title": "Autonomy and waste",
+               "x": {"field": "day", "type": "date", "label": "Day"},
+               "y": [{"field": "autonomous_pct", "label": "Autonomous deliveries", "unit": "%"},
+                     {"field": "wasted_pct", "label": "Wasted runs", "unit": "%"},
+                     {"field": "denial_pct", "label": "Runs with denials", "unit": "%"}]}),
+        chart({"version": 1, "type": "line", "collection": "days", "title": "Human stops and the wait for them",
+               "x": {"field": "day", "type": "date", "label": "Day"},
+               "y": [{"field": "human_stops", "label": "Human stops"},
+                     {"field": "human_wait_h", "label": "Hours waited", "unit": "h"}]}),
+        chart({"version": 1, "type": "line", "collection": "days", "title": "Cycle and run time per delivery",
+               "x": {"field": "day", "type": "date", "label": "Day"},
+               "y": [{"field": "loop_cycle_h_median", "label": "Cycle, median", "unit": "h"},
+                     {"field": "run_h_median", "label": "Run time, median", "unit": "h"}]}),
+        chart({"version": 1, "type": "table", "collection": "days", "title": "Recent days",
+               "columns": [column("day", "Day", "date"), column("deliveries", "Deliveries"),
+                           column("autonomous", "Autonomous"), column("wasted_pct", "Wasted runs", **percent),
+                           column("human_stops", "Human stops"), column("loop_cycle_h_median", "Cycle", **hours),
+                           column("run_h_median", "Run time", **hours), column("denial_pct", "Denials", **percent)],
+               "sort": {"field": "day", "direction": "desc"}, "pageSize": 7}),
+        {"type": "heading", "level": 2, "text": "Actions"},
+        *document({}, data)["actions"],
+        {"type": "heading", "level": 2, "text": "Changelog"},
+        chart({"version": 1, "type": "table", "collection": "changes", "title": "Changes that landed",
+               "columns": [column("day", "Day", "date"), column("title", "Change", "text"),
+                           column("why", "Why", "text"), column("url", "Link", "link")],
+               "sort": {"field": "day", "direction": "desc"}, "pageSize": 5}),
+    ]
+    return {"title": f"Delivery report: {repo}",
+            "description": f"Daily KPIs, causes and actions of the ub-agents loop in {repo}, stored by the "
+                           "ub-agents-deliver-report skill.",
+            "blocks": blocks}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
@@ -601,11 +672,15 @@ def main():
     d = commands.add_parser("document")
     d.add_argument("dataset", help="lessons as read with get_data")
     d.add_argument("report", help="report.json written by render")
+    n = commands.add_parser("create")
+    n.add_argument("report", help="report.json written by render")
     args = parser.parse_args()
     if args.command == "collect":
         print(json.dumps(collect(args.repo, *day_window(args.day)), indent=1))
     elif args.command == "records":
         print(json.dumps(records(json.loads(Path(args.report).read_text())), indent=1))
+    elif args.command == "create":
+        print(json.dumps(create_document(json.loads(Path(args.report).read_text())), indent=1, ensure_ascii=False))
     elif args.command == "document":
         print(json.dumps(document(json.loads(Path(args.dataset).read_text()), json.loads(Path(args.report).read_text())),
                          indent=1, ensure_ascii=False))

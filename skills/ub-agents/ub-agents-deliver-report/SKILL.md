@@ -11,7 +11,8 @@ description: >-
 license: MIT
 compatibility: >-
   Requires python3 and an authenticated GitHub CLI (gh); reads GitHub only.
-  Storing the day needs the Uberblick MCP server (get_data, update_data).
+  Storing the day in an Uberblick document is optional and needs the
+  uberblick MCP server; without it the skill still writes the page.
 metadata:
   author: uberblick-ai
   version: "1.0"
@@ -40,10 +41,18 @@ classes, the page and the records are defined in
    before the day ended count, so a day reads the same whenever it is
    collected.
 
-2. Find the project's delivery dataset: an Uberblick document holding the
-   `days`, `items`, `findings`, `causes`, `lessons` and `changes` collections
-   (search for "Delivery Report"); call it `DOC`. With `DOC`, read its `causes`
-   and `lessons` with `get_data` before naming anything.
+2. Decide where the day will be kept. Uberblick is available when the
+   `uberblick` MCP tools (`search`, `get_data`, `update_data`, `create_doc`,
+   `insert_block`, `delete_block`) are in your tool list. Without them, the
+   page is the whole result: skip steps 6 and 7, say so in one line of the
+   reply, and add that `ub mcp install` registers the server for next time
+   when `ub` is on the PATH. With them, find the project's delivery dataset:
+   an Uberblick document holding the `days`, `items`, `findings`, `causes`,
+   `lessons` and `changes` collections (search for "Delivery report"); call it
+   `DOC`, and read its `causes` and `lessons` with `get_data` before naming
+   anything. When no such document exists, ask the maintainer once whether to
+   create the delivery report document, and carry on with the page while
+   waiting: a yes creates `DOC` in step 6, a no skips steps 6 and 7.
 
 3. For each loop delivery that is not autonomous, each wasted run and each
    reviewer send-back, name the cause from run summaries, denied commands and
@@ -78,7 +87,16 @@ classes, the page and the records are defined in
    browser, such as a remote session, and give the path or publish the page
    instead.
 
-6. With `DOC`, store the day:
+6. Store the day, unless the maintainer asked for the page only. When the
+   maintainer said yes to a new document:
+
+   ```sh
+   python3 scripts/review.py create DIR/report.json > DIR/create.json
+   ```
+
+   Pass the file's `title`, `description` and `blocks` to `create_doc`; the
+   document it returns is `DOC`, laid out as `references/report.md` describes
+   with this day's actions already in place. Then, with `DOC`:
 
    ```sh
    python3 scripts/review.py records DIR/report.json > DIR/operations.json
@@ -89,7 +107,8 @@ classes, the page and the records are defined in
    Storing a day again overwrites its records; delete a finding that no
    longer applies with `deleteRecords`.
 
-7. With `DOC`, refresh its Actions section. Read `lessons` with `get_data`
+7. With a `DOC` that existed before this run, refresh its Actions section
+   (a document created in step 6 already carries them). Read `lessons` with `get_data`
    and write them to `DIR/dataset.json` as `{"lessons": [...]}`, a list of
    `{id, value}`. Then:
 
@@ -102,6 +121,6 @@ classes, the page and the records are defined in
    after the heading. Leave every other block as it is; the charts and the
    Recent days and Changelog tables follow the data by themselves.
 
-8. Reply with the headline, the KPIs and one line per change. The page and the
-   records may be shared: keep credentials, local paths and hostnames out of
-   the notes.
+8. Reply with the headline, the KPIs, one line per change, and where the day
+   was stored or why it was not. The page and the records may be shared: keep
+   credentials, local paths and hostnames out of the notes.
