@@ -307,7 +307,9 @@ def collect(repo, day, zone, since, until):
     items = {}
     for row in pages(f"repos/{repo}/issues", state="all", since=stamp(since)):
         records, notices = [], []
-        for c in pages(f"repos/{repo}/issues/{row['number']}/comments"):
+        # An item opened after the day holds none of its runs, and one without comments holds no records.
+        thread = row["comments"] and before(row["created_at"])
+        for c in pages(f"repos/{repo}/issues/{row['number']}/comments") if thread else []:
             if c["author_association"] not in TRUSTED:
                 continue
             if found := RECORD.search(c["body"] or ""):
@@ -339,10 +341,13 @@ def collect(repo, day, zone, since, until):
         pulls = []
         for n in members:
             if "pull_request" in items[n]["row"]:
-                pr = gh(f"repos/{repo}/pulls/{n}")
-                pulls.append({"number": n, "url": pr["html_url"], "merged": pr["merged_at"],
-                              "additions": pr["additions"], "deletions": pr["deletions"], "files": pr["changed_files"],
-                              "by_loop": inside(pr["merged_at"]) and any(
+                row = items[n]["row"]
+                landed = row["pull_request"].get("merged_at")
+                # The issue row carries the merge time; size counts only for PRs merged inside the day.
+                pr = gh(f"repos/{repo}/pulls/{n}") if inside(landed) else {}
+                pulls.append({"number": n, "url": row["html_url"], "merged": landed, "additions": pr.get("additions", 0),
+                              "deletions": pr.get("deletions", 0), "files": pr.get("changed_files", 0),
+                              "by_loop": inside(landed) and any(
                                   l == "G" and r["result"] == "merged" for l, r in zip(letters, runs))})
         merged = [p["merged"] for p in pulls if inside(p["merged"])]
         closed = "pull_request" not in head and inside(head.get("closed_at"))
@@ -408,9 +413,10 @@ def collect(repo, day, zone, since, until):
             "issues_closed": sum(1 for r in rows if "pull_request" not in r and inside(r.get("closed_at"))),
             "issues_opened": sum(1 for r in rows if "pull_request" not in r and inside(r["created_at"])),
             "retrospectives": len(retrospectives),
-            **open_queue,
-            "machines": len({r["machine"] for r in window if r["machine"]}),
-            "loops": len({r["loop"] for r in window if r["loop"]}), "peak_runs": peak(window)},
+            **open_queue, "peak_runs": peak(window),
+            # Records from before host tracking say nothing about machines: leave the gap rather than report zero.
+            **({"machines": len({r["machine"] for r in window if r["machine"]}),
+                "loops": len({r["loop"] for r in window if r["loop"]})} if any(r["machine"] for r in window) else {})},
         "retrospectives": {"errors": errors, "in_window": retrospectives},
         "issues": issues}
 

@@ -60,7 +60,7 @@ Inflow and capacity, also context:
 | `backlog` | The two together: the actionable queue. |
 | `waiting_to_start` | Open issues no role can take until a person starts them: no workflow label (drafts, sub-issues not yet started, agent-filed follow-ups awaiting approval) or parked at a stop label. Parents with sub-issues are left out; their work counts in the children. |
 | `open_issues` | All open issues at the end of the day, parents included. Issues opened above deliveries day after day shows as this rising. |
-| `machines` | Distinct hosts that ran a role that day |
+| `machines` | Distinct hosts that ran a role that day; absent for days whose records name no host (before 2 October) |
 | `loops` | Distinct loop checkouts that ran a role that day |
 | `peak_runs` | The most runs that overlapped at any moment that day |
 
