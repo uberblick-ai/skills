@@ -17,6 +17,7 @@ come from the repository's ub-agents.yaml, and ROLES maps the common role names 
 import argparse
 import base64
 import datetime as dt
+import hashlib
 import html
 import json
 import re
@@ -178,6 +179,61 @@ def classifier(agents, stop):
     return kind
 
 
+def anonymous(*parts):
+    """A short stable id for a host or a loop checkout: counts without hostnames or paths."""
+    return hashlib.sha256("\0".join(parts).encode()).hexdigest()[:8] if all(parts) else None
+
+
+def peak(runs):
+    """The most runs that overlapped at any moment."""
+    edges = sorted(e for r in runs if r["started"] and r["minutes"] for e in (
+        (when(r["started"]), 1), (when(r["started"]) + dt.timedelta(minutes=r["minutes"]), -1)))
+    most = current = 0
+    for _, step in edges:
+        current += step
+        most = max(most, current)
+    return most
+
+
+def events_since(repo, moment):
+    """Issue and PR events newer than moment, newest first."""
+    for page in range(1, 300):
+        rows = gh("-XGET", f"repos/{repo}/issues/events", "-fper_page=100", f"-fpage={page}")
+        for event in rows:
+            if when(event["created_at"]) < moment:
+                return
+            yield event
+        if len(rows) < 100:
+            return
+
+
+def queue(repo, until, rows, agents):
+    """Open issues at the end of the day that wait for preparation, and those already prepared: today's labels
+    and state with every later change undone."""
+    rank = lambda name: ORDER.find(ROLES.get(name, "?"))
+    waiting = {l for name, a in agents.items() if rank(name) == 0 for l in a["triggers"]}
+    prepared = {l for name, a in agents.items() if rank(name) in (1, 2) for l in a["triggers"]} - waiting
+    state = {}
+    for r in list(rows) + list(pages(f"repos/{repo}/issues", state="open")):
+        if "pull_request" not in r:
+            state.setdefault(r["number"], {"open": r["state"] == "open", "created": r["created_at"],
+                                           "labels": {l["name"] for l in r["labels"]}})
+    for event in events_since(repo, until):
+        item = state.get(event["issue"]["number"]) if not event["issue"].get("pull_request") else None
+        if item is None:
+            continue
+        label = (event.get("label") or {}).get("name")
+        if event["event"] == "labeled":
+            item["labels"].discard(label)
+        elif event["event"] == "unlabeled":
+            item["labels"].add(label)
+        elif event["event"] in ("closed", "reopened"):
+            item["open"] = event["event"] == "closed"
+    live = [i for i in state.values() if i["open"] and when(i["created"]) < until]
+    return sum(bool(i["labels"] & waiting) for i in live), sum(bool(i["labels"] & prepared) and not i["labels"] & waiting
+                                                                 for i in live)
+
+
 def runs_of(records):
     leases = {r["run"]: r for r in records if r.get("kind") == "lease"}
     outcomes = {r["run"]: r for r in records if r.get("kind") == "outcome"}
@@ -198,6 +254,9 @@ def runs_of(records):
                      "denials_recorded": "denials" in out,
                      "summary": public(out.get("summary") or lease.get("summary"), 400),
                      "url": out.get("url") or lease.get("url"),
+                     "machine": anonymous(lease.get("host") or out.get("host")),
+                     "loop": anonymous(lease.get("host") or out.get("host"),
+                                       re.split(r"/\.ub-agents?/", lease.get("log_dir") or "")[0] or None),
                      "pending": not out and lease.get("state") == "running" and bool(lease.get("expires"))
                      and when(lease["expires"]) > dt.datetime.now(dt.timezone.utc)})
     return sorted(runs, key=lambda r: r["started"] or "")
@@ -249,6 +308,7 @@ def collect(repo, day, zone, since, until):
             groups.setdefault(number, set()).update(int(r["handoff"]) for r in item["records"] if r.get("handoff"))
 
     posts, errors = board_posts(repo, agents)
+    unprepared, prepared = queue(repo, until, [i["row"] for i in items.values()], agents)
     issues = []
     for key, prs in sorted(groups.items()):
         members = [key] + sorted(p for p in prs - {key} if p in items)
@@ -327,7 +387,10 @@ def collect(repo, day, zone, since, until):
             "files": sum(p["files"] for p in merged),
             "issues_closed": sum(1 for r in rows if "pull_request" not in r and inside(r.get("closed_at"))),
             "issues_opened": sum(1 for r in rows if "pull_request" not in r and inside(r["created_at"])),
-            "retrospectives": len(retrospectives)},
+            "retrospectives": len(retrospectives),
+            "backlog": unprepared + prepared, "backlog_unprepared": unprepared, "backlog_prepared": prepared,
+            "machines": len({r["machine"] for r in window if r["machine"]}),
+            "loops": len({r["loop"] for r in window if r["loop"]}), "peak_runs": peak(window)},
         "retrospectives": {"errors": errors, "in_window": retrospectives},
         "issues": issues}
 
@@ -392,7 +455,10 @@ def figures(t):
             (spanh(t["run_h_median"]), "run time", f'median per delivery · {spanh(t["run_h"])} all runs'),
             (pct(t["denial_pct"]), "runs with denials", f'{t["runs_with_denials"]} of {t["claude_runs"]} Claude runs'),
             (t["prs_merged"], "PRs merged", f'+{t["additions"]:,} −{t["deletions"]:,} · {t["files"]} files'),
-            (t["issues_closed"], "issues closed", f'{t["issues_opened"]} opened')]
+            (t["issues_closed"], "issues closed", f'{t["issues_opened"]} opened'),
+            (t.get("backlog", "–"), "open queue", f'{t.get("backlog_unprepared", "–")} to prepare · '
+             f'{t.get("backlog_prepared", "–")} prepared'),
+            (t.get("machines", "–"), "machines", f'{t.get("loops", "–")} loops · peak {t.get("peak_runs", "–")} parallel runs')]
 
 
 def report(data):
@@ -515,7 +581,8 @@ SCHEMAS = {
         ["day", "deliveries", "autonomous", "runs", "wasted_runs"], day=DAY, repo=TEXT, headline=TEXT,
         **dict.fromkeys(["deliveries", "autonomous", "runs", "wasted_runs", "human_stops", "claude_runs",
                          "runs_with_denials", "denials", "prs_merged", "prs_merged_by_loop", "additions",
-                         "deletions", "files", "issues_closed", "issues_opened", "retrospectives"], COUNT),
+                         "deletions", "files", "issues_closed", "issues_opened", "retrospectives", "backlog",
+                         "backlog_unprepared", "backlog_prepared", "machines", "loops", "peak_runs"], COUNT),
         **dict.fromkeys(["autonomous_pct", "wasted_pct", "denial_pct"], PERCENT),
         **dict.fromkeys(["run_h", "human_wait_h", "human_stops_per_delivery", "review_rounds_per_delivery",
                          "lead_h_median", "cycle_h_median", "loop_cycle_h_median", "run_h_median"], HOURS)),
@@ -679,11 +746,23 @@ def create_document(data):
                "x": {"field": "day", "type": "date", "label": "Day"},
                "y": [{"field": "loop_cycle_h_median", "label": "Cycle, median", "unit": "h"},
                      {"field": "run_h_median", "label": "Run time, median", "unit": "h"}]}),
+        chart({"version": 1, "type": "line", "collection": "days", "title": "Issues in, deliveries out and the open queue",
+               "x": {"field": "day", "type": "date", "label": "Day"},
+               "y": [{"field": "issues_opened", "label": "Issues opened"},
+                     {"field": "deliveries", "label": "Loop deliveries"},
+                     {"field": "backlog", "label": "Open queue at day end"}]}),
+        {"type": "paragraph", "text": "When issues opened stay above loop deliveries, the open queue rises: work arrives "
+         "faster than the loop delivers it."},
+        chart({"version": 1, "type": "line", "collection": "days", "title": "Capacity",
+               "x": {"field": "day", "type": "date", "label": "Day"},
+               "y": [{"field": "machines", "label": "Machines"}, {"field": "loops", "label": "Loops"},
+                     {"field": "peak_runs", "label": "Peak parallel runs"}]}),
         chart({"version": 1, "type": "table", "collection": "days", "title": "Recent days",
                "columns": [column("day", "Day", "date"), column("deliveries", "Deliveries"),
                            column("autonomous", "Autonomous"), column("wasted_pct", "Wasted runs", **percent),
                            column("human_stops", "Human stops"), column("loop_cycle_h_median", "Cycle", **hours),
-                           column("run_h_median", "Run time", **hours), column("denial_pct", "Denials", **percent)],
+                           column("run_h_median", "Run time", **hours), column("denial_pct", "Denials", **percent),
+                           column("backlog", "Open queue"), column("machines", "Machines")],
                "sort": {"field": "day", "direction": "desc"}, "pageSize": 7}),
         {"type": "heading", "level": 2, "text": "Actions"},
         *sections["actions"],

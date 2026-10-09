@@ -51,6 +51,22 @@ of the day. Overnight launcher pauses still count toward cycle; ub-agents does
 not record them yet. Collect a day a few hours after midnight, so runs still
 going at midnight have reported.
 
+Inflow and capacity, also context:
+
+| Field | What it counts |
+| --- | --- |
+| `backlog_unprepared` | Open issues at the end of the day waiting for preparation (the preparer's trigger labels) |
+| `backlog_prepared` | Open issues at the end of the day already prepared: waiting for issue review or ready to implement |
+| `backlog` | The two together. Issues opened above issues delivered day after day shows as this line rising. |
+| `machines` | Distinct hosts that ran a role that day |
+| `loops` | Distinct loop checkouts that ran a role that day |
+| `peak_runs` | The most runs that overlapped at any moment that day |
+
+The queue is reconstructed from today's labels with every later label and
+state change undone, so a past day reads the same whenever it is collected.
+Hosts and checkouts are counted, never stored: the collector keys on short
+hashes.
+
 ## Causes
 
 A finding is one cause on one day: what it cost and one concrete example. The
@@ -86,9 +102,11 @@ same gap recurring is worth fixing.
 1. **Header.** Repository, the day and its time zone, the title "Delivery
    report", then the headline: one sentence saying how the day went and the
    biggest lesson. The headline is the only thing many readers take in.
-2. **Figures.** Eight tiles: autonomous deliveries, wasted runs, human stops
+2. **Figures.** Ten tiles: autonomous deliveries, wasted runs, human stops
    with the hours waited, cycle with and without the wait, run time, runs with
-   denials, PRs merged with lines and files, issues closed and opened.
+   denials, PRs merged with lines and files, issues closed and opened, the open
+   queue split into to-prepare and prepared, and machines with loops and peak
+   parallel runs.
 3. **What to change.** At most four cards, each one lesson: the lever
    (clearer authority, better wording, fewer instructions, more autonomy), a
    title, the change in one or two sentences quoting any line it would
