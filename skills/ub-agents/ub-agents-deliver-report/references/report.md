@@ -143,7 +143,8 @@ lesson without `addressed_by`, or more than five actions.
 A lesson is `proposed` until an issue or PR addresses it: `tracked` while that
 is open, `applied` once it merged, `rejected` when a person declines it.
 `addressed_by` names it as `owner/name#number`. `actions` ranks up to five
-proposed lessons, from any day, most runs saved first. A change is anything
+proposed lessons proposed or re-proposed in the last 14 days, most runs saved
+first; an older lesson drops off until a day proposes it again. A change is anything
 that landed on this day to fix a cause or apply a lesson; `ref` is
 `owner/name#number` or a commit, with `url` for a commit. `records` gives every
 change a `url`, derived from `ref` when the notes give none.
@@ -188,7 +189,7 @@ document, each collection with its schema:
 | Collection | Key | One record per |
 | --- | --- | --- |
 | `days` | `2026-10-07` | day: the summary and headline |
-| `items` | `1281` | delivered item, written on its delivery day |
+| `items` | `2026-10-07` | day: that day's loop deliveries, compact, kept 14 days |
 | `findings` | `2026-10-07/report-lost-on-upgrade` | day and cause |
 | `causes` | `report-lost-on-upgrade` | cause: class, mechanism, state, `fixed_by` |
 | `lessons` | `launcher-installs-dependencies` | lesson: lever, change, causes, state, `addressed_by` |
@@ -197,8 +198,11 @@ document, each collection with its schema:
 Storing a day again overwrites its records; a finding that no longer applies
 stays until `deleteRecords` removes it. A person's verdict on a cause or
 lesson belongs in a separate `verdicts` collection keyed by the same id; the
-skill never writes it, so a refresh cannot overwrite it. A document's data is
-limited to 4 MiB; a day with five deliveries takes about 7.5 KB.
+skill never writes it, so a refresh cannot overwrite it. Item detail is a recent snapshot: each item leaves out zero, empty and derivable
+fields, and storing a day deletes `items` records older than 14 days. `days`,
+`findings`, `causes`, `lessons` and `changes` stay, so trends cover 180 days
+and more. A document's data is limited to 4 MiB; a year of days and findings
+takes about 2 MB.
 
 ## Document
 

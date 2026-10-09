@@ -498,6 +498,10 @@ def merge(data, notes):
     return data
 
 
+ITEM_REQUIRED = ["number", "title", "autonomous", "sequence"]
+ITEM_DAYS = 14  # item detail is a recent snapshot; days, findings and causes stay for trends
+
+
 def collection(required, **fields):
     return {"version": 1, "schema": {"type": "object", "required": required, "properties": fields}}
 
@@ -515,12 +519,13 @@ SCHEMAS = {
         **dict.fromkeys(["autonomous_pct", "wasted_pct", "denial_pct"], PERCENT),
         **dict.fromkeys(["run_h", "human_wait_h", "human_stops_per_delivery", "review_rounds_per_delivery",
                          "lead_h_median", "cycle_h_median", "loop_cycle_h_median", "run_h_median"], HOURS)),
-    "items": collection(
-        ["day", "number", "title", "loop", "autonomous", "sequence"], day=DAY, number=COUNT, title=TEXT, url=TEXT,
-        loop={"type": "boolean"}, autonomous={"type": "boolean"}, sequence=TEXT, prs=NUMBERS, note=TEXT,
-        **dict.fromkeys(["attempts", "wasted_runs", "review_rounds", "human_stops", "denials", "runs_with_denials",
-                         "lines"], COUNT),
-        **dict.fromkeys(["human_wait_h", "lead_h", "cycle_h", "loop_cycle_h", "run_h"], HOURS)),
+    "items": collection(["day", "items"], day=DAY, items={"type": "array", "items": {
+        "type": "object", "required": ITEM_REQUIRED, "properties": {
+            "number": COUNT, "title": TEXT, "autonomous": {"type": "boolean"}, "sequence": TEXT, "prs": NUMBERS,
+            "note": TEXT,
+            **dict.fromkeys(["attempts", "wasted_runs", "review_rounds", "human_stops", "denials", "runs_with_denials",
+                             "lines"], COUNT),
+            **dict.fromkeys(["human_wait_h", "lead_h", "cycle_h", "loop_cycle_h", "run_h"], HOURS)}}}),
     "findings": collection(
         ["day", "cause", "class", "example"], day=DAY, cause=TEXT, cost=TEXT, runs=COUNT, items=NUMBERS,
         example=TEXT, **{"class": {"type": "string", "enum": CLASSES}}),
@@ -534,19 +539,27 @@ SCHEMAS = {
     "changes": collection(
         ["day", "title", "why"], day=DAY, title=TEXT, why=TEXT, url=TEXT, causes=IDS, lessons=IDS),
 }
-ITEM_FIELDS = ["day", "number", "title", "url", "loop", "autonomous", "sequence", "attempts", "wasted_runs",
-               "review_rounds", "human_stops", "human_wait_h", "lead_h", "cycle_h", "loop_cycle_h", "run_h",
-               "denials", "runs_with_denials", "lines", "note"]
+ITEM_FIELDS = ["number", "title", "autonomous", "sequence", "attempts", "wasted_runs", "review_rounds", "human_stops",
+               "human_wait_h", "lead_h", "cycle_h", "loop_cycle_h", "run_h", "denials", "runs_with_denials", "lines",
+               "note"]
+
+
+def item(d):
+    """A loop delivery, compact: zero, empty and derivable fields are left out."""
+    value = {k: d[k] for k in ITEM_FIELDS if k in ITEM_REQUIRED or d.get(k) not in (0, "", None, False)}
+    prs = [p["number"] for p in d["prs"] if p["number"] != d["number"]]
+    return value | ({"prs": prs} if prs else {})
 
 
 def records(data):
-    """One update_data batch for the day: upserts keyed so that storing a day again replaces it."""
+    """One update_data batch for the day: upserts keyed so that storing a day again replaces it. Items are one
+    record per day and only the last ITEM_DAYS days are kept; the batch deletes older ones."""
     day = data["day"]
+    first = dt.date.fromisoformat(day)
     rows = {
         "days": [{"id": day, "value": data["summary"]}],
-        "items": [{"id": str(d["number"]), "value": {k: d[k] for k in ITEM_FIELDS} | {
-            "prs": [p["number"] for p in d["prs"] if p["number"] != d["number"]]}}
-            for d in data["issues"] if d["delivered"] and d["runs"]],
+        "items": [{"id": day, "value": {"day": day, "items": [
+            item(d) for d in data["issues"] if d["delivered"] and d["loop"]]}}],
         "findings": [{"id": f'{day}/{f["cause"]}', "value": {"day": day} | {
             k: f[k] for k in ("cause", "class", "cost", "runs", "items", "example") if k in f}} for f in data["findings"]],
         "causes": [{"id": f["cause"], "value": {k: f[k] for k in ("class", "mechanism", "state", "fixed_by") if f.get(k)}}
@@ -557,7 +570,9 @@ def records(data):
         "changes": [{"id": c["ref"], "value": {k: c[k] for k in ("day", "title", "why", "causes", "lessons") if k in c} | (
             {"url": c.get("url") or link(c["ref"])} if c.get("url") or link(c["ref"]) else {})}
                     for c in data.get("changes", [])]}
-    return [{"collection": name, "schema": SCHEMAS[name], "upsert": rows[name]} for name in SCHEMAS if rows[name]]
+    expired = [(first - dt.timedelta(days=n)).isoformat() for n in range(ITEM_DAYS, ITEM_DAYS + 60)]
+    return [{"collection": name, "schema": SCHEMAS[name], "upsert": rows[name]} |
+            ({"deleteRecords": expired} if name == "items" else {}) for name in SCHEMAS if rows[name]]
 
 
 def link(ref):
@@ -595,7 +610,11 @@ def document(dataset, data):
                                            key=lambda i: lessons[i].get("day", ""), reverse=True)
     actions = [{"type": "paragraph", "text": "The most valuable changes not yet taken up, most runs saved first. An action "
                 "leaves this list once an issue or PR addresses it."}]
-    for n, key in enumerate([k for k in ranked if k in lessons and lessons[k].get("state", "proposed") == "proposed"][:5], 1):
+    # Actions look back ITEM_DAYS: a lesson nobody proposed again in that window drops off.
+    since = (dt.date.fromisoformat(data["day"]) - dt.timedelta(days=ITEM_DAYS - 1)).isoformat()
+    current = [k for k in ranked if k in lessons and lessons[k].get("state", "proposed") == "proposed"
+               and lessons[k].get("day", data["day"]) >= since]
+    for n, key in enumerate(current[:5], 1):
         l = lessons[key]
         meta = " · ".join(filter(None, [LEVERS[l["lever"]], l.get("where"), l.get("cost"),
                                         "causes: " + ", ".join(l.get("causes", [])) if l.get("causes") else None]))

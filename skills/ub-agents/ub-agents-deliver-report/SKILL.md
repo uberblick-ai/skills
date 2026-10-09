@@ -71,8 +71,9 @@ classes, the page and the records are defined in
    the registry already has. Then search the repositories' issues and PRs for
    one that addresses each proposed lesson, new or registered: mark it
    `tracked` with `addressed_by` when an open one does, `applied` when a merged
-   one did. Rank up to five still-proposed lessons, most runs saved first, as
-   the day's `actions`.
+   one did. Rank up to five still-proposed lessons from the last 14 days,
+   most runs saved first, as the day's `actions`; re-propose an older lesson
+   when the day shows it again.
 
 5. Write `DIR/notes.json` in the shape `references/report.md` gives (headline,
    one note per item, findings, lessons, actions, changes, retrospective
