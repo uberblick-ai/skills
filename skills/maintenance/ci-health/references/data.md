@@ -92,7 +92,9 @@ year of two repositories stays far below a document's 4 MiB.
    its collection: wall time (the 7-day total first, then each job of the
    last three days with green commits, at most seven) and tests.
 
-`create` writes the whole document; `section` writes one more repository's
+Search indexes the title, description and block text, not the records,
+so the description names what the data holds; `create` also gives a TL;DR,
+and the agent adds the fitting catalog tags. `create` writes the whole document; `section` writes one more repository's
 blocks. Everything outside the Incidents list is written once and may be
 edited by hand, except the wall-time chart, which the skill replaces when
 the jobs change.

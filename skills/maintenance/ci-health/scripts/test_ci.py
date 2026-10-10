@@ -99,6 +99,7 @@ class Tests(unittest.TestCase):
         self.assertEqual([c["collection"] for c in charts], ["r", "r"])
         self.assertEqual(charts[0]["y"][0]["field"], "wall_min_7d")
         self.assertTrue(all(len(c["y"]) <= 8 for c in charts))
+        self.assertTrue(len(doc["description"]) <= 300 and len(doc["tldr"]) <= 300)
         items = [b for b in doc["blocks"] if b["type"] == "list-item"]
         self.assertIn("Split the tests", items[0]["inline"][1]["text"])
         with self.assertRaises(SystemExit):

@@ -33,7 +33,8 @@ layout are in [references/data.md](references/data.md).
 
 1. Decide where the figures will be kept. Uberblick is available when the
    `uberblick` MCP tools (`search`, `get_doc`, `get_data`, `update_data`,
-   `create_doc`, `insert_block`, `delete_block`) are in your tool list.
+   `create_doc`, `insert_block`, `delete_block`, `list_tags`) are in your
+   tool list.
    Without them, steps 6 and 7 are skipped: the table from step 2 and the
    incidents from step 4 are the result; say so in one line and add that
    `ub mcp install` registers the server for next time when `ub` is on the
@@ -96,8 +97,11 @@ layout are in [references/data.md](references/data.md).
    ```
 
    (list only the collected `NAME.json` files.) Pass its `title`,
-   `description` and `blocks` to `create_doc`; the result is `DOC`. Then,
-   for each repository:
+   `description`, `tldr` and `blocks` to `create_doc`, with `tags`: the
+   active ids from `list_tags` that fit CI, testing or engineering health,
+   so the document is found by tag as well as by search. If none fits, say
+   so in the reply rather than leaving it silently untagged. The result is
+   `DOC`. Then, for each repository:
 
    ```sh
    python3 scripts/ci.py records DIR/NAME.json [DIR/incidents.json] > DIR/NAME-ops.json

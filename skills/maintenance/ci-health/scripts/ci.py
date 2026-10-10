@@ -426,8 +426,15 @@ def create_document(datas, incidents=()):
     ]
     for data in datas:
         blocks += section(data)
-    return {"title": "CI health", "description": f"Daily CI wall time and test count on main for {repos}, stored "
-            "by the ci-health skill.", "blocks": blocks}
+    names = [collection_name(d["repo"]) for d in datas]
+    names = " and ".join(filter(None, [", ".join(names[:-1]), names[-1]]))
+    return {"title": "CI health",
+            "description": f"How long CI takes on main in {names}: daily GitHub Actions wall time per parallel job and "
+                           "in total, test counts, and the incidents that made CI slower or faster. Data in the "
+                           "document's collections, refreshed daily by the ci-health skill.",
+            "tldr": f"Tracks how long a push to main waits for CI in {names}, how many tests run, and which changes "
+                    "moved it.",
+            "blocks": blocks}
 
 
 def load(path):
