@@ -1,5 +1,8 @@
 """Build skills.uberblick.ai from the skills in this repository into site/out.
 
+Links use Pages' extensionless URLs (/skills/<name>, not /skills/<name>.html,
+which Pages redirects), so the pages are meant to be served, not opened as files.
+
 Standard library only:
 
     python3 site/build.py
@@ -129,7 +132,7 @@ def head(title, description, canonical, pre):
 
 def header(pre, skills):
     return f'''<header class="top">
-  <a class="mark" href="{pre}index.html">uberblick<span>/</span>skills</a>
+  <a class="mark" href="{pre or "./"}">uberblick<span>/</span>skills</a>
   <span class="count">{len(skills)} skills</span>
   <nav>
     <a href="{AGENTS}">ub-agents</a>
@@ -183,7 +186,7 @@ def sidebar(pre, groups, current=None, filt=True):
     out = []
     for g in groups:
         items = ''.join(
-            f'<li data-skill="{s["slug"]}" data-find="{find(s)}"><a{" class=\"on\"" if s is current else ""} href="{pre}skills/{s["slug"]}.html">{s["slug"]}</a></li>'
+            f'<li data-skill="{s["slug"]}" data-find="{find(s)}"><a{" class=\"on\"" if s is current else ""} href="{pre}skills/{s["slug"]}">{s["slug"]}</a></li>'
             for s in g['skills'])
         out.append(f'<li data-group="{g["id"]}"><span class="grp">{e(g["name"])} <span>{len(g["skills"])}</span></span><ul>{items}</ul></li>')
     f = '<input class="filter" id="filter" type="search" placeholder="Filter skills" aria-label="Filter skills">' if filt else ''
@@ -193,7 +196,7 @@ def sidebar(pre, groups, current=None, filt=True):
     <summary>{summary}</summary>
     <div class="side-in">
       {f}
-      <ul class="plain"><li><a{on} href="{pre}index.html">Overview</a></li></ul>
+      <ul class="plain"><li><a{on} href="{pre or "./"}">Overview</a></li></ul>
       <ul id="nav">{"".join(out)}</ul>
       <ul class="plain">
         <li><a href="{REPO}/blob/main/AGENTS.md">Add a skill</a></li>
@@ -241,7 +244,7 @@ def overview(home, groups, skills):
         for s in g['skills']:
             ask = f'<span>Ask: "{e(s["question"])}"</span>' if s.get('question') else ''
             version = f'v{e(s["version"])}' if s['version'] else ''
-            rows += (f'<li data-skill="{s["slug"]}" data-find="{find(s)}"><a href="skills/{s["slug"]}.html"><span class="n">{s["slug"]}</span>'
+            rows += (f'<li data-skill="{s["slug"]}" data-find="{find(s)}"><a href="skills/{s["slug"]}"><span class="n">{s["slug"]}</span>'
                      f'<span class="d">{e(s["short"])}{ask}</span><span class="v">{version}</span></a></li>')
         blocks.append(f'<div class="gblock" data-group="{g["id"]}"><div class="gblock-h"><span class="num">{i:02d}</span><h3>{e(g["name"])}</h3>'
                       f'<code>plugin {g["plugin"]}</code><p>{e(g["description"])}</p></div><ul class="sk-list">{rows}</ul></div>')
@@ -250,7 +253,7 @@ def overview(home, groups, skills):
         + ''.join(f'<li><span class="tag">{e(t)}</span><a href="{e(h)}">{e(n)}</a></li>' for t, n, h in q['links'])
         + '</ul></article>' for q in home['questions'])
     changes = ''.join(f'<li><time>{d}</time><span class="tag">{e(t)}</span><span>{e(x)}</span></li>' for d, t, x in home['changes'])
-    skill_links = ''.join(f'<li><a href="skills/{s["slug"]}.html">{s["slug"]}</a></li>' for s in skills)
+    skill_links = ''.join(f'<li><a href="skills/{s["slug"]}">{s["slug"]}</a></li>' for s in skills)
     return head('uberblick skills', TAGLINE, f'{SITE}/', '') + header('', skills) + f'''
 <div class="layout">
   {sidebar('', groups)}
@@ -299,10 +302,10 @@ def skill_page(s, groups, skills):
     pre = '../'
     i = skills.index(s)
     prev, nxt = (skills[i - 1] if i else None), (skills[i + 1] if i + 1 < len(skills) else None)
-    pager = (f'<a class="prev" href="{prev["slug"]}.html"><span>Previous</span>{prev["slug"]}</a>' if prev
-             else f'<a class="prev" href="{pre}index.html"><span>Back to</span>All skills</a>')
+    pager = (f'<a class="prev" href="{prev["slug"]}"><span>Previous</span>{prev["slug"]}</a>' if prev
+             else f'<a class="prev" href="{pre or "./"}"><span>Back to</span>All skills</a>')
     if nxt:
-        pager += f'<a class="next" href="{nxt["slug"]}.html"><span>Next</span>{nxt["slug"]}</a>'
+        pager += f'<a class="next" href="{nxt["slug"]}"><span>Next</span>{nxt["slug"]}</a>'
     shots = s.get('shots', [])
     first = shot(shots[0]['image'], shots[0]['caption'], pre, eager=True) if shots else ''
     more = ''.join(shot(x['image'], x['caption'], pre) for x in shots[1:])
@@ -324,11 +327,11 @@ def skill_page(s, groups, skills):
     srcs = ''.join(f'<li><a href="{REPO}/blob/main/{s["path"]}/{p}">{p}</a></li>' for p in ['SKILL.md'] + s['files'])
     secs.append(f'<section class="sk-sec"><h2>Source</h2><ul class="srcs">{srcs}</ul></section>')
     version = f'<span class="chip">v{e(s["version"])}</span>' if s['version'] else ''
-    return head(f'{s["slug"]} · uberblick skills', s['short'], f'{SITE}/skills/{s["slug"]}.html', pre) + header(pre, skills) + f'''
+    return head(f'{s["slug"]} · uberblick skills', s['short'], f'{SITE}/skills/{s["slug"]}', pre) + header(pre, skills) + f'''
 <div class="layout">
   {sidebar(pre, groups, s, filt=False)}
   <main class="main sk">
-    <p class="crumb"><a href="{pre}index.html">Skills</a> / {e(s["group_name"])}</p>
+    <p class="crumb"><a href="{pre or "./"}">Skills</a> / {e(s["group_name"])}</p>
     <div class="sk-title"><h1>{s["slug"]}</h1>{version}<span class="chip acc">plugin {s["plugin"]}</span></div>
     <p class="sk-lede">{e(s.get("lede", s["description"]))}</p>
     {first}
@@ -352,7 +355,7 @@ def not_found(groups, skills):
     body = head('Page not found · uberblick skills', TAGLINE, f'{SITE}/', '/') + header('/', skills) + f'''
 <div class="layout">
   {sidebar('/', groups, filt=False)}
-  <main class="main"><div class="hero"><h1>Page not found.</h1><p class="lede">Start at the <a href="/index.html">overview</a>, or pick a skill on the left.</p></div></main>
+  <main class="main"><div class="hero"><h1>Page not found.</h1><p class="lede">Start at the <a href="/">overview</a>, or pick a skill on the left.</p></div></main>
 </div>
 {FOOTER}
 {JS}
@@ -368,7 +371,7 @@ def skills_md(groups):
         out += [f'## {g["name"]}', '', g['description'], f'Claude Code plugin: `/plugin install {g["plugin"]} --marketplace uberblick-ai/skills`', '']
         for s in g['skills']:
             out += [f'### {s["slug"]}', '', s['description'], '',
-                    f'- Page: {SITE}/skills/{s["slug"]}.html', f'- SKILL.md: {RAW}/{s["path"]}/SKILL.md',
+                    f'- Page: {SITE}/skills/{s["slug"]}', f'- SKILL.md: {RAW}/{s["path"]}/SKILL.md',
                     f'- Install: `{INSTALL} --skill {s["slug"]}`', '']
     return '\n'.join(out)
 
@@ -401,7 +404,7 @@ def main():
     (OUT / '404.html').write_text(not_found(groups, skills))
     (OUT / 'skills.md').write_text(skills_md(groups))
     (OUT / 'llms.txt').write_text(llms_txt(home, groups))
-    urls = [f'{SITE}/'] + [f'{SITE}/skills/{s["slug"]}.html' for s in skills]
+    urls = [f'{SITE}/'] + [f'{SITE}/skills/{s["slug"]}' for s in skills]
     (OUT / 'sitemap.xml').write_text('<?xml version="1.0" encoding="UTF-8"?>\n'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
         + ''.join(f'  <url><loc>{u}</loc></url>\n' for u in urls) + '</urlset>\n')
