@@ -18,6 +18,7 @@
     {"label": "Contribute", "question": "How do I write a skill for this repository?", "links": [["Guide", "AGENTS.md", "https://github.com/uberblick-ai/skills/blob/main/AGENTS.md"], ["Spec", "Agent Skills specification", "https://agentskills.io/specification"]]}
   ],
   "changes": [
+    ["2026-10-10", "Skill", "Added ci-health 1.0 in the Maintenance group: CI wall time, jobs, tests and the changes that moved them."],
     ["2026-10-10", "Site", "skills.uberblick.ai, one page per skill."],
     ["2026-10-09", "Skill", "Added backlog-grooming 1.1 in the new Maintenance group."],
     ["2026-10-09", "Skill", "Added ub-agents-deliver-report, moved here from uberblick-2 and ub-agents."],

@@ -1,0 +1,59 @@
+{
+  "question": "Is CI on main getting slower?",
+  "short": "Track how long a push to main waits for CI, split per parallel job, and how many tests it runs, in any repository and language. Name the changes that made CI slower or faster.",
+  "lede": "The wait that counts is wall time: from the first job starting to the last one finishing, not the job minutes added up. Splitting checks into parallel jobs is one way to cut it, so each job is tracked beside the total. Steps up or down are kept as incidents, each with the change behind it.",
+  "asks": [
+    "How long does CI on main take?",
+    "Did CI get slower this week?",
+    "Record yesterday's CI figures in the CI health page."
+  ],
+  "steps": [
+    "Reads GitHub Actions runs on the default branch, grouped by commit, for a UTC day or a backfill of up to 90 days.",
+    "Takes the median wall time of green pushes, a 7-day median as the headline with its spread and P95, and each job's median beside it.",
+    "Reads the test count off the job logs, with patterns the agent writes for whatever runners the repository uses.",
+    "Optionally measures the test-to-code ratio, and coverage when the repository defines <code>mise run codecov</code>.",
+    "Finds steps in wall time and stretches of hung runs, then names the change behind each from the PRs around it.",
+    "With Uberblick, stores the day and any incident in the repository's own <em>CI health</em> document, charts first and incidents below. Without it, prints a table."
+  ],
+  "facts_title": "What it records",
+  "facts": [
+    [
+      "Wall time",
+      "first job start to last job end, over every workflow of the push"
+    ],
+    [
+      "Spread",
+      "the 7-day median with its ± and P95, so the slow tail shows"
+    ],
+    [
+      "Per job",
+      "each parallel job's median, so a split shows"
+    ],
+    [
+      "Tests",
+      "what the runners report, matrix copies counted once"
+    ],
+    [
+      "Code",
+      "test lines per code line, and coverage through a mise task"
+    ],
+    [
+      "Incidents",
+      "the latest five changes that moved CI time, up or down"
+    ]
+  ],
+  "needs": [
+    [
+      "Needs",
+      "<code>python3</code> and an authenticated <code>gh</code>; the test count needs access to GitHub's job logs."
+    ],
+    [
+      "Optional",
+      "a local checkout for the ratio and coverage; the Uberblick MCP tools or the <code>ub</code> command, to keep the figures in a document."
+    ],
+    [
+      "Leaves",
+      "one JSON file per repository and day, and the document's records."
+    ]
+  ]
+}
