@@ -44,6 +44,22 @@ class Tests(unittest.TestCase):
     def test_pytest(self):
         self.assertEqual(ci.tests_in(log("======= 3 failed, 97 passed, 4 skipped in 12.30s =======")), 100)
 
+    def test_log_read_retries_when_gh_refuses_escapes(self):
+        calls = []
+
+        def fake(path, raw=False, *flags):
+            calls.append(flags)
+            if not flags:
+                raise RuntimeError(f"gh api {path}: the response contains terminal escape sequences; pass "
+                                   "--allow-escape-sequences to output it anyway")
+            return b"Ran 3 tests in 0.1s"
+        real, ci.gh = ci.gh, fake
+        try:
+            self.assertEqual(ci.tests_in(ci.job_log("o/r", 1)), 3)
+        finally:
+            ci.gh = real
+        self.assertEqual(calls, [(), ("--allow-escape-sequences",)])
+
     def test_no_summary(self):
         self.assertIsNone(ci.tests_in(log("Lint passed", "done")))
 

@@ -43,8 +43,8 @@ DOTS = re.compile(r"^[.X]+$")
 RAN = {"passed", "failed", "flaky", "error", "errors"}
 
 
-def gh(path, raw=False):
-    done = subprocess.run(["gh", "api", path], capture_output=True)
+def gh(path, raw=False, *flags):
+    done = subprocess.run(["gh", "api", *flags, path], capture_output=True)
     if done.returncode:
         raise RuntimeError(f"gh api {path}: {done.stderr.decode(errors='replace').strip()}")
     return done.stdout if raw else json.loads(done.stdout)
@@ -112,7 +112,14 @@ def tests_in(text):
 
 
 def job_log(repo, job_id):
-    data = gh(f"repos/{repo}/actions/jobs/{job_id}/logs", raw=True)
+    path = f"repos/{repo}/actions/jobs/{job_id}/logs"
+    try:
+        data = gh(path, True)
+    except RuntimeError as e:
+        # Newer gh refuses output with terminal escapes, which test runners print; older gh lacks the flag.
+        if "--allow-escape-sequences" not in str(e):
+            raise
+        data = gh(path, True, "--allow-escape-sequences")
     if data[:2] == b"PK":  # some hosts hand back the zipped log
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             return "\n".join(z.read(n).decode(errors="replace") for n in z.namelist())
