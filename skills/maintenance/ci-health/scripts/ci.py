@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Facts and the dataset records for the ci-health skill. Reads GitHub Actions only; standard library and `gh`.
 
-    ci.py collect --repo OWNER/NAME [--day YYYY-MM-DD | --since YYYY-MM-DD [--until YYYY-MM-DD]] > data.json
+    ci.py collect --repo OWNER/NAME [--day D | --since D [--until D]] [--workflow W] [--start D] > data.json
     ci.py shifts data.json [--limit 5]                 # candidate incidents: steps in wall time, and hangs
+    ci.py logs data.json --out DIR [--day DAY]         # a day's job logs, cleaned, to find the test summary line
+    ci.py tests data.json --pattern REGEX...           # each day's test count from that line, added in place
+    ci.py measure data.json --checkout PATH            # optional: coverage and code/test lines, added in place
     ci.py summary data.json                            # the days as a Markdown table, for a reply
-    ci.py records data.json [incidents.json] > operations.json  # update_data batch for the CI health document
-    ci.py create data.json... [--incidents incidents.json] > create.json  # create_doc arguments for a new document
-    ci.py section data.json > section.json             # insert_block arguments for one more repository
+    ci.py records data.json [incidents.json] [--doc UUID] > update.json  # update_data batch for the document
+    ci.py create data.json [--incidents incidents.json] [--tag ID]... > create.json  # create_doc arguments
+    ci.py charts data.json > charts.json               # the chart blocks, to replace when the jobs change
     ci.py changelog incidents.json > changelog.json    # the document's Incidents list, latest five
+    ci.py ub TOOL [arguments.json] [--checkout PATH]   # an Uberblick MCP tool through `ub mcp serve`
 
 Days are UTC calendar days; the default is yesterday. A commit counts on the day its first push run was
 created. Wall time is the time from the first job starting to the last job finishing, over every workflow the
@@ -19,10 +23,13 @@ import argparse
 import datetime as dt
 import io
 import json
+import math
+import os
 import re
 import statistics
 import subprocess
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -31,16 +38,6 @@ WINDOW = 7  # rolling median over this many days, the headline
 LOOKBACK = 21  # days of commits read before the first day: the rolling median and step detection need them
 LOG = re.compile(r"^﻿?\d{4}-\d\d-\d\dT[\d:.]+Z ?")
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
-VITEST = re.compile(r"\bTests\s+((?:\d+ (?:passed|failed|skipped|todo|flaky)\s*\|?\s*)+)\(\d+\)")
-JEST = re.compile(r"^Tests:\s+(.*\d+ total)")
-COUNTS = re.compile(r"(\d+) (passed|failed|flaky|errors?|skipped|todo)\b")
-PLAYWRIGHT = re.compile(r"^\s*(\d+) (passed|failed|flaky)(?: \([\d.]+m?s?\)| \(\d+(?:\.\d+)?[smh]\))?\s*$")
-UNITTEST = re.compile(r"^Ran (\d+) tests? in ")
-UNITTEST_SKIPPED = re.compile(r"^(?:OK|FAILED) \(.*?skipped=(\d+)")
-PYTEST = re.compile(r"^=+ (.*?\d+ (?:passed|failed).*?) in [\d.]+s")
-NODE = re.compile(r"^ℹ (tests|skipped|todo) (\d+)$")
-DOTS = re.compile(r"^[.X]+$")
-RAN = {"passed", "failed", "flaky", "error", "errors"}
 
 
 def gh(path, raw=False, *flags):
@@ -74,6 +71,21 @@ def median(values):
     return round(statistics.median(values), 2) if values else None
 
 
+def p95(values):
+    """The 95th percentile by nearest rank: a value that was measured. With under 20 values it is the slowest."""
+    values = sorted(v for v in values if v is not None)
+    return values[math.ceil(0.95 * len(values)) - 1] if values else None
+
+
+def spread(values):
+    """Half the interquartile range: the ± around the median that holds the middle half of the values."""
+    values = [v for v in values if v is not None]
+    if len(values) < 2:
+        return None
+    q1, _, q3 = statistics.quantiles(values, n=4, method="inclusive")
+    return round((q3 - q1) / 2, 2)
+
+
 def slug(text):
     return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")[:60]
 
@@ -83,32 +95,21 @@ def field(workflow, job):
     return f"{slug(f'{workflow} {job}')}_min"
 
 
-def tests_in(text):
-    """Tests a job ran, from the summaries test runners print: vitest, jest, playwright, unittest, pytest and the
-    node test runner (its spec summary, or one mark per test from the dot reporter). None when nothing matched."""
-    total, found, dots = 0, False, []
-    lines = [ANSI.sub("", LOG.sub("", line)).rstrip() for line in text.splitlines()]
-    for n, line in enumerate(lines):
-        body = line.split(": ", 1)[1] if re.match(r"^\S+ (?:test|e2e)\S*: ", line) else line
-        if m := VITEST.search(body) or JEST.search(body) or PYTEST.search(body):
-            total += sum(int(c) for c, kind in COUNTS.findall(m.group(1)) if kind in RAN)
-            found = True
-        elif m := PLAYWRIGHT.match(body):
-            total += int(m.group(1))
-            found = True
-        elif m := UNITTEST.match(body):
-            skipped = next((int(s.group(1)) for later in lines[n + 1:n + 6] if (s := UNITTEST_SKIPPED.match(later))), 0)
-            total += int(m.group(1)) - skipped
-            found = True
-            # The unittest runner's own progress marks are not a second suite.
-            dots = [d for d in dots if d[0] < n - 6]
-        elif m := NODE.match(body):
-            total += int(m.group(2)) * (1 if m.group(1) == "tests" else -1)
-            found = True
-        elif DOTS.match(body):
-            dots.append((n, body.count(".") + body.count("X")))
-    total += sum(count for _, count in dots)
-    return total if found or dots else None
+def clean(text):
+    """A job log without GitHub's timestamps and terminal colors."""
+    return "\n".join(ANSI.sub("", LOG.sub("", line)).rstrip() for line in text.splitlines())
+
+
+def tests_in(text, patterns):
+    """Tests a job reports, by the agent's patterns for this repository's runners: every integer a pattern's groups
+    capture, on every line it matches, summed. None when no pattern matched."""
+    total, found = 0, False
+    for line in clean(text).splitlines():
+        for pattern in patterns:
+            if m := pattern.search(line):
+                total += sum(int(g) for g in m.groups() if g and g.isdigit())
+                found = True
+    return total if found else None
 
 
 def job_log(repo, job_id):
@@ -138,7 +139,7 @@ def window(args):
     return first, last
 
 
-def collect(repo, first, last, tests=True, required=(), floor=None):
+def collect(repo, first, last, required=(), floor=None):
     """Every push run on the default branch from LOOKBACK days before `first` to the end of `last`, grouped by
     commit, and one record per day from `first` to `last`. With `required` workflows, a commit counts only when it
     ran one of them; the other workflows on that commit still count toward its wall time. Runs before `floor` are
@@ -175,12 +176,6 @@ def collect(repo, first, last, tests=True, required=(), floor=None):
         c["execution_min"] = round(sum(j["min"] for j in c["jobs"]), 2)
         rows.append(c)
     rows.sort(key=lambda c: c["created"])
-    if tests:
-        # One log read per day: the day's last green commit.
-        for day in {c["day"] for c in rows if first.isoformat() <= c["day"]}:
-            green = [c for c in rows if c["day"] == day and c["ok"]]
-            if green:
-                count_tests(repo, green[-1])
     names = {}
     days = []
     d = first
@@ -194,6 +189,8 @@ def collect(repo, first, last, tests=True, required=(), floor=None):
                   "start": floor.isoformat() if floor else None, "commits": len(today), "failed": len(today) - len(green),
                   "wall_min": median(c["wall_min"] for c in green),
                   "wall_min_7d": median(c["wall_min"] for c in recent),
+                  "wall_spread_7d": spread(c["wall_min"] for c in recent),
+                  "wall_p95_7d": p95(c["wall_min"] for c in recent),
                   "execution_min": median(c["execution_min"] for c in green),
                   "wait_min": median(c["wait_min"] for c in green)}
         per_job = {}
@@ -203,9 +200,6 @@ def collect(repo, first, last, tests=True, required=(), floor=None):
                 names[key_] = f"{j['workflow']} / {j['name']}"
                 per_job.setdefault(key_, []).append(j["min"])
         record |= {k: median(v) for k, v in sorted(per_job.items())}
-        counted = [c for c in green if c.get("tests") is not None]
-        if counted:
-            record["tests"] = counted[-1]["tests"]
         days.append({k: v for k, v in record.items() if v is not None})
         d += dt.timedelta(days=1)
     for c in rows:
@@ -216,20 +210,159 @@ def collect(repo, first, last, tests=True, required=(), floor=None):
             "workflows": list(required), "jobs": dict(sorted(names.items())), "days": days, "commits": rows}
 
 
-def count_tests(repo, commit):
+def count_tests(repo, commit, patterns):
     """Tests on a green commit, summed over its jobs; a matrix runs one suite several times, so jobs that differ
     only in their parenthesised matrix values count once, at their largest."""
     groups = {}
     for j in commit["jobs"]:
         try:
-            j["tests"] = tests_in(job_log(repo, j["id"]))
+            n = tests_in(job_log(repo, j["id"]), patterns)
         except RuntimeError as e:
             print(f"tests: no log for {j['workflow']} / {j['name']}: {e}", file=sys.stderr)
-            j["tests"] = None
-        if j["tests"] is not None:
+            continue
+        if n is not None:
             base = (j["workflow"], re.sub(r"\s*\(.*\)$", "", j["name"]))
-            groups[base] = max(groups.get(base, 0), j["tests"])
-    commit["tests"] = sum(groups.values()) if groups else None
+            groups[base] = max(groups.get(base, 0), n)
+    return sum(groups.values()) if groups else None
+
+
+def last_green(data, day):
+    green = [c for c in data["commits"] if c["day"] == day and c["ok"]]
+    return green[-1] if green else None
+
+
+def save_logs(data, out, day=None):
+    """The job logs of a day's last green commit, cleaned, one file per job, for the agent to read."""
+    day = day or data["days"][-1]["day"]
+    commit = last_green(data, day)
+    if not commit:
+        sys.exit(f"logs: no green commit on {day}")
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    files = []
+    for j in commit["jobs"]:
+        path = out / f"{slug(j['workflow'] + ' ' + j['name'])}.log"
+        path.write_text(clean(job_log(data["repo"], j["id"])))
+        files.append({"job": f"{j['workflow']} / {j['name']}", "file": str(path), "lines": len(path.read_text().splitlines())})
+    return {"day": day, "sha": commit["sha"][:12], "logs": files}
+
+
+def add_tests(data, patterns):
+    """Set `tests` on every day with a green commit, from that commit's logs, and record the patterns used."""
+    compiled = []
+    for p in patterns:
+        try:
+            compiled.append(re.compile(p))
+        except re.error as e:
+            sys.exit(f"tests: pattern {p!r}: {e}")
+        if not compiled[-1].groups:
+            sys.exit(f"tests: pattern {p!r} captures nothing; put the count in a group, like (\\d+) passed")
+    for d in data["days"]:
+        commit = last_green(data, d["day"])
+        if commit and (n := count_tests(data["repo"], commit, compiled)) is not None:
+            d["tests"] = n
+            d["tests_pattern"] = " || ".join(patterns)
+    return data
+
+
+# Source files for the built-in line count, by extension; everything else (docs, data, lockfiles) is left out.
+SOURCE = {"c", "cc", "cpp", "cs", "cxx", "dart", "ex", "exs", "fs", "go", "h", "hpp", "java", "js", "jsx", "kt",
+          "kts", "lua", "m", "mjs", "cjs", "mm", "php", "pl", "py", "rb", "rs", "scala", "sh", "swift", "ts", "tsx",
+          "vb", "vue", "svelte", "zig"}
+# Test files by path, across ecosystems: test directories, and test_*, *_test, *.test, *.spec, *Test(s), *Spec.
+TEST_PATH = re.compile(r"(^|/)(tests?|__tests__|spec|specs|e2e|testing)/|(^|/)test_[^/]*$|[^/]*(_test|_tests|_spec|"
+                       r"\.test|\.spec|Tests?|Spec)\.[^/.]+$")
+
+
+def mise_tasks(root):
+    """Task names the checkout's mise config defines; empty when mise is missing or has none."""
+    done = subprocess.run(["mise", "tasks", "ls", "--json"], cwd=root, capture_output=True, text=True,
+                          env=mise_env(root))
+    if done.returncode:
+        return set()
+    try:
+        return {t["name"] for t in json.loads(done.stdout)}
+    except (ValueError, KeyError, TypeError):
+        return set()
+
+
+def mise_env(root):
+    # A throwaway worktree is a new path to mise; trust its config for this run only.
+    return os.environ | {"MISE_TRUSTED_CONFIG_PATHS": str(root), "MISE_YES": "1"}
+
+
+def mise_json(root, task, timeout):
+    """Run `mise run TASK` and read the last line of its output that is a JSON object."""
+    try:
+        done = subprocess.run(["mise", "run", task], cwd=root, capture_output=True, text=True, timeout=timeout,
+                              env=mise_env(root))
+    except subprocess.TimeoutExpired:
+        print(f"measure: mise run {task} took longer than {timeout}s", file=sys.stderr)
+        return {}
+    for line in reversed(done.stdout.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except ValueError:
+                break
+    print(f"measure: mise run {task} printed no JSON object (exit {done.returncode})", file=sys.stderr)
+    return {}
+
+
+def count_lines(root):
+    """Code and test lines over the source files git tracks, by extension and test path. A rough, language-agnostic
+    split; a repository that wants its own defines `mise run loc`."""
+    files = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True, check=True).stdout.split(b"\0")
+    code = test = 0
+    for name in filter(None, (f.decode(errors="replace") for f in files)):
+        if name.rsplit(".", 1)[-1].lower() not in SOURCE or "." not in name:
+            continue
+        try:
+            with open(Path(root) / name, "rb") as f:
+                n = sum(1 for line in f if line.strip())
+        except OSError:
+            continue
+        if TEST_PATH.search(name):
+            test += n
+        else:
+            code += n
+    return {"code_lines": code, "test_lines": test}
+
+
+def measure(data, checkout, timeout=1800):
+    """Coverage and code against test lines at the last day's last green commit, from a detached worktree of
+    `checkout`. `mise run codecov` and `mise run loc` are used when the checkout defines them; lines fall back to
+    count_lines. Adds the figures to the last day."""
+    day = data["days"][-1]
+    commit = last_green(data, day["day"])
+    if not commit:
+        print(f"measure: no green commit on {day['day']}", file=sys.stderr)
+        return data
+    sha = commit["sha"]
+    git = lambda *a, **k: subprocess.run(["git", "-C", checkout, *a], capture_output=True, text=True, **k)
+    if git("cat-file", "-e", f"{sha}^{{commit}}").returncode:
+        git("fetch", "-q", "origin", sha)
+    root = Path(tempfile.mkdtemp(prefix="ci-health-")) / "tree"
+    added = git("worktree", "add", "-q", "--detach", str(root), sha)
+    if added.returncode:
+        sys.exit(f"measure: cannot check out {sha[:12]} in {checkout}: {added.stderr.strip()}")
+    try:
+        tasks = mise_tasks(root)
+        found = {}
+        if "codecov" in tasks:
+            found |= {k: v for k, v in mise_json(root, "codecov", timeout).items() if k == "coverage_pct"}
+        if "loc" in tasks:
+            found |= {k: v for k, v in mise_json(root, "loc", timeout).items() if k in ("code_lines", "test_lines")}
+        if "code_lines" not in found or "test_lines" not in found:
+            found |= count_lines(root)
+    finally:
+        git("worktree", "remove", "--force", str(root))
+    if found.get("code_lines"):
+        found["test_ratio"] = round(found["test_lines"] / found["code_lines"], 2)
+    day |= {k: v for k, v in found.items() if isinstance(v, (int, float))}
+    day["measured_sha"] = sha[:12]
+    return data
 
 
 def number(title):
@@ -294,13 +427,16 @@ def hangs(data, floor=60):
 
 def summary(data):
     jobs = [k for k in data["jobs"] if any(k in d for d in data["days"])]
-    head = ["Day", "Commits", "Failed", "Wall (7d)", "Wall", *[data["jobs"][k] for k in jobs], "Tests"]
+    extra = [k for k in ("tests", "coverage_pct", "code_lines", "test_lines") if any(k in d for d in data["days"])]
+    titles = {"tests": "Tests", "coverage_pct": "Coverage %", "code_lines": "Code lines", "test_lines": "Test lines"}
+    head = ["Day", "Commits", "Failed", "Wall (7d)", "P95 (7d)", "Wall", *[data["jobs"][k] for k in jobs], *[titles[k] for k in extra]]
     lines = ["| " + " | ".join(head) + " |", "|" + " --- |" * len(head)]
     fmt = lambda v: "" if v is None else f"{v:.1f}" if isinstance(v, float) else str(v)
+    wall = lambda d: fmt(d.get("wall_min_7d")) + (f" ± {fmt(float(d['wall_spread_7d']))}" if "wall_spread_7d" in d else "")
     for d in data["days"]:
-        lines.append("| " + " | ".join([d["day"], fmt(d["commits"]), fmt(d["failed"]), fmt(d.get("wall_min_7d")),
+        lines.append("| " + " | ".join([d["day"], fmt(d["commits"]), fmt(d["failed"]), wall(d), fmt(d.get("wall_p95_7d")),
                                         fmt(d.get("wall_min")), *[fmt(d.get(k)) for k in jobs],
-                                        fmt(d.get("tests"))]) + " |")
+                                        *[fmt(d.get(k)) for k in extra]]) + " |")
     return f"{data['repo']} ({data['branch']}), minutes, medians of green commits:\n\n" + "\n".join(lines)
 
 
@@ -315,14 +451,11 @@ INCIDENTS = {"version": 1, "schema": {"type": "object", "required": ["day", "rep
                             "url": TEXT, "jobs": TEXT}}}
 
 
-def collection_name(repo):
-    """One collection per repository, named like it: a chart reads one collection, so each repository has its own."""
-    return repo.split("/", 1)[1]
-
-
 def schema(data):
-    fields = {"day": DAY, "repo": TEXT, "workflows": TEXT, "start": DAY, "commits": COUNT, "failed": COUNT, "tests": COUNT,
-              **dict.fromkeys(["wall_min", "wall_min_7d", "execution_min", "wait_min", *data["jobs"]], NUM)}
+    fields = {"day": DAY, "repo": TEXT, "workflows": TEXT, "start": DAY, "measured_sha": TEXT, "tests_pattern": TEXT,
+              **dict.fromkeys(["commits", "failed", "tests", "code_lines", "test_lines"], COUNT),
+              "coverage_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+              **dict.fromkeys(["wall_min", "wall_min_7d", "wall_spread_7d", "wall_p95_7d", "execution_min", "wait_min", "test_ratio", *data["jobs"]], NUM)}
     return {"version": 1, "schema": {"type": "object", "required": ["day", "repo", "commits"], "properties": fields}}
 
 
@@ -347,7 +480,7 @@ def incident_rows(incidents):
             value["url"] = link(i["ref"])
         # Several changes can land on one day: the change itself keeps their ids apart.
         change = slug(i.get("ref") or i["title"]).replace("_", "-")
-        rows.append({"id": f"{collection_name(i['repo'])}/{i['day']}/{change}", "value": value})
+        rows.append({"id": f"{i['day']}/{change}", "value": value})
     ids = [r["id"] for r in rows]
     if len(ids) != len(set(ids)):
         sys.exit(f"incidents: the same change twice on one day: {sorted({x for x in ids if ids.count(x) > 1})}")
@@ -356,7 +489,9 @@ def incident_rows(incidents):
 
 def records(data, incidents=()):
     """One update_data batch: the repository's days, keyed by day so a refresh replaces them, and any incidents."""
-    batch = [{"collection": collection_name(data["repo"]), "schema": schema(data),
+    if any(i.get("repo") not in (None, data["repo"]) for i in incidents):
+        sys.exit(f"incidents: every incident must be for {data['repo']}, the repository of this document")
+    batch = [{"collection": "days", "schema": schema(data),
               "upsert": [{"id": d["day"], "value": d} for d in data["days"]]}]
     if incidents:
         batch.append({"collection": "incidents", "schema": INCIDENTS, "upsert": incident_rows(incidents)})
@@ -367,28 +502,34 @@ def chart(mapping):
     return {"type": "chart", "text": json.dumps(mapping, indent=1)}
 
 
-def section(data):
-    """A repository's heading and charts, bound to its collection."""
-    repo, name = data["repo"], collection_name(data["repo"])
+def charts(data):
+    """The wall-time and test charts, bound to the document's days."""
     # Job names change as CI is reworked: draw the jobs of the last three days with green commits; older ones
     # stay in the data.
     recent = [d for d in data["days"] if d.get("wall_min") is not None][-3:]
     jobs = [k for k in data["jobs"] if any(k in d for d in recent)] or list(data["jobs"])
     x = {"field": "day", "type": "date", "label": "Day"}
-    blocks = [{"type": "heading", "level": 2, "text": repo},
-              chart({"version": 1, "type": "line", "collection": name, "title": f"{name}: wall time on {data['branch']}",
+    blocks = [chart({"version": 1, "type": "line", "collection": "days", "title": f"Wall time on {data['branch']}",
                      "x": x, "missing": "connect",
                      "y": [{"field": "wall_min_7d", "label": "Total wall time, 7-day median", "unit": "min"},
-                           *[{"field": k, "label": data["jobs"][k], "unit": "min"} for k in jobs[:7]]]}),
-              chart({"version": 1, "type": "line", "collection": name, "title": f"{name}: tests", "x": x,
+                           {"field": "wall_p95_7d", "label": "Total wall time, 7-day P95", "unit": "min"},
+                           *[{"field": k, "label": data["jobs"][k], "unit": "min"} for k in jobs[:6]]]}),
+              chart({"version": 1, "type": "line", "collection": "days", "title": "Tests", "x": x,
                      "missing": "connect", "y": [{"field": "tests", "label": "Tests"}]})]
-    if len(jobs) > 7:
-        blocks.insert(2, {"type": "paragraph", "text": f"{len(jobs) - 7} more jobs are in the data but not drawn."})
+    if any("code_lines" in d for d in data["days"]):
+        blocks.append(chart({"version": 1, "type": "line", "collection": "days", "title": "Code and test lines",
+                             "x": x, "missing": "connect", "y": [{"field": "code_lines", "label": "Code lines"},
+                                                                 {"field": "test_lines", "label": "Test lines"}]}))
+    if any("coverage_pct" in d for d in data["days"]):
+        blocks.append(chart({"version": 1, "type": "line", "collection": "days", "title": "Test coverage", "x": x,
+                             "missing": "connect", "y": [{"field": "coverage_pct", "label": "Coverage", "unit": "%"}]}))
+    if len(jobs) > 6:
+        blocks.insert(1, {"type": "paragraph", "text": f"{len(jobs) - 6} more jobs are in the data but not drawn."})
     return blocks
 
 
 def changelog(incidents, limit=5):
-    """The latest incidents as list items, newest first: day, repository, the change linked, its effect and why."""
+    """The latest incidents as list items, newest first: the day, the change linked, its effect and why."""
     rows = incidents.get("records", incidents) if isinstance(incidents, dict) else incidents
     rows = [r.get("value", r) for r in rows]
     blocks = []
@@ -400,41 +541,76 @@ def changelog(incidents, limit=5):
         day = dt.date.fromisoformat(i["day"]).strftime("%-d %b %Y")
         url = i.get("url") or link(i.get("ref"))
         blocks.append({"type": "list-item", "inline": [
-            {"text": f"{day}, {collection_name(i['repo'])}: ", "marks": {"bold": True}},
+            {"text": f"{day}: ", "marks": {"bold": True}},
             {"text": i["title"], "marks": {"link": url} if url else {}},
             {"text": f" ({effect}). {i['why']}", "marks": {}}]})
     return blocks or [{"type": "paragraph", "text": "No incident recorded yet."}]
 
 
-def create_document(datas, incidents=()):
-    """create_doc arguments for a new CI health document: intent, how to read it, the incidents, then one section
-    per repository."""
-    repos = ", ".join(d["repo"] for d in datas)
+def create_document(data, incidents=()):
+    """create_doc arguments for a repository's CI health document: intent, how to read it, the charts, then the
+    incidents."""
+    repo, name = data["repo"], data["repo"].split("/", 1)[1]
     blocks = [
-        {"type": "paragraph", "text": "How long a push to main waits for CI, and how many tests it runs. The goal is "
-         "short wall time: the time from the first job starting to the last one finishing, not the minutes the "
-         "jobs add up to, so running checks in parallel is one way to bring it down."},
+        {"type": "paragraph", "text": f"How long a push to {data['branch']} in {repo} waits for CI, and how many tests "
+         "it runs. The goal is short wall time: the time from the first job starting to the last one finishing, not "
+         "the minutes the jobs add up to, so running checks in parallel is one way to bring it down."},
         {"type": "paragraph", "inline": [
             {"text": "Reading the charts: ", "marks": {"bold": True}},
-            {"text": "one point per day, medians over green commits in minutes. The first line is the total wall time, "
-             "the median over the last 7 days; the others are each parallel job on its own, per day. Lower is better. "
+            {"text": "one point per day, over green commits, in minutes. The first two lines are the total wall time over "
+             "the last 7 days: the median, and the P95 that shows the slow tail. The others are each parallel job "
+             "on its own, the median per day. Lower is better. "
              "Runner queueing before the first job is left out. Data from GitHub Actions, refreshed daily by the "
              "ci-health skill (npx skills@latest add uberblick-ai/skills).", "marks": {}}]},
+        *charts(data),
         {"type": "heading", "level": 2, "text": "Incidents"},
         {"type": "paragraph", "text": "The latest steps in total wall time, up or down, and the change behind each."},
         *changelog(list(incidents)),
     ]
-    for data in datas:
-        blocks += section(data)
-    names = [collection_name(d["repo"]) for d in datas]
-    names = " and ".join(filter(None, [", ".join(names[:-1]), names[-1]]))
     return {"title": "CI health",
-            "description": f"How long CI takes on main in {names}: daily GitHub Actions wall time per parallel job and "
-                           "in total, test counts, and the incidents that made CI slower or faster. Data in the "
-                           "document's collections, refreshed daily by the ci-health skill.",
-            "tldr": f"Tracks how long a push to main waits for CI in {names}, how many tests run, and which changes "
-                    "moved it.",
+            "description": f"How long CI takes on {data['branch']} in {repo}: daily GitHub Actions wall time per "
+                           "parallel job and in total, test counts, and the incidents that made CI slower or faster. "
+                           "Data in the document's days and incidents, refreshed by the ci-health skill.",
+            "tldr": f"Tracks how long a push to {data['branch']} in {name} waits for CI, how many tests run, and which "
+                    "changes moved it.",
             "blocks": blocks}
+
+
+def ub_call(tool, arguments, checkout, timeout=300):
+    """Call one Uberblick MCP tool through `ub mcp serve` in `checkout`, for a host that has the `ub` command but not
+    the uberblick MCP tools. The server serves the workspace that checkout is bound to."""
+    try:
+        server = subprocess.Popen(["ub", "mcp", "serve"], cwd=checkout, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  text=True)
+    except OSError as e:
+        sys.exit(f"ub: {e}")
+
+    def ask(n, method, params):
+        server.stdin.write(json.dumps({"jsonrpc": "2.0", "id": n, "method": method, "params": params}) + "\n")
+        server.stdin.flush()
+        for line in server.stdout:  # one JSON-RPC message per line; skip the server's notifications
+            message = json.loads(line) if line.strip().startswith("{") else {}
+            if message.get("id") == n:
+                if "error" in message:
+                    sys.exit(f"ub {method}: {message['error'].get('message')}")
+                return message["result"]
+        sys.exit(f"ub mcp serve stopped before answering {method}; run `ub doctor` in {checkout}")
+
+    try:
+        ask(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                              "clientInfo": {"name": "ci-health", "version": "1.0"}})
+        server.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
+        result = ask(2, "tools/call", {"name": tool, "arguments": arguments})
+    finally:
+        server.stdin.close()
+        try:
+            server.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            server.kill()
+    text = "\n".join(c.get("text", "") for c in result.get("content", []) if c.get("type") == "text")
+    if result.get("isError"):
+        sys.exit(f"ub {tool}: {text}")
+    return text
 
 
 def load(path):
@@ -456,19 +632,36 @@ def main():
                    help="count only commits that ran this workflow (repeatable); default every push workflow")
     c.add_argument("--start", type=dt.date.fromisoformat,
                    help="ignore runs before this UTC day, such as the day CI was reworked or re-enabled")
-    c.add_argument("--no-tests", action="store_true", help="skip reading job logs for the test count")
     s = commands.add_parser("shifts")
     s.add_argument("data")
     s.add_argument("--limit", type=int, default=5)
     commands.add_parser("summary").add_argument("data")
+    lg = commands.add_parser("logs", help="save a day's job logs for reading")
+    lg.add_argument("data")
+    lg.add_argument("--out", required=True)
+    lg.add_argument("--day", help="default the last day")
+    t = commands.add_parser("tests", help="set each day's test count from the job logs, in place")
+    t.add_argument("data")
+    t.add_argument("--pattern", action="append", required=True,
+                   help="regex for a line reporting tests, the count in a group (repeatable)")
+    m = commands.add_parser("measure", help="add coverage and code/test lines to the last day, in place")
+    m.add_argument("data")
+    m.add_argument("--checkout", required=True, help="a local clone of the repository")
+    m.add_argument("--timeout", type=int, default=1800, help="seconds each mise task may take")
     r = commands.add_parser("records")
     r.add_argument("data")
     r.add_argument("incidents", nargs="?")
+    r.add_argument("--doc", help="the document's uuid: print update_data arguments instead of the operations alone")
     n = commands.add_parser("create")
-    n.add_argument("data", nargs="+")
+    n.add_argument("data")
     n.add_argument("--incidents")
-    commands.add_parser("section").add_argument("data")
+    n.add_argument("--tag", action="append", default=[], help="a catalog tag id from list_tags")
+    commands.add_parser("charts").add_argument("data")
     commands.add_parser("changelog").add_argument("incidents")
+    u = commands.add_parser("ub", help="call an Uberblick MCP tool through `ub mcp serve`")
+    u.add_argument("tool")
+    u.add_argument("arguments", nargs="?", help="the tool's arguments: inline JSON or a JSON file (default none)")
+    u.add_argument("--checkout", default=".", help="a checkout bound to the workspace (default here)")
     args = parser.parse_args()
     if args.command == "collect":
         if args.day and (args.since or args.until):
@@ -476,22 +669,45 @@ def main():
         if not re.fullmatch(r"[\w.-]+/[\w.-]+", args.repo):
             sys.exit(f"--repo {args.repo}: expected OWNER/NAME")
         try:
-            out = collect(args.repo, *window(args), tests=not args.no_tests, required=args.workflow,
+            out = collect(args.repo, *window(args), required=args.workflow,
                           floor=args.start)
         except RuntimeError as e:
             sys.exit(str(e))
     elif args.command == "shifts":
         data = load(args.data)
         out = shifts(data, args.limit) + hangs(data)
+    elif args.command == "logs":
+        try:
+            out = save_logs(load(args.data), args.out, args.day)
+        except RuntimeError as e:
+            sys.exit(str(e))
+    elif args.command == "tests":
+        Path(args.data).write_text(json.dumps(add_tests(load(args.data), args.pattern), indent=1))
+        return
+    elif args.command == "measure":
+        Path(args.data).write_text(json.dumps(measure(load(args.data), args.checkout, args.timeout), indent=1))
+        return
     elif args.command == "summary":
         print(summary(load(args.data)))
         return
     elif args.command == "records":
         out = records(load(args.data), load(args.incidents) if args.incidents else ())
+        if args.doc:
+            out = {"uuid": args.doc, "operations": out}
     elif args.command == "create":
-        out = create_document([load(p) for p in args.data], load(args.incidents) if args.incidents else ())
-    elif args.command == "section":
-        out = section(load(args.data))
+        out = create_document(load(args.data), load(args.incidents) if args.incidents else ())
+        if args.tag:
+            out["tags"] = args.tag
+    elif args.command == "charts":
+        out = charts(load(args.data))
+    elif args.command == "ub":
+        given = args.arguments or "{}"
+        try:
+            arguments = json.loads(given) if given.lstrip().startswith("{") else load(given)
+        except ValueError as e:
+            sys.exit(f"ub {args.tool}: {e}")
+        print(ub_call(args.tool, arguments, args.checkout))
+        return
     else:
         out = changelog(load(args.incidents))
     print(json.dumps(out, indent=1, ensure_ascii=False))

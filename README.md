@@ -1,7 +1,8 @@
 # Uberblick skills
 
 Agent skills for working with [Uberblick](https://github.com/uberblick-ai/uberblick-2)
-and [ub-agents](https://agents.uberblick.ai). Each skill is a folder with a
+and [ub-agents](https://agents.uberblick.ai). Browse them at
+[skills.uberblick.ai](https://skills.uberblick.ai). Each skill is a folder with a
 `SKILL.md` that follows the
 [Agent Skills specification](https://agentskills.io/specification), so it works
 in Claude Code, Codex, Cursor, OpenCode and every other agent the
@@ -49,7 +50,7 @@ Skills for repositories that run the [ub-agents](https://agents.uberblick.ai) lo
 Repository maintenance, with no release or delivery-loop requirement. Plugin: `maintenance`.
 
 - **[backlog-grooming](skills/maintenance/backlog-grooming/SKILL.md)**: Review all issues, a milestone or a project against current deliveries and available product intent. Challenge duplication and excess scope, resolve decisions in chat, and produce the “Less work. More value.” report with estimates, blockers and optional loop eligibility.
-- **[ci-health](skills/maintenance/ci-health/SKILL.md)**: Track CI on main from GitHub Actions: the median wall time a push waits, split per parallel job with the total as the headline, the number of tests, and the changes that moved CI time up or down. Needs only `python3` and an authenticated `gh`; with the Uberblick MCP server it stores each day in a "CI health" document with charts and an incident changelog.
+- **[ci-health](skills/maintenance/ci-health/SKILL.md)**: Track CI on main from GitHub Actions for any repository: the median wall time a push waits, split per parallel job with the total as the headline, its spread and P95, the number of tests, optionally coverage and code against test lines, and the changes that moved CI time up or down. Needs only `python3` and an authenticated `gh`; with the Uberblick MCP tools or the `ub` command it stores each day in the repository's own "CI health" document with charts and an incident changelog.
 
 ## Contributing
 

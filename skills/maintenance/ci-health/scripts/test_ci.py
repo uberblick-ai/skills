@@ -1,6 +1,10 @@
-"""Checks for ci.py that need no network: test counting, step detection, records and the document."""
+"""Checks for ci.py that need no network: test counting, line counts, step detection, records and the document."""
 
 import json
+import os
+import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 import sys
@@ -23,26 +27,21 @@ def commit(n, wall, day="2026-10-01", ok=True, title=None):
 
 
 class Tests(unittest.TestCase):
-    def test_vitest_summaries_add_up_across_packages(self):
+    def test_patterns_sum_every_count_they_capture(self):
         text = log("packages/cli test:       Tests  120 passed | 2 skipped (122)",
                    "packages/web test:       Tests  1 failed | 300 passed (301)",
-                   "\x1b[2m      Tests \x1b[22m \x1b[1m\x1b[32m5 passed\x1b[39m\x1b[22m\x1b[90m (5)\x1b[39m")
-        self.assertEqual(ci.tests_in(text), 426)
+                   "\x1b[2m      Tests \x1b[22m \x1b[1m\x1b[32m5 passed\x1b[39m\x1b[22m\x1b[90m (5)\x1b[39m",
+                   "Lint passed")
+        self.assertEqual(ci.tests_in(text, [re.compile(r"\bTests\s.*?(\d+) passed")]), 425)
 
-    def test_playwright(self):
-        self.assertEqual(ci.tests_in(log("Running 80 tests using 2 workers", "  2 skipped", "  1 flaky",
-                                         "  77 passed (3.4m)")), 78)
+    def test_several_patterns_and_groups(self):
+        text = log("test result: ok. 12 passed; 1 failed; 1 ignored; 0 measured",
+                   "Passed!  - Failed:     0, Passed:    42, Skipped:     1, Total:    43")
+        patterns = [re.compile(r"test result: \w+\. (\d+) passed; (\d+) failed"), re.compile(r"Passed:\s+(\d+),")]
+        self.assertEqual(ci.tests_in(text, patterns), 55)
 
-    def test_unittest_drops_skipped_and_its_own_marks(self):
-        text = log("........s....", "-" * 70, "Ran 13 tests in 2.000s (4 workers)", "", "OK (skipped=1)")
-        self.assertEqual(ci.tests_in(text), 12)
-
-    def test_node_runner(self):
-        self.assertEqual(ci.tests_in(log("ℹ tests 40", "ℹ suites 3", "ℹ skipped 2")), 38)
-        self.assertEqual(ci.tests_in(log("Run node --test --test-reporter=dot", "..........X.....")), 16)
-
-    def test_pytest(self):
-        self.assertEqual(ci.tests_in(log("======= 3 failed, 97 passed, 4 skipped in 12.30s =======")), 100)
+    def test_no_summary(self):
+        self.assertIsNone(ci.tests_in(log("Lint passed", "done"), [re.compile(r"Ran (\d+) tests")]))
 
     def test_log_read_retries_when_gh_refuses_escapes(self):
         calls = []
@@ -55,13 +54,50 @@ class Tests(unittest.TestCase):
             return b"Ran 3 tests in 0.1s"
         real, ci.gh = ci.gh, fake
         try:
-            self.assertEqual(ci.tests_in(ci.job_log("o/r", 1)), 3)
+            self.assertEqual(ci.tests_in(ci.job_log("o/r", 1), [re.compile(r"Ran (\d+) tests")]), 3)
         finally:
             ci.gh = real
         self.assertEqual(calls, [(), ("--allow-escape-sequences",)])
 
-    def test_no_summary(self):
-        self.assertIsNone(ci.tests_in(log("Lint passed", "done")))
+    def test_tests_per_day_count_a_matrix_once(self):
+        c = commit(1, 5.0)
+        c["jobs"] = [{"id": i, "workflow": "CI", "name": f"test (py{v})", "min": 5.0} for i, v in ((1, "3.11"), (2, "3.14"))]
+        c["jobs"].append({"id": 3, "workflow": "CI", "name": "lint", "min": 1.0})
+        data = {"repo": "o/r", "days": [{"day": "2026-10-01"}, {"day": "2026-10-02"}], "commits": [c]}
+        logs = {1: "Ran 10 tests in 1s", 2: "Ran 12 tests in 1s", 3: "All checks passed"}
+        real, ci.job_log = ci.job_log, lambda repo, job: logs[job]
+        try:
+            ci.add_tests(data, [r"Ran (\d+) tests"])
+        finally:
+            ci.job_log = real
+        self.assertEqual(data["days"][0]["tests"], 12)
+        self.assertEqual(data["days"][0]["tests_pattern"], r"Ran (\d+) tests")
+        self.assertNotIn("tests", data["days"][1], "a day without a green commit has no count")
+        with self.assertRaises(SystemExit):
+            ci.add_tests(data, [r"Ran \d+ tests"])
+
+    def test_test_paths_across_languages(self):
+        tests = ["tests/test_app.py", "src/app_test.go", "web/button.test.tsx", "App.Tests/LoginTests.cs",
+                 "spec/models/user_spec.rb", "crates/core/tests/parse.rs", "src/FooTest.java"]
+        code = ["src/app.py", "src/main.rs", "App/Login.cs", "web/button.tsx", "src/latest.py"]
+        self.assertEqual([t for t in tests if not ci.TEST_PATH.search(t)], [])
+        self.assertEqual([c for c in code if ci.TEST_PATH.search(c)], [])
+
+    def test_count_lines_splits_code_and_tests(self):
+        with tempfile.TemporaryDirectory() as root:
+            for name, text in {"src/app.py": "a = 1\n\nb = 2\n", "tests/test_app.py": "assert 1\n",
+                               "README.md": "words\n" * 50}.items():
+                (Path(root) / name).parent.mkdir(parents=True, exist_ok=True)
+                (Path(root) / name).write_text(text)
+            subprocess.run(["git", "init", "-q", root], check=True)
+            subprocess.run(["git", "-C", root, "add", "."], check=True)
+            self.assertEqual(ci.count_lines(root), {"code_lines": 2, "test_lines": 1})
+
+    def test_tail_and_spread(self):
+        walls = [10.0, 11.0, 12.0, 13.0, 30.0]
+        self.assertEqual((ci.median(walls), ci.p95(walls), ci.spread(walls)), (12.0, 30.0, 1.0))
+        self.assertEqual(ci.p95(range(1, 41)), 38)
+        self.assertIsNone(ci.spread([5.0]))
 
     def test_shift_found_with_its_suspects(self):
         commits = [commit(n, 5.0) for n in range(10)] + [commit(n, 9.0, "2026-10-02") for n in range(10, 20)]
@@ -81,6 +117,29 @@ class Tests(unittest.TestCase):
         self.assertEqual([(h["commits"], h["first"]["pr"], h["last"]["pr"], h["after"]["pr"]) for h in found],
                          [(3, 5, 7, 8)])
 
+    def test_ub_bridge_calls_one_tool(self):
+        server = """#!/usr/bin/env python3
+import json, sys
+assert sys.argv[1:] == ["mcp", "serve"]
+for line in sys.stdin:
+    m = json.loads(line)
+    if "id" not in m:
+        continue
+    print(json.dumps({"jsonrpc": "2.0", "method": "notifications/message", "params": {}}), flush=True)
+    result = {"content": [{"type": "text", "text": json.dumps(m["params"].get("arguments"))}]} \\
+        if m["method"] == "tools/call" else {"capabilities": {}}
+    print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": result}), flush=True)
+"""
+        with tempfile.TemporaryDirectory() as bin_:
+            (Path(bin_) / "ub").write_text(server)
+            (Path(bin_) / "ub").chmod(0o755)
+            path = os.environ["PATH"]
+            os.environ["PATH"] = f"{bin_}:{path}"
+            try:
+                self.assertEqual(json.loads(ci.ub_call("search", {"query": "CI health"}, bin_)), {"query": "CI health"})
+            finally:
+                os.environ["PATH"] = path
+
     def test_records_and_document(self):
         data = {"repo": "o/r", "branch": "main", "jobs": {"ci_tests_min": "CI / tests"},
                 "days": [{"day": "2026-10-01", "repo": "o/r", "commits": 3, "failed": 0, "wall_min": 5.0,
@@ -88,16 +147,24 @@ class Tests(unittest.TestCase):
         incidents = [{"day": "2026-10-01", "repo": "o/r", "direction": "faster", "before_min": 9, "after_min": 5,
                       "title": "Split the tests", "ref": "o/r#7", "why": "Two jobs instead of one."}]
         batch = ci.records(data, incidents)
-        self.assertEqual([b["collection"] for b in batch], ["r", "incidents"])
+        self.assertEqual([b["collection"] for b in batch], ["days", "incidents"])
         self.assertIn("ci_tests_min", batch[0]["schema"]["schema"]["properties"])
-        self.assertEqual(batch[1]["upsert"][0]["id"], "r/2026-10-01/o-r-7")
+        self.assertEqual(batch[1]["upsert"][0]["id"], "2026-10-01/o-r-7")
         same_day = incidents + [dict(incidents[0], ref="abc123", title="Drop macOS")]
-        self.assertEqual([r["id"] for r in ci.incident_rows(same_day)], ["r/2026-10-01/o-r-7", "r/2026-10-01/abc123"])
+        self.assertEqual([r["id"] for r in ci.incident_rows(same_day)], ["2026-10-01/o-r-7", "2026-10-01/abc123"])
         self.assertEqual(batch[1]["upsert"][0]["value"]["url"], "https://github.com/o/r/pull/7")
-        doc = ci.create_document([data], incidents)
+        with self.assertRaises(SystemExit):
+            ci.records(data, [dict(incidents[0], repo="o/other")])
+        doc = ci.create_document(data, incidents)
+        types = [b["type"] for b in doc["blocks"]]
+        self.assertLess(types.index("chart"), types.index("heading"), "incidents sit below the charts")
         charts = [json.loads(b["text"]) for b in doc["blocks"] if b["type"] == "chart"]
-        self.assertEqual([c["collection"] for c in charts], ["r", "r"])
-        self.assertEqual(charts[0]["y"][0]["field"], "wall_min_7d")
+        self.assertEqual([c["collection"] for c in charts], ["days", "days"])
+        data["days"][0] |= {"code_lines": 900, "test_lines": 300, "coverage_pct": 81.5}
+        self.assertEqual([json.loads(b["text"])["title"] for b in ci.charts(data) if b["type"] == "chart"],
+                         ["Wall time on main", "Tests", "Code and test lines", "Test coverage"])
+        self.assertIn("coverage_pct", ci.schema(data)["schema"]["properties"])
+        self.assertEqual([y["field"] for y in charts[0]["y"][:2]], ["wall_min_7d", "wall_p95_7d"])
         self.assertTrue(all(len(c["y"]) <= 8 for c in charts))
         self.assertTrue(len(doc["description"]) <= 300 and len(doc["tldr"]) <= 300)
         items = [b for b in doc["blocks"] if b["type"] == "list-item"]

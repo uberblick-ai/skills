@@ -1,0 +1,29 @@
+{
+  "groups": ["ub-agents", "maintenance"],
+  "eyebrow": "Agent skills · by Uberblick",
+  "headline": "Agents need feedback, not more instructions.",
+  "lede": "Skills for teams that run coding agents on their GitHub issues. They read what the loop already records, report what happened, and propose the smallest change that fixes it.",
+  "problem": {
+    "title": "A loop that needs you for every item isn't a loop.",
+    "paragraphs": [
+      "Coding agents claim issues, open pull requests and review each other's work. When a day goes well, nobody looks. When it doesn't, the cost hides in retried runs, sent-back PRs and items waiting for a person.",
+      "The evidence is already on GitHub: claims, outcomes, denied commands, retrospectives. Reading it by hand takes longer than the runs did, so it rarely happens.",
+      "These skills read it for you. They name the cause, count what it cost, and propose a fix that removes text or scope instead of adding another rule."
+    ]
+  },
+  "questions": [
+    {"label": "Measure the loop", "question": "How did the loop do yesterday?", "links": [["Skill", "ub-agents-deliver-report", "skills/ub-agents-deliver-report"], ["Docs", "Retrospectives", "https://agents.uberblick.ai/docs/best-practices/retrospectives.html"]]},
+    {"label": "Cut scope", "question": "What can we drop before the next release?", "links": [["Skill", "backlog-grooming", "skills/backlog-grooming"], ["Docs", "Small issues", "https://agents.uberblick.ai/docs/best-practices/small-issues.html"]]},
+    {"label": "Run the loop", "question": "How do I let agents work my issues?", "links": [["Docs", "Installation", "https://agents.uberblick.ai/docs/installation.html"], ["Docs", "Configuration", "https://agents.uberblick.ai/docs/configuration/index.html"]]},
+    {"label": "Contribute", "question": "How do I write a skill for this repository?", "links": [["Guide", "AGENTS.md", "https://github.com/uberblick-ai/skills/blob/main/AGENTS.md"], ["Spec", "Agent Skills specification", "https://agentskills.io/specification"]]}
+  ],
+  "changes": [
+    ["2026-10-10", "Skill", "Added ci-health 1.0 in the Maintenance group: CI wall time, jobs, tests and the changes that moved them."],
+    ["2026-10-10", "Site", "skills.uberblick.ai, one page per skill."],
+    ["2026-10-09", "Skill", "Added backlog-grooming 1.1 in the new Maintenance group."],
+    ["2026-10-09", "Skill", "Added ub-agents-deliver-report, moved here from uberblick-2 and ub-agents."],
+    ["2026-10-09", "Plugin", "One Claude Code plugin per skill group. The old /uberblick plugin is gone."],
+    ["2026-03-07", "Release", "v1.0.0, the first public release."]
+  ],
+  "about": "Uberblick builds <a href=\"https://agents.uberblick.ai\">ub-agents</a>, the loop engineering framework for GitHub. The skills here come from running that loop on our own repositories, ub-agents included. The deliver report screenshots are one of its days."
+}
