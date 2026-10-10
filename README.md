@@ -1,7 +1,8 @@
 # Uberblick skills
 
 Agent skills for working with [Uberblick](https://github.com/uberblick-ai/uberblick-2)
-and [ub-agents](https://agents.uberblick.ai). Each skill is a folder with a
+and [ub-agents](https://agents.uberblick.ai). Browse them at
+[skills.uberblick.ai](https://skills.uberblick.ai). Each skill is a folder with a
 `SKILL.md` that follows the
 [Agent Skills specification](https://agentskills.io/specification), so it works
 in Claude Code, Codex, Cursor, OpenCode and every other agent the

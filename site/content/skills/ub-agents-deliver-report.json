@@ -1,0 +1,68 @@
+{
+  "question": "How did the loop do yesterday?",
+  "short": "One day of loop deliveries: what the loop delivered on its own, which runs were wasted, where a person stepped in, and the few changes that would have saved runs.",
+  "lede": "The loop should move work forward alone and ask a person only for a real decision. This report measures how close one day came, names the causes, and keeps both over time, so a fix that holds and a cause that returns are both visible.",
+  "asks": [
+    "How did the loop do yesterday?",
+    "Run the deliver report for 2026-10-07.",
+    "Why did the preparer keep retrying last Tuesday?"
+  ],
+  "steps": [
+    "Collects one calendar day from GitHub in your local time, yesterday by default: runs, outcomes, comments and merged PRs. A day reads the same whenever it is collected.",
+    "Names a cause for every delivery that needed a person, every wasted run and every reviewer send-back, from run summaries, denied commands and retrospectives.",
+    "Proposes at most four changes, each giving clearer authority, better wording, fewer instructions or more autonomy. It never adds a role, label, gate or checklist.",
+    "Renders the report, opens it in your browser and leaves a JSON record of the day next to it.",
+    "With the Uberblick MCP server, stores the day in a <em>Delivery report</em> document, so KPIs and recurring causes show up over time."
+  ],
+  "facts_title": "What it measures",
+  "facts": [
+    [
+      "Autonomous deliveries",
+      "items the loop delivered with no person stepping in"
+    ],
+    [
+      "Wasted runs",
+      "runs that moved nothing forward, and what they cost"
+    ],
+    [
+      "Human stops",
+      "each time the loop asked a person, and how long it waited"
+    ],
+    [
+      "Cycle time",
+      "first run to delivery, without that wait"
+    ],
+    [
+      "Run time",
+      "agent minutes summed over the day"
+    ],
+    [
+      "Denied commands",
+      "runs that hit a permission denial"
+    ]
+  ],
+  "needs": [
+    [
+      "Needs",
+      "<code>python3</code> and an authenticated <code>gh</code>. Reads GitHub only."
+    ],
+    [
+      "Optional",
+      "the Uberblick MCP server, to keep each day in a document and chart KPIs over time."
+    ],
+    [
+      "Leaves",
+      "<code>report.html</code> in your browser and <code>report.json</code>, a record of the day."
+    ]
+  ],
+  "shots": [
+    {
+      "image": "deliver-top",
+      "caption": "The day at a glance and what to change. uberblick-ai/ub-agents, 7 October 2026."
+    },
+    {
+      "image": "deliver-table",
+      "caption": "Every delivery with its runs by role: green moved forward, amber sent back, red blocked or retried."
+    }
+  ]
+}

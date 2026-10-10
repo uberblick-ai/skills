@@ -50,8 +50,21 @@ pip install skills-ref                     # once
 for s in skills/*/*/; do agentskills validate "$s"; done
 python3 -m compileall -q skills
 python3 scripts/check_marketplace.py       # every skill in its group's plugin
+python3 site/build.py                      # skills.uberblick.ai builds
 npx skills@latest add . --list             # every skill listed, none missing
 ```
+
+## Website
+
+`site/build.py` builds https://skills.uberblick.ai into `site/out` from the
+`SKILL.md` files, the group READMEs and the marketplace, so a new skill gets a
+page without further work. For a fuller page, add
+`site/content/skills/<name>.json` with the question it answers, example asks,
+steps, facts, requirements and screenshots (`site/img/<image>-light.webp` and
+`-dark.webp`); see the existing files for the shape. The overview's text and
+recent changes are in `site/content/home.json`. Cloudflare Pages rebuilds the
+site on every push to `main` that touches `site/`, `skills/`, the marketplace
+or `CHANGELOG.md`.
 
 ## Releasing
 
