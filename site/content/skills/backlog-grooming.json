@@ -1,0 +1,69 @@
+{
+  "question": "What can we drop from this milestone?",
+  "short": "Review all issues, a milestone or a project against what already shipped. Challenge duplicates and excess scope, settle decisions in chat, and get a report of what to cut.",
+  "lede": "Reduce work while keeping clear user value, technical correctness and maintainability. Every issue gets one treatment, a tentative estimate and the evidence behind it. A small backlog is not the goal by itself; necessary work stays.",
+  "asks": [
+    "Groom the backlog for the 1.4 milestone.",
+    "What can we cut to ship sync sooner?",
+    "Which open issues are already delivered?"
+  ],
+  "steps": [
+    "Agrees on the goal and scope in chat: the whole repository, a milestone or a project, and whether you want a smaller backlog or a named outcome sooner.",
+    "Reads every open issue in scope, linked deliveries, blockers and, where one exists, the product corpus.",
+    "Challenges each issue and recommends one treatment with a tentative effort estimate.",
+    "Asks a separate agent to argue against the large or disputed calls, and labels the rows it challenged.",
+    "Settles material choices with you in chat, then renders <em>Less work. More value.</em> as HTML and JSON.",
+    "Changes issues only when you ask. A dry run changes nothing."
+  ],
+  "facts_title": "What it recommends",
+  "facts": [
+    [
+      "Keep",
+      "the work still earns its place"
+    ],
+    [
+      "Narrow",
+      "a smaller outcome is enough"
+    ],
+    [
+      "Combine",
+      "fold it into another issue, scope carried over"
+    ],
+    [
+      "Defer",
+      "not now, not gone"
+    ],
+    [
+      "Close delivered",
+      "it already shipped"
+    ],
+    [
+      "Close unnecessary",
+      "no remaining user, technical or maintenance benefit"
+    ],
+    [
+      "Track only",
+      "a parent or tracker, never queued as a delivery"
+    ]
+  ],
+  "needs": [
+    [
+      "Needs",
+      "<code>python3</code> for the report; <code>gh</code> and <code>git</code> for evidence."
+    ],
+    [
+      "Optional",
+      "a product corpus, and ub-agents loop eligibility per issue."
+    ],
+    [
+      "Leaves",
+      "<code>report.html</code> and <code>report.json</code>. Recommendations, decisions and applied actions stay separate."
+    ]
+  ],
+  "shots": [
+    {
+      "image": "grooming-top",
+      "caption": "The decision table. Example data from the skill's format sample."
+    }
+  ]
+}
