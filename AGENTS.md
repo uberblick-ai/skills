@@ -62,9 +62,10 @@ page without further work. For a fuller page, add
 `site/content/skills/<name>.json` with the question it answers, example asks,
 steps, facts, requirements and screenshots (`site/img/<image>-light.webp` and
 `-dark.webp`); see the existing files for the shape. The overview's text and
-recent changes are in `site/content/home.json`. Cloudflare Pages rebuilds the
-site on every push to `main` that touches `site/`, `skills/`, the marketplace
-or `CHANGELOG.md`.
+recent changes are in `site/content/home.json`. Files in `site/static/`
+(favicons, the Pages `_headers` file) are copied to the site root. Cloudflare
+Pages rebuilds the site on every push to `main` that touches `site/`,
+`skills/`, the marketplace or `CHANGELOG.md`.
 
 ## Releasing
 

@@ -12,7 +12,8 @@ optional site/content/skills/<name>.json adds the question it answers, example
 asks, steps, screenshots and requirements; without it the page still builds
 from the frontmatter. Group names and descriptions come from each group's
 README.md, plugins from .claude-plugin/marketplace.json, the overview's text
-from site/content/home.json.
+from site/content/home.json. Files in site/static (favicons, the Pages _headers
+file) are copied to the site root as they are.
 """
 import html, json, re, shutil, sys
 from pathlib import Path
@@ -121,6 +122,9 @@ def head(title, description, canonical, pre):
 <title>{e(title)}</title>
 <meta name="description" content="{e(description)}">
 <link rel="canonical" href="{canonical}">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/icon.png" type="image/png" sizes="512x512">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -362,7 +366,7 @@ def not_found(groups, skills):
 </body>
 </html>
 '''
-    return re.sub(r'<link rel="canonical"[^>]*>\n', '', body)
+    return re.sub(r'<link rel="canonical"[^>]*>\n', '<meta name="robots" content="noindex">\n', body)
 
 
 def skills_md(groups):
@@ -394,6 +398,7 @@ def main():
     (OUT / 'skills').mkdir()
     shutil.copy(ROOT / 'site.css', OUT / 'assets' / 'site.css')
     shutil.copytree(ROOT / 'img', OUT / 'img')
+    shutil.copytree(ROOT / 'static', OUT, dirs_exist_ok=True)
     missing = [x['image'] for s in skills for x in s.get('shots', [])
                for v in ('light', 'dark') if not (ROOT / 'img' / f'{x["image"]}-{v}.webp').is_file()]
     if missing:
