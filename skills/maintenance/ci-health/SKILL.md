@@ -43,11 +43,15 @@ the document layout are in [references/data.md](references/data.md).
    - the `uberblick` MCP tools (`search`, `get_data`, `update_data`,
      `create_doc`, `insert_block`, `delete_block`, `list_tags`) are in your
      tool list: call them directly;
-   - otherwise the `ub` command is on the PATH: call each tool with
-     `python3 scripts/ci.py ub TOOL 'ARGS' --checkout PATH`, where `ARGS` is
-     the tool's arguments as inline JSON or a JSON file and `PATH` the
-     repository's checkout. It prints the tool's result. When it fails
-     because the checkout is not bound, say so and go on without Uberblick.
+   - otherwise the `ub` command is on the PATH: call a tool with `python3
+     scripts/ci.py ub TOOL 'ARGS' --checkout PATH`, where `ARGS` is the
+     tool's arguments as inline JSON or a JSON file and `PATH` the
+     repository's checkout. Each invocation starts one server, which shows
+     as one agent in the workspace, so put several calls in one file,
+     `[{"tool": ..., "arguments": {...}}]`, and pass it with `--calls`.
+     After a write it waits for the hub to acknowledge before exiting. When
+     it fails because the checkout is not bound, say so and go on without
+     Uberblick.
 
    With neither, steps 8 and 9 are skipped: the table and the incidents are
    the result; say so in one line. With one, `search` for "CI health" in
@@ -102,7 +106,7 @@ the document layout are in [references/data.md](references/data.md).
    ```
 
    It checks out the last green commit in a temporary worktree and adds
-   `code_lines`, `test_lines` and `test_ratio` to the last day, plus
+   `test_ratio` (with `code_lines` and `test_lines`) to the last day, plus
    `coverage_pct` when the checkout defines `mise run codecov`. A `mise run
    loc` task replaces the built-in line count. Without a coverage task,
    mention once that adding one charts coverage too; the conventions are in
@@ -157,9 +161,11 @@ the document layout are in [references/data.md](references/data.md).
 
 9. With a `DOC` that existed before this run, compare its chart blocks with
    `ci.py charts DIR/data.json`: replace a chart whose `y` fields changed
-   (jobs renamed, added or dropped) and insert one that is new (lines or
-   coverage measured for the first time) after the last chart. When there
-   are new incidents, read `incidents` again with `get_data`, write it to
+   (jobs renamed, added or dropped) and insert one that is new (the ratio or
+   coverage measured for the first time) after the last chart. Through
+   `ub`, gather these writes into one `--calls` file; several blocks
+   inserted after the same block, in reverse order, end up in order, so
+   the file needs only ids read before. When there are new incidents, read `incidents` again with `get_data`, write it to
    `DIR/all-incidents.json`, run `ci.py changelog DIR/all-incidents.json`,
    and replace the list items under the "Incidents" heading, below the
    charts, with its blocks. Leave every other block as it is.

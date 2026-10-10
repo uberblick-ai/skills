@@ -151,7 +151,7 @@ of that repository's corpus. It reads top to bottom:
    comes from.
 2. **Charts.** Line charts bound to `days`: wall time (the 7-day median and
    P95 of the total first, then each job of the last three days with green
-   commits, at most six), tests, and, once measured, code against test lines
+   commits, at most six), tests, and, once measured, the test-to-code ratio
    and coverage.
 3. **Incidents.** Below the charts, the latest five, newest first, one list
    item each: the day, the change linked, the direction with the medians

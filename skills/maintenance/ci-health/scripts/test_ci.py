@@ -117,28 +117,40 @@ class Tests(unittest.TestCase):
         self.assertEqual([(h["commits"], h["first"]["pr"], h["last"]["pr"], h["after"]["pr"]) for h in found],
                          [(3, 5, 7, 8)])
 
-    def test_ub_bridge_calls_one_tool(self):
+    def test_ub_bridge_uses_one_server_and_waits_for_sync(self):
         server = """#!/usr/bin/env python3
-import json, sys
+import json, os, sys
 assert sys.argv[1:] == ["mcp", "serve"]
+with open(os.path.join(os.path.dirname(sys.argv[0]), "starts"), "a") as f:
+    f.write("x")
+pending = 1
 for line in sys.stdin:
     m = json.loads(line)
     if "id" not in m:
         continue
     print(json.dumps({"jsonrpc": "2.0", "method": "notifications/message", "params": {}}), flush=True)
-    result = {"content": [{"type": "text", "text": json.dumps(m["params"].get("arguments"))}]} \\
-        if m["method"] == "tools/call" else {"capabilities": {}}
+    if m["method"] == "initialize":
+        result = {"capabilities": {}, "client": m["params"]["clientInfo"]["title"]}
+    elif m["params"]["name"] == "sync_status":
+        result = {"content": [{"type": "text", "text": json.dumps({"unsyncedChanges": pending})}]}
+        pending = 0
+    else:
+        result = {"content": [{"type": "text", "text": json.dumps(m["params"].get("arguments"))}]}
     print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": result}), flush=True)
 """
         with tempfile.TemporaryDirectory() as bin_:
             (Path(bin_) / "ub").write_text(server)
             (Path(bin_) / "ub").chmod(0o755)
-            path = os.environ["PATH"]
-            os.environ["PATH"] = f"{bin_}:{path}"
+            path, poll = os.environ["PATH"], ci.SETTLE_POLL
+            os.environ["PATH"], ci.SETTLE_POLL = f"{bin_}:{path}", 0
             try:
-                self.assertEqual(json.loads(ci.ub_call("search", {"query": "CI health"}, bin_)), {"query": "CI health"})
+                out = ci.ub_calls([{"tool": "search", "arguments": {"query": "CI health"}},
+                                   {"tool": "update_data", "arguments": {"uuid": "u", "operations": []}}], bin_)
             finally:
-                os.environ["PATH"] = path
+                os.environ["PATH"], ci.SETTLE_POLL = path, poll
+            self.assertEqual([json.loads(o["result"]) for o in out],
+                             [{"query": "CI health"}, {"uuid": "u", "operations": []}])
+            self.assertEqual((Path(bin_) / "starts").read_text(), "x", "one server for every call")
 
     def test_records_and_document(self):
         data = {"repo": "o/r", "branch": "main", "jobs": {"ci_tests_min": "CI / tests"},
@@ -160,9 +172,9 @@ for line in sys.stdin:
         self.assertLess(types.index("chart"), types.index("heading"), "incidents sit below the charts")
         charts = [json.loads(b["text"]) for b in doc["blocks"] if b["type"] == "chart"]
         self.assertEqual([c["collection"] for c in charts], ["days", "days"])
-        data["days"][0] |= {"code_lines": 900, "test_lines": 300, "coverage_pct": 81.5}
+        data["days"][0] |= {"code_lines": 900, "test_lines": 300, "test_ratio": 0.33, "coverage_pct": 81.5}
         self.assertEqual([json.loads(b["text"])["title"] for b in ci.charts(data) if b["type"] == "chart"],
-                         ["Wall time on main", "Tests", "Code and test lines", "Test coverage"])
+                         ["Wall time on main", "Tests", "Test to code ratio", "Test coverage"])
         self.assertIn("coverage_pct", ci.schema(data)["schema"]["properties"])
         self.assertEqual([y["field"] for y in charts[0]["y"][:2]], ["wall_min_7d", "wall_p95_7d"])
         self.assertTrue(all(len(c["y"]) <= 8 for c in charts))

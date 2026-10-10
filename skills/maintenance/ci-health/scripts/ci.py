@@ -11,7 +11,7 @@
     ci.py create data.json [--incidents incidents.json] [--tag ID]... > create.json  # create_doc arguments
     ci.py charts data.json > charts.json               # the chart blocks, to replace when the jobs change
     ci.py changelog incidents.json > changelog.json    # the document's Incidents list, latest five
-    ci.py ub TOOL [arguments.json] [--checkout PATH]   # an Uberblick MCP tool through `ub mcp serve`
+    ci.py ub TOOL [ARGS] | --calls calls.json [--checkout PATH]  # Uberblick tools through one `ub mcp serve`
 
 Days are UTC calendar days; the default is yesterday. A commit counts on the day its first push run was
 created. Wall time is the time from the first job starting to the last job finishing, over every workflow the
@@ -30,6 +30,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -516,10 +517,10 @@ def charts(data):
                            *[{"field": k, "label": data["jobs"][k], "unit": "min"} for k in jobs[:6]]]}),
               chart({"version": 1, "type": "line", "collection": "days", "title": "Tests", "x": x,
                      "missing": "connect", "y": [{"field": "tests", "label": "Tests"}]})]
-    if any("code_lines" in d for d in data["days"]):
-        blocks.append(chart({"version": 1, "type": "line", "collection": "days", "title": "Code and test lines",
-                             "x": x, "missing": "connect", "y": [{"field": "code_lines", "label": "Code lines"},
-                                                                 {"field": "test_lines", "label": "Test lines"}]}))
+    if any("test_ratio" in d for d in data["days"]):
+        blocks.append(chart({"version": 1, "type": "line", "collection": "days", "title": "Test to code ratio",
+                             "x": x, "missing": "connect",
+                             "y": [{"field": "test_ratio", "label": "Test lines per code line"}]}))
     if any("coverage_pct" in d for d in data["days"]):
         blocks.append(chart({"version": 1, "type": "line", "collection": "days", "title": "Test coverage", "x": x,
                              "missing": "connect", "y": [{"field": "coverage_pct", "label": "Coverage", "unit": "%"}]}))
@@ -576,41 +577,71 @@ def create_document(data, incidents=()):
             "blocks": blocks}
 
 
-def ub_call(tool, arguments, checkout, timeout=300):
-    """Call one Uberblick MCP tool through `ub mcp serve` in `checkout`, for a host that has the `ub` command but not
-    the uberblick MCP tools. The server serves the workspace that checkout is bound to."""
+SETTLE_POLL = 2  # seconds between sync_status checks after a write
+WRITES = {"create_doc", "update_data", "insert_block", "delete_block", "replace_block", "set_description", "set_tldr",
+          "set_title", "set_tags"}
+
+
+def ub_calls(calls, checkout, timeout=300, settle=60):
+    """Call Uberblick MCP tools through one `ub mcp serve` in `checkout`, for a host that has the `ub` command but not
+    the uberblick MCP tools. The server serves the workspace that checkout is bound to. One server for the whole
+    list keeps the run to one agent in the workspace's activity; after a write it waits up to `settle` seconds for
+    the hub to acknowledge, so the changes leave this machine before the server exits. Stops at the first error."""
     try:
         server = subprocess.Popen(["ub", "mcp", "serve"], cwd=checkout, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   text=True)
     except OSError as e:
         sys.exit(f"ub: {e}")
+    ids = iter(range(1, 1_000_000))
 
-    def ask(n, method, params):
+    def ask(method, params):
+        n = next(ids)
         server.stdin.write(json.dumps({"jsonrpc": "2.0", "id": n, "method": method, "params": params}) + "\n")
         server.stdin.flush()
         for line in server.stdout:  # one JSON-RPC message per line; skip the server's notifications
             message = json.loads(line) if line.strip().startswith("{") else {}
             if message.get("id") == n:
                 if "error" in message:
-                    sys.exit(f"ub {method}: {message['error'].get('message')}")
+                    sys.exit(f"ub {params.get('name', method)}: {message['error'].get('message')}")
                 return message["result"]
         sys.exit(f"ub mcp serve stopped before answering {method}; run `ub doctor` in {checkout}")
 
+    def call(tool, arguments):
+        result = ask("tools/call", {"name": tool, "arguments": arguments})
+        text = "\n".join(c.get("text", "") for c in result.get("content", []) if c.get("type") == "text")
+        if result.get("isError"):
+            sys.exit(f"ub {tool}: {text}")
+        return text
+
+    out = []
     try:
-        ask(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
-                              "clientInfo": {"name": "ci-health", "version": "1.0"}})
+        ask("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                           "clientInfo": {"name": "ci-health", "title": "CI health", "version": "1.0"}})
         server.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
-        result = ask(2, "tools/call", {"name": tool, "arguments": arguments})
+        for c in calls:
+            out.append({"tool": c["tool"], "result": call(c["tool"], c.get("arguments", {}))})
+        if any(c["tool"] in WRITES for c in calls):
+            deadline = time.monotonic() + settle
+            while True:
+                try:
+                    status = json.loads(call("sync_status", {}))
+                except ValueError:
+                    break
+                if not status.get("unsyncedChanges") and not status.get("inFlightUpdates"):
+                    break
+                if time.monotonic() > deadline:
+                    print(f"ub: the hub has not acknowledged {status.get('unsyncedChanges')} change(s) after "
+                          f"{settle}s; they are saved locally and sync when a server next runs in {checkout}",
+                          file=sys.stderr)
+                    break
+                time.sleep(SETTLE_POLL)
     finally:
         server.stdin.close()
         try:
             server.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             server.kill()
-    text = "\n".join(c.get("text", "") for c in result.get("content", []) if c.get("type") == "text")
-    if result.get("isError"):
-        sys.exit(f"ub {tool}: {text}")
-    return text
+    return out
 
 
 def load(path):
@@ -658,9 +689,10 @@ def main():
     n.add_argument("--tag", action="append", default=[], help="a catalog tag id from list_tags")
     commands.add_parser("charts").add_argument("data")
     commands.add_parser("changelog").add_argument("incidents")
-    u = commands.add_parser("ub", help="call an Uberblick MCP tool through `ub mcp serve`")
-    u.add_argument("tool")
+    u = commands.add_parser("ub", help="call Uberblick MCP tools through one `ub mcp serve`")
+    u.add_argument("tool", nargs="?", help="one tool; or pass --calls")
     u.add_argument("arguments", nargs="?", help="the tool's arguments: inline JSON or a JSON file (default none)")
+    u.add_argument("--calls", help='a JSON file listing calls, [{"tool": ..., "arguments": {...}}], run in order')
     u.add_argument("--checkout", default=".", help="a checkout bound to the workspace (default here)")
     args = parser.parse_args()
     if args.command == "collect":
@@ -701,12 +733,19 @@ def main():
     elif args.command == "charts":
         out = charts(load(args.data))
     elif args.command == "ub":
-        given = args.arguments or "{}"
-        try:
-            arguments = json.loads(given) if given.lstrip().startswith("{") else load(given)
-        except ValueError as e:
-            sys.exit(f"ub {args.tool}: {e}")
-        print(ub_call(args.tool, arguments, args.checkout))
+        if bool(args.calls) == bool(args.tool):
+            sys.exit("ub: pass one TOOL or --calls FILE")
+        if args.calls:
+            calls = load(args.calls)
+        else:
+            given = args.arguments or "{}"
+            try:
+                calls = [{"tool": args.tool,
+                          "arguments": json.loads(given) if given.lstrip().startswith("{") else load(given)}]
+            except ValueError as e:
+                sys.exit(f"ub {args.tool}: {e}")
+        results = ub_calls(calls, args.checkout)
+        print(results[0]["result"] if args.tool else json.dumps(results, indent=1, ensure_ascii=False))
         return
     else:
         out = changelog(load(args.incidents))

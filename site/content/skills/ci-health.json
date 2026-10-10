@@ -11,7 +11,7 @@
     "Reads GitHub Actions runs on the default branch, grouped by commit, for a UTC day or a backfill of up to 90 days.",
     "Takes the median wall time of green pushes, a 7-day median as the headline with its spread and P95, and each job's median beside it.",
     "Reads the test count off the job logs, with patterns the agent writes for whatever runners the repository uses.",
-    "Optionally measures code against test lines, and coverage when the repository defines <code>mise run codecov</code>.",
+    "Optionally measures the test-to-code ratio, and coverage when the repository defines <code>mise run codecov</code>.",
     "Finds steps in wall time and stretches of hung runs, then names the change behind each from the PRs around it.",
     "With Uberblick, stores the day and any incident in the repository's own <em>CI health</em> document, charts first and incidents below. Without it, prints a table."
   ],
@@ -35,7 +35,7 @@
     ],
     [
       "Code",
-      "code and test lines, and coverage through a mise task"
+      "test lines per code line, and coverage through a mise task"
     ],
     [
       "Incidents",
@@ -49,7 +49,7 @@
     ],
     [
       "Optional",
-      "a local checkout for lines and coverage; the Uberblick MCP tools or the <code>ub</code> command, to keep the figures in a document."
+      "a local checkout for the ratio and coverage; the Uberblick MCP tools or the <code>ub</code> command, to keep the figures in a document."
     ],
     [
       "Leaves",
