@@ -12,8 +12,8 @@
     ]
   },
   "questions": [
-    {"label": "Measure the loop", "question": "How did the loop do yesterday?", "links": [["Skill", "ub-agents-deliver-report", "skills/ub-agents-deliver-report.html"], ["Docs", "Retrospectives", "https://agents.uberblick.ai/docs/best-practices/retrospectives.html"]]},
-    {"label": "Cut scope", "question": "What can we drop before the next release?", "links": [["Skill", "backlog-grooming", "skills/backlog-grooming.html"], ["Docs", "Small issues", "https://agents.uberblick.ai/docs/best-practices/small-issues.html"]]},
+    {"label": "Measure the loop", "question": "How did the loop do yesterday?", "links": [["Skill", "ub-agents-deliver-report", "skills/ub-agents-deliver-report"], ["Docs", "Retrospectives", "https://agents.uberblick.ai/docs/best-practices/retrospectives.html"]]},
+    {"label": "Cut scope", "question": "What can we drop before the next release?", "links": [["Skill", "backlog-grooming", "skills/backlog-grooming"], ["Docs", "Small issues", "https://agents.uberblick.ai/docs/best-practices/small-issues.html"]]},
     {"label": "Run the loop", "question": "How do I let agents work my issues?", "links": [["Docs", "Installation", "https://agents.uberblick.ai/docs/installation.html"], ["Docs", "Configuration", "https://agents.uberblick.ai/docs/configuration/index.html"]]},
     {"label": "Contribute", "question": "How do I write a skill for this repository?", "links": [["Guide", "AGENTS.md", "https://github.com/uberblick-ai/skills/blob/main/AGENTS.md"], ["Spec", "Agent Skills specification", "https://agentskills.io/specification"]]}
   ],
