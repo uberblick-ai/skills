@@ -168,7 +168,9 @@ the document layout are in [references/data.md](references/data.md).
    the file needs only ids read before. When there are new incidents, read `incidents` again with `get_data`, write it to
    `DIR/all-incidents.json`, run `ci.py changelog DIR/all-incidents.json`,
    and replace the list items under the "Incidents" heading, below the
-   charts, with its blocks. Leave every other block as it is.
+   charts, with its blocks. Leave every other block as it is. A block
+   change clears the document's TL;DR, so read it with `get_doc` first and
+   end the writes with `set_tldr` to put it back.
 
 10. Reply with the total wall time (7-day median), the jobs, the tests, any
     coverage and lines, any new incident, and where the day was stored. When
