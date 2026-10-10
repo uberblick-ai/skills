@@ -60,7 +60,9 @@ keeps a candidate only when a change explains it and writes
 
 `ref` is `owner/name#number` or a commit SHA, with `url` for a commit;
 `records` derives `url` from a `#number` reference. The id is
-`NAME/DAY`, so storing an incident again replaces it.
+`NAME/DAY/CHANGE`, the change being `ref` (or the title) in lowercase with
+hyphens, so several changes on one day stay apart and storing an incident
+again replaces it.
 
 ## Records
 
@@ -69,7 +71,7 @@ keeps a candidate only when a change explains it and writes
 | Collection | Key | One record per |
 | --- | --- | --- |
 | `NAME`, the repository's name | `2026-10-09` | day, every field above |
-| `incidents` | `uberblick-2/2026-09-02` | incident |
+| `incidents` | `ub-agents/2026-10-04/uberblick-ai-ub-agents-189` | incident |
 
 Each repository has its own collection because a chart reads one
 collection. The schema lists every job field seen, so a batch that adds a

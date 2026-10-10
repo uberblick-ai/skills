@@ -90,7 +90,9 @@ class Tests(unittest.TestCase):
         batch = ci.records(data, incidents)
         self.assertEqual([b["collection"] for b in batch], ["r", "incidents"])
         self.assertIn("ci_tests_min", batch[0]["schema"]["schema"]["properties"])
-        self.assertEqual(batch[1]["upsert"][0]["id"], "r/2026-10-01")
+        self.assertEqual(batch[1]["upsert"][0]["id"], "r/2026-10-01/o-r-7")
+        same_day = incidents + [dict(incidents[0], ref="abc123", title="Drop macOS")]
+        self.assertEqual([r["id"] for r in ci.incident_rows(same_day)], ["r/2026-10-01/o-r-7", "r/2026-10-01/abc123"])
         self.assertEqual(batch[1]["upsert"][0]["value"]["url"], "https://github.com/o/r/pull/7")
         doc = ci.create_document([data], incidents)
         charts = [json.loads(b["text"]) for b in doc["blocks"] if b["type"] == "chart"]

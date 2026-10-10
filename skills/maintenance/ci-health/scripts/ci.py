@@ -345,7 +345,12 @@ def incident_rows(incidents):
             value["jobs"] = i["jobs"]
         if "url" not in value and link(i.get("ref")):
             value["url"] = link(i["ref"])
-        rows.append({"id": f"{collection_name(i['repo'])}/{i['day']}", "value": value})
+        # Several changes can land on one day: the change itself keeps their ids apart.
+        change = slug(i.get("ref") or i["title"]).replace("_", "-")
+        rows.append({"id": f"{collection_name(i['repo'])}/{i['day']}/{change}", "value": value})
+    ids = [r["id"] for r in rows]
+    if len(ids) != len(set(ids)):
+        sys.exit(f"incidents: the same change twice on one day: {sorted({x for x in ids if ids.count(x) > 1})}")
     return rows
 
 
