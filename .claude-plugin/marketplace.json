@@ -18,11 +18,12 @@
     },
     {
       "name": "maintenance",
-      "description": "Repository-agnostic backlog grooming and scope reduction.",
+      "description": "Repository-agnostic backlog grooming, scope reduction and CI health tracking.",
       "source": "./",
       "strict": false,
       "skills": [
-        "./skills/maintenance/backlog-grooming"
+        "./skills/maintenance/backlog-grooming",
+        "./skills/maintenance/ci-health"
       ]
     }
   ]
