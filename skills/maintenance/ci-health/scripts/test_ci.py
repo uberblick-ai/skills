@@ -203,6 +203,10 @@ for line in sys.stdin:
         self.assertIn("coverage_pct", ci.schema(data)["schema"]["properties"])
         self.assertTrue(all(len(c["y"]) <= 8 for c in charts))
         self.assertTrue(len(doc["description"]) <= 300 and len(doc["tldr"]) <= 300)
+        same_day = [dict(incidents[0], title="Cause", time="2026-10-01T09:00:00Z"),
+                    dict(incidents[0], title="Fix", ref="o/r#8", time="2026-10-01T10:00:00Z")]
+        self.assertEqual([b["inline"][1]["text"] for b in ci.changelog(same_day)], ["Fix", "Cause"],
+                         "newest first within a day, whatever order they come in")
         items = [b for b in doc["blocks"] if b["type"] == "list-item"]
         self.assertIn("Split the tests", items[0]["inline"][1]["text"])
         with self.assertRaises(SystemExit):

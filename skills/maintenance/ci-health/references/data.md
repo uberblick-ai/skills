@@ -22,8 +22,8 @@ attempt's jobs, skipping jobs that were skipped.
 | `late_start_min` | how long after the first job the last job of a minute or more started: runner waits (macOS, a busy pool) or `needs` | median, context only |
 | `commits`, `failed` | | commits whose runs all finished, and how many of them were not green |
 | `tests`, `tests_pattern` | tests the jobs report, and the patterns that read them | from the day's last green commit |
-| `code_lines`, `test_lines`, `test_ratio` | | at the last green commit, by `measure` |
-| `coverage_pct`, `measured_sha` | | the same commit, by `mise run codecov` |
+| `code_lines`, `test_lines`, `test_ratio` | | at the day's last green commit, by `measure` |
+| `coverage_pct`, `measured_sha` | | the same commit, by `mise run codecov`; the last day only |
 
 - A day is a UTC calendar day; a commit belongs to the day its first run was
   created. A commit with a run still going is left for a later collection.
@@ -45,18 +45,17 @@ attempt's jobs, skipping jobs that were skipped.
   integer they capture, on every line that matches, is added up per job,
   except a group named `skipped`, which is subtracted. Timestamps and
   terminal colors are stripped first. Count tests run or passed, not
-  skipped. Jobs that differ only in their matrix values in
-  parentheses run one suite, so they count once, at the largest. Logs are
-  kept 90 days; older days have no `tests`.
+  skipped. Jobs that differ only in their matrix values in parentheses run
+  one suite, so they count once, at the largest. Logs are kept 90 days;
+  older days have no `tests`.
 
 ## Code and coverage
 
 `ci.py measure` checks out the last green commit of the last day in a
 temporary worktree of a local clone and adds its figures to that day; with
 `--every-day` it adds the lines to every day, while coverage, which runs the
-suite, stays on the last day. It
-looks for two `mise` tasks by name and trusts the worktree's mise config for
-that run:
+suite, stays on the last day. It looks for two `mise` tasks by name and
+trusts the worktree's mise config for that run:
 
 | Task | Prints, as the last JSON line of its output | Without it |
 | --- | --- | --- |
@@ -112,23 +111,24 @@ proposes candidates: at each green commit, the median of the eight green
 commits before against the eight from it on; a step moves at least a minute
 and 15 percent, and of nearby steps only the largest stays, placed where
 the means before and after differ most. Its suspects are every commit since
-two green commits before it, failed ones included. It also lists
-hangs: stretches of commits whose CI failed after at least an hour and three
-times the green median, which wall time leaves out as failures. Both list
-only what falls on the collected days. The agent
-keeps a candidate only when a change explains it and writes
-`incidents.json`:
+two green commits before it, failed ones included. It also lists hangs:
+stretches of commits whose CI failed after at least an hour and three times
+the green median, which wall time leaves out as failures. Both list only
+what falls on the collected days. The agent keeps a candidate only when a
+change explains it and writes `incidents.json`:
 
 ```json
-[{"day": "2026-10-04", "repo": "acme/app", "direction": "faster",
-  "before_min": 2.9, "after_min": 1.1, "change_min": -1.8, "change_pct": -62,
-  "title": "Run the test suite on every core and trim slow tests",
-  "ref": "acme/app#189",
-  "why": "Tests run in one worker per core and real-terminal checks wait for output instead of fixed delays."}]
+[{"day": "2026-10-04", "time": "2026-10-04T09:12:31Z", "repo": "acme/app",
+  "direction": "faster", "before_min": 2.9, "after_min": 1.1,
+  "change_min": -1.8, "change_pct": -62,
+  "title": "Run the test suite on every core", "ref": "acme/app#189",
+  "why": "The suite ran in one process; it now runs one worker per core."}]
 ```
 
 `ref` is `owner/name#number` or a commit SHA, with `url` for a commit;
-`records` derives `url` from a `#number` reference. The id is
+`records` derives `url` from a `#number` reference. `time` is when the
+change's first run started, as `shifts` gives it; it orders several
+incidents on one day. The id is
 `DAY/CHANGE`, the change being `ref` (or the title) in lowercase with
 hyphens, so several changes on one day stay apart and storing an incident
 again replaces it.
@@ -166,6 +166,7 @@ of that repository's corpus. It reads top to bottom:
 Search indexes the title, description and block text, not the records, so
 the description names what the data holds; `create` also gives a TL;DR, and
 the agent adds the fitting catalog tags. `create` writes the whole document.
-Everything outside the Incidents list is written once and may be edited by
-hand, except the charts, which the skill replaces or adds from `ci.py
-charts` when the jobs change or a new measure appears.
+Everything outside the Incidents list and the charts is written once and
+may be edited by hand. The skill replaces a chart when `ci.py charts` gives
+a different one, after a skill update, and adds one when a new measure
+appears.

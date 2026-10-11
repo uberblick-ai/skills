@@ -4,10 +4,9 @@ description: >-
   Track CI health on a repository's main branch from GitHub Actions: the
   median wall time a push waits for CI and its slow tail, the number of
   tests, optionally coverage and the test-to-code ratio, and the changes that
-  made CI slower or faster. Use when a
-  maintainer asks how long CI takes, whether it got slower, or to record CI
-  figures daily. Works for any repository and language. Not a CI fix, a
-  flaky-test hunt or a merge gate.
+  made CI slower or faster. Use when a maintainer asks how long CI takes,
+  whether it got slower, or to record CI figures daily. Works for any
+  repository and language. Not a CI fix, a flaky-test hunt or a merge gate.
 license: MIT
 compatibility: >-
   Requires python3 and an authenticated GitHub CLI (gh); reads GitHub only.
@@ -26,9 +25,9 @@ metadata:
 CI should stay fast as a project grows: the wait that counts is wall time,
 from the first job starting to the last one finishing, not the minutes the
 jobs add up to. The charts show that total only; each job's time stays in
-the data to show which job moved when the total steps. This skill records one day
-for one repository and keeps the steps that moved the total, with their
-cause.
+the data to show which job moved when the total steps. This skill records
+one day for one repository and keeps the steps that moved the total, with
+their cause.
 
 `scripts/ci.py` lives next to this file; call it by its path inside this
 skill's directory. `REPO` is `OWNER/NAME`, `DIR` a scratch directory outside
@@ -40,9 +39,9 @@ the document layout are in [references/data.md](references/data.md).
    never put two repositories in one document. Uberblick is reached one of
    two ways:
 
-   - the `uberblick` MCP tools (`search`, `get_data`, `update_data`,
-     `create_doc`, `insert_block`, `delete_block`, `list_tags`) are in your
-     tool list: call them directly;
+   - the `uberblick` MCP tools (`search`, `get_doc`, `get_data`,
+     `update_data`, `create_doc`, `insert_block`, `delete_block`, `set_tldr`,
+     `list_tags`) are in your tool list: call them directly;
    - otherwise the `ub` command is on the PATH: call a tool with `python3
      scripts/ci.py ub TOOL 'ARGS' --checkout PATH`, where `ARGS` is the
      tool's arguments as inline JSON or a JSON file and `PATH` the
@@ -104,19 +103,21 @@ the document layout are in [references/data.md](references/data.md).
    `tests_pattern` holds the patterns joined by ` || `; reuse them while they
    still match. When no job prints a count, leave `tests` out and say so.
 
-4. Measure the code, when you run inside a checkout of `REPO`:
+4. Measure the code, given a local clone of `REPO`; a scratch clone works
+   and keeps the maintainer's checkout untouched:
 
    ```sh
    python3 scripts/ci.py measure DIR/data.json --checkout PATH [--every-day]
    ```
 
-   It checks out the last green commit in a temporary worktree and adds
+   It fetches the last green commit if the clone lacks it, checks it out in
+   a temporary worktree, which it removes afterwards, and adds
    `test_ratio` (with `code_lines` and `test_lines`) to the last day, or to
    every day with `--every-day`, which a backfill wants, plus
    `coverage_pct` when the checkout defines `mise run codecov`. A `mise run
    loc` task replaces the built-in line count. Without a coverage task,
    mention once that adding one charts coverage too; the conventions are in
-   `references/data.md`. Skip this step without a checkout.
+   `references/data.md`. Skip this step without a clone.
 
 5. Find the steps:
 
@@ -147,16 +148,16 @@ the document layout are in [references/data.md](references/data.md).
    day, the repository, `slower` or `faster` (a hang is `slower` when it
    starts and `faster` when the change that ended it lands), the medians
    before and after, a title naming the change, `ref` as `owner/name#number`
-   or a commit, and `why` in one sentence (what moved and why). Several
-   incidents on one day go newest first, as the changelog lists them. A step
+   or a commit, `time` from the candidate (it keeps several incidents on one
+   day in order), and `why` in one sentence (what moved and why). A step
    whose cause you cannot confirm from the changes is left out, not
    guessed.
 
 7. Without `DOC`, reply with the summary table and any incidents; stop here.
 
-8. Store the day, unless the maintainer asked for the table only. When the
-   maintainer said yes to a new document, pick from `list_tags` the active
-   ids that fit CI, testing or engineering health, then:
+8. Store the day, unless the maintainer asked for the table only. For a new
+   document the maintainer said yes to, pick from `list_tags` the active ids
+   that fit CI, testing or engineering health, then:
 
    ```sh
    python3 scripts/ci.py create DIR/data.json --incidents DIR/incidents.json [--tag ID]... > DIR/create.json
@@ -164,7 +165,7 @@ the document layout are in [references/data.md](references/data.md).
 
    Pass it as the arguments of `create_doc`; the result's uuid is `DOC`. If
    no tag fits, say so in the reply rather than leaving it silently
-   untagged. Then:
+   untagged. Then, for a new document or an existing one:
 
    ```sh
    python3 scripts/ci.py records DIR/data.json [DIR/incidents.json] --doc DOC > DIR/update.json
@@ -177,16 +178,18 @@ the document layout are in [references/data.md](references/data.md).
 9. With a `DOC` that existed before this run, compare its chart blocks with
    `ci.py charts DIR/data.json`: replace a chart whose JSON differs and
    insert one that is new (the ratio or coverage measured for the first
-   time) after the last chart. Through
-   `ub`, gather these writes into one `--calls` file; several blocks
-   inserted after the same block, in reverse order, end up in order, so
-   the file needs only ids read before. When there are new incidents, read `incidents` again with `get_data`, write it to
-   `DIR/all-incidents.json`, run `ci.py changelog DIR/all-incidents.json`,
-   and replace the list items under the "Incidents" heading, below the
-   charts, with its blocks. Leave every other block as it is. A block
+   time) after the last chart. When there are new incidents, read
+   `incidents` again with `get_data`, write it to `DIR/all-incidents.json`,
+   run `ci.py changelog DIR/all-incidents.json`, and replace the list items
+   under the "Incidents" heading, below the charts, with its blocks. Leave
+   every other block as it is, since people may have edited it. A block
    change clears the document's TL;DR, so read it with `get_doc` first and
-   end the writes with `set_tldr` to put it back.
+   end the writes with `set_tldr` to put it back. Through `ub`, gather
+   these writes into one `--calls` file; several blocks inserted after the
+   same block, in reverse order, end up in order, so the file needs only
+   ids read before.
 
-10. Reply with the total wall time (7-day median), the jobs, the tests, any
-    coverage and lines, any new incident, and where the day was stored. When
-    the skill runs on a schedule with nothing new, a single line is enough.
+10. Reply with the total wall time (the 7-day median with its ± and the
+    P95), the tests, the test ratio and any coverage, any new incident with
+    the job that moved, and where the day was stored. When the skill runs on
+    a schedule with nothing new, a single line is enough.

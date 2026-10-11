@@ -5,11 +5,11 @@
     ci.py shifts data.json [--limit 5]                 # candidate incidents: steps in wall time, and hangs
     ci.py logs data.json --out DIR [--day DAY]         # a day's job logs, cleaned, to find the test summary line
     ci.py tests data.json --pattern REGEX...           # each day's test count from that line, added in place
-    ci.py measure data.json --checkout PATH            # optional: coverage and code/test lines, added in place
+    ci.py measure data.json --checkout PATH [--every-day]  # optional: test ratio and coverage, added in place
     ci.py summary data.json                            # the days as a Markdown table, for a reply
     ci.py records data.json [incidents.json] [--doc UUID] > update.json  # update_data batch for the document
     ci.py create data.json [--incidents incidents.json] [--tag ID]... > create.json  # create_doc arguments
-    ci.py charts data.json > charts.json               # the chart blocks, to replace when the jobs change
+    ci.py charts data.json > charts.json               # the chart blocks, to compare with an existing document's
     ci.py changelog incidents.json > changelog.json    # the document's Incidents list, latest five
     ci.py ub TOOL [ARGS] | --calls calls.json [--checkout PATH]  # Uberblick tools through one `ub mcp serve`
 
@@ -415,7 +415,8 @@ def shifts(data, limit=5, span=8):
                 for j in c["jobs"]:
                     jobs.setdefault(f"{j['workflow']} / {j['name']}", {}).setdefault(side, []).append(j["min"])
         moved = {k: {"before": median(v.get("before", [])), "after": median(v.get("after", []))} for k, v in jobs.items()}
-        out.append({"repo": data["repo"], "day": green[i]["day"], "direction": "slower" if a > b else "faster",
+        out.append({"repo": data["repo"], "day": green[i]["day"], "time": green[i]["created"],
+                    "direction": "slower" if a > b else "faster",
                     "before_min": b, "after_min": a, "change_min": round(a - b, 2),
                     "change_pct": round(100 * (a - b) / b) if b else None, "jobs": moved,
                     "suspects": suspects(data["commits"], green[i - 2], green[i])})
@@ -445,7 +446,8 @@ def hangs(data, floor=60):
         if hung:
             stretch.append(c)
         elif stretch:
-            pick = lambda x: {"sha": x["sha"][:12], "day": x["day"], "title": x["title"], "pr": number(x["title"]),
+            pick = lambda x: {"sha": x["sha"][:12], "day": x["day"], "time": x["created"], "title": x["title"],
+                              "pr": number(x["title"]),
                               "wall_min": x["wall_min"]} if x else None
             out.append({"repo": data["repo"], "kind": "hang", "day": stretch[0]["day"], "commits": len(stretch),
                         "hung_min": median(x["wall_min"] for x in stretch), "green_min": typical,
@@ -477,7 +479,7 @@ INCIDENTS = {"version": 1, "schema": {"type": "object", "required": ["day", "rep
              "properties": {"day": DAY, "repo": TEXT, "direction": {"type": "string", "enum": ["slower", "faster"]},
                             "before_min": NUM, "after_min": NUM, "change_min": {"type": ["number", "null"]},
                             "change_pct": {"type": ["number", "null"]}, "title": TEXT, "why": TEXT, "ref": TEXT,
-                            "url": TEXT, "jobs": TEXT}}}
+                            "url": TEXT, "jobs": TEXT, "time": TEXT}}}
 
 
 def schema(data):
@@ -502,7 +504,7 @@ def incident_rows(incidents):
         if i["direction"] not in ("slower", "faster"):
             sys.exit(f"incident {i['day']}: direction must be slower or faster")
         value = {k: i[k] for k in ("day", "repo", "direction", "before_min", "after_min", "change_min", "change_pct",
-                                   "title", "why", "ref", "url") if i.get(k) is not None}
+                                   "title", "why", "ref", "url", "time") if i.get(k) is not None}
         if isinstance(i.get("jobs"), str):
             value["jobs"] = i["jobs"]
         if "url" not in value and link(i.get("ref")):
@@ -553,7 +555,8 @@ def changelog(incidents, limit=5):
     rows = incidents.get("records", incidents) if isinstance(incidents, dict) else incidents
     rows = [r.get("value", r) for r in rows]
     blocks = []
-    for i in sorted(rows, key=lambda i: i["day"], reverse=True)[:limit]:
+    # `time`, when the change's first run started, keeps several incidents on one day in order.
+    for i in sorted(rows, key=lambda i: (i["day"], i.get("time", "")), reverse=True)[:limit]:
         arrow = "▲ slower" if i["direction"] == "slower" else "▼ faster"
         short = lambda v: f"{v:.1f}" if v < 10 else f"{v:.0f}"
         effect = arrow + (f", {short(i['before_min'])} → {short(i['after_min'])} min"
@@ -579,7 +582,7 @@ def create_document(data, incidents=()):
             {"text": "Reading the charts: ", "marks": {"bold": True}},
             {"text": "one point per day, over green commits, in minutes. Wall time is the total over the last 7 days: the "
              "median, and the P95 that shows the slow tail. Lower is better. "
-             "Runner queueing before the first job is left out. Data from GitHub Actions, refreshed daily by the "
+             "Runner queueing before the first job is left out. Data from GitHub Actions, refreshed by the "
              "ci-health skill (npx skills@latest add uberblick-ai/skills).", "marks": {}}]},
         *charts(data),
         {"type": "heading", "level": 2, "text": "Incidents"},
@@ -595,16 +598,14 @@ def create_document(data, incidents=()):
             "blocks": blocks}
 
 
-SETTLE_POLL = 2  # seconds between sync_status checks after a write
-WRITES = {"create_doc", "update_data", "insert_block", "delete_block", "replace_block", "set_description", "set_tldr",
-          "set_title", "set_tags"}
+SETTLE_POLL = 2  # seconds between sync_status checks before the server exits
 
 
 def ub_calls(calls, checkout, timeout=300, settle=60):
     """Call Uberblick MCP tools through one `ub mcp serve` in `checkout`, for a host that has the `ub` command but not
     the uberblick MCP tools. The server serves the workspace that checkout is bound to. One server for the whole
-    list keeps the run to one agent in the workspace's activity; after a write it waits up to `settle` seconds for
-    the hub to acknowledge, so the changes leave this machine before the server exits. Stops at the first error."""
+    list keeps the run to one agent in the workspace's activity. Before it exits it waits up to `settle` seconds
+    for the hub to acknowledge any write, so the changes leave this machine. Stops at the first error."""
     try:
         server = subprocess.Popen(["ub", "mcp", "serve"], cwd=checkout, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   text=True)
@@ -638,21 +639,20 @@ def ub_calls(calls, checkout, timeout=300, settle=60):
         server.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
         for c in calls:
             out.append({"tool": c["tool"], "result": call(c["tool"], c.get("arguments", {}))})
-        if any(c["tool"] in WRITES for c in calls):
-            deadline = time.monotonic() + settle
-            while True:
-                try:
-                    status = json.loads(call("sync_status", {}))
-                except ValueError:
-                    break
-                if not status.get("unsyncedChanges") and not status.get("inFlightUpdates"):
-                    break
-                if time.monotonic() > deadline:
-                    print(f"ub: the hub has not acknowledged {status.get('unsyncedChanges')} change(s) after "
-                          f"{settle}s; they are saved locally and sync when a server next runs in {checkout}",
-                          file=sys.stderr)
-                    break
-                time.sleep(SETTLE_POLL)
+        deadline = time.monotonic() + settle
+        while calls:
+            try:
+                status = json.loads(call("sync_status", {}))
+            except ValueError:
+                break
+            if not status.get("unsyncedChanges") and not status.get("inFlightUpdates"):
+                break
+            if time.monotonic() > deadline:
+                print(f"ub: the hub has not acknowledged {status.get('unsyncedChanges')} change(s) after "
+                      f"{settle}s; they are saved locally and sync when a server next runs in {checkout}",
+                      file=sys.stderr)
+                break
+            time.sleep(SETTLE_POLL)
     finally:
         server.stdin.close()
         try:
@@ -680,7 +680,7 @@ def main():
     c.add_argument("--workflow", action="append", default=[],
                    help="count only commits that ran this workflow (repeatable); default every push workflow")
     c.add_argument("--start", type=dt.date.fromisoformat,
-                   help="ignore runs before this UTC day, such as the day CI was reworked or re-enabled")
+                   help="ignore runs before this UTC day, when they cannot be compared, such as CI re-enabled after a gap")
     s = commands.add_parser("shifts")
     s.add_argument("data")
     s.add_argument("--limit", type=int, default=5)
@@ -693,7 +693,7 @@ def main():
     t.add_argument("data")
     t.add_argument("--pattern", action="append", required=True,
                    help="regex for a line reporting tests, the count in a group (repeatable)")
-    m = commands.add_parser("measure", help="add coverage and code/test lines to the last day, in place")
+    m = commands.add_parser("measure", help="add the test ratio and coverage to the last day, in place")
     m.add_argument("data")
     m.add_argument("--checkout", required=True, help="a local clone of the repository")
     m.add_argument("--timeout", type=int, default=1800, help="seconds each mise task may take")
