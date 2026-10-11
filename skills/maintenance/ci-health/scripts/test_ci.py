@@ -194,6 +194,9 @@ for line in sys.stdin:
             ci.records(data, [dict(incidents[0], repo="o/other")])
         doc = ci.create_document(data, incidents)
         self.assertEqual(doc["title"], "CI Health Report")
+        runs = [r for b in doc["blocks"] for r in b.get("inline", [])]
+        self.assertIn({"text": "ci-health skill", "marks": {"link": ci.SKILL_URL}}, runs)
+        self.assertNotIn("npx", json.dumps(doc))
         types = [b["type"] for b in doc["blocks"]]
         self.assertLess(types.index("chart"), types.index("heading"), "incidents sit below the charts")
         charts = [json.loads(b["text"]) for b in doc["blocks"] if b["type"] == "chart"]

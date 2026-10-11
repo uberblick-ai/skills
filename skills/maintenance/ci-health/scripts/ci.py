@@ -570,6 +570,9 @@ def changelog(incidents, limit=5):
     return blocks or [{"type": "paragraph", "text": "No incident recorded yet."}]
 
 
+SKILL_URL = "https://skills.uberblick.ai/skills/ci-health"
+
+
 def create_document(data, incidents=()):
     """create_doc arguments for a repository's CI health document: intent, how to read it, the charts, then the
     incidents."""
@@ -582,8 +585,10 @@ def create_document(data, incidents=()):
             {"text": "Reading the charts: ", "marks": {"bold": True}},
             {"text": "one point per day, over green commits, in minutes. Wall time is the total over the last 7 days: the "
              "median, and the P95 that shows the slow tail. Lower is better. "
-             "Runner queueing before the first job is left out. Data from GitHub Actions, refreshed by the "
-             "ci-health skill (npx skills@latest add uberblick-ai/skills).", "marks": {}}]},
+             "Runner queueing before the first job is left out. Data from GitHub Actions, refreshed by the ",
+             "marks": {}},
+            {"text": "ci-health skill", "marks": {"link": SKILL_URL}},
+            {"text": ".", "marks": {}}]},
         *charts(data),
         {"type": "heading", "level": 2, "text": "Incidents"},
         {"type": "paragraph", "text": "The latest steps in total wall time, up or down, and the change behind each."},
