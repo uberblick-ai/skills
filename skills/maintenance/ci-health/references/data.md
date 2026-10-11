@@ -150,7 +150,7 @@ repository.
 
 ## Document
 
-Each repository has its own "CI health" document, in the Uberblick workspace
+Each repository has its own "CI Health Report" document, in the Uberblick workspace
 of that repository's corpus. It reads top to bottom:
 
 1. **Intent.** One paragraph: what is measured and why wall time, not
@@ -164,8 +164,9 @@ of that repository's corpus. It reads top to bottom:
    before and after, and why. `ci.py changelog` rewrites this list.
 
 Search indexes the title, description and block text, not the records, so
-the description names what the data holds; `create` also gives a TL;DR, and
-the agent adds the fitting catalog tags. `create` writes the whole document.
+the description names what the data holds, and the agent adds the fitting
+catalog tags. The document has no TL;DR; the charts and incidents are the
+summary. `create` writes the whole document.
 Everything outside the Incidents list and the charts is written once and
 may be edited by hand. The skill replaces a chart when `ci.py charts` gives
 a different one, after a skill update, and adds one when a new measure

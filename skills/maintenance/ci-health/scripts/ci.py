@@ -570,10 +570,13 @@ def changelog(incidents, limit=5):
     return blocks or [{"type": "paragraph", "text": "No incident recorded yet."}]
 
 
+SKILL_URL = "https://skills.uberblick.ai/skills/ci-health"
+
+
 def create_document(data, incidents=()):
     """create_doc arguments for a repository's CI health document: intent, how to read it, the charts, then the
     incidents."""
-    repo, name = data["repo"], data["repo"].split("/", 1)[1]
+    repo = data["repo"]
     blocks = [
         {"type": "paragraph", "text": f"How long a push to {data['branch']} in {repo} waits for CI, and how many tests "
          "it runs. The goal is short wall time: the time from the first job starting to the last one finishing, not "
@@ -582,19 +585,19 @@ def create_document(data, incidents=()):
             {"text": "Reading the charts: ", "marks": {"bold": True}},
             {"text": "one point per day, over green commits, in minutes. Wall time is the total over the last 7 days: the "
              "median, and the P95 that shows the slow tail. Lower is better. "
-             "Runner queueing before the first job is left out. Data from GitHub Actions, refreshed by the "
-             "ci-health skill (npx skills@latest add uberblick-ai/skills).", "marks": {}}]},
+             "Runner queueing before the first job is left out. Data from GitHub Actions, refreshed by the ",
+             "marks": {}},
+            {"text": "ci-health skill", "marks": {"link": SKILL_URL}},
+            {"text": ".", "marks": {}}]},
         *charts(data),
         {"type": "heading", "level": 2, "text": "Incidents"},
         {"type": "paragraph", "text": "The latest steps in total wall time, up or down, and the change behind each."},
         *changelog(list(incidents)),
     ]
-    return {"title": "CI health",
+    return {"title": "CI Health Report",
             "description": f"How long CI takes on {data['branch']} in {repo}: daily GitHub Actions wall time, its "
                            "slow tail, test counts, and the incidents that made CI slower or faster. "
                            "Data in the document's days and incidents, refreshed by the ci-health skill.",
-            "tldr": f"Tracks how long a push to {data['branch']} in {name} waits for CI, how many tests run, and which "
-                    "changes moved it.",
             "blocks": blocks}
 
 

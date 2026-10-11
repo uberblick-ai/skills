@@ -35,12 +35,12 @@ the repository. Definitions, the records, the `mise` task conventions and
 the document layout are in [references/data.md](references/data.md).
 
 1. Decide where the figures will be kept. Each repository keeps its own "CI
-   health" document in the Uberblick workspace its checkout is bound to;
-   never put two repositories in one document. Uberblick is reached one of
+   Health Report" document in the Uberblick workspace its checkout is bound
+   to; never put two repositories in one document. Uberblick is reached one of
    two ways:
 
    - the `uberblick` MCP tools (`search`, `get_doc`, `get_data`,
-     `update_data`, `create_doc`, `insert_block`, `delete_block`, `set_tldr`,
+     `update_data`, `create_doc`, `insert_block`, `delete_block`,
      `list_tags`) are in your tool list: call them directly;
    - otherwise the `ub` command is on the PATH: call a tool with `python3
      scripts/ci.py ub TOOL 'ARGS' --checkout PATH`, where `ARGS` is the
@@ -182,9 +182,9 @@ the document layout are in [references/data.md](references/data.md).
    `incidents` again with `get_data`, write it to `DIR/all-incidents.json`,
    run `ci.py changelog DIR/all-incidents.json`, and replace the list items
    under the "Incidents" heading, below the charts, with its blocks. Leave
-   every other block as it is, since people may have edited it. A block
-   change clears the document's TL;DR, so read it with `get_doc` first and
-   end the writes with `set_tldr` to put it back. Through `ub`, gather
+   every other block as it is, since people may have edited it. The
+   document has no TL;DR: the charts and incidents are the summary, so do
+   not add one when a tool suggests it. Through `ub`, gather
    these writes into one `--calls` file; several blocks inserted after the
    same block, in reverse order, end up in order, so the file needs only
    ids read before.

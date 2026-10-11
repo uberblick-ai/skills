@@ -193,6 +193,10 @@ for line in sys.stdin:
         with self.assertRaises(SystemExit):
             ci.records(data, [dict(incidents[0], repo="o/other")])
         doc = ci.create_document(data, incidents)
+        self.assertEqual(doc["title"], "CI Health Report")
+        runs = [r for b in doc["blocks"] for r in b.get("inline", [])]
+        self.assertIn({"text": "ci-health skill", "marks": {"link": ci.SKILL_URL}}, runs)
+        self.assertNotIn("npx", json.dumps(doc))
         types = [b["type"] for b in doc["blocks"]]
         self.assertLess(types.index("chart"), types.index("heading"), "incidents sit below the charts")
         charts = [json.loads(b["text"]) for b in doc["blocks"] if b["type"] == "chart"]
@@ -202,7 +206,8 @@ for line in sys.stdin:
                          ["Wall time on main", "Tests", "Test to code ratio", "Test coverage"])
         self.assertIn("coverage_pct", ci.schema(data)["schema"]["properties"])
         self.assertTrue(all(len(c["y"]) <= 8 for c in charts))
-        self.assertTrue(len(doc["description"]) <= 300 and len(doc["tldr"]) <= 300)
+        self.assertLessEqual(len(doc["description"]), 300)
+        self.assertNotIn("tldr", doc)
         same_day = [dict(incidents[0], title="Cause", time="2026-10-01T09:00:00Z"),
                     dict(incidents[0], title="Fix", ref="o/r#8", time="2026-10-01T10:00:00Z")]
         self.assertEqual([b["inline"][1]["text"] for b in ci.changelog(same_day)], ["Fix", "Cause"],
