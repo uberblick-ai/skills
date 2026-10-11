@@ -19,6 +19,7 @@ attempt's jobs, skipping jobs that were skipped.
 | `<job>_min` | one job's start to end | median of the day's green commits |
 | `execution_min` | all job minutes added up | median, for contrast with wall time |
 | `wait_min` | push to the first job starting: concurrency and runner queueing | median, context only |
+| `queue_min` | the longest any job waited for a runner after it was queued, part of wall time | median, context only |
 | `commits`, `failed` | | commits whose runs all finished, and how many of them were not green |
 | `tests`, `tests_pattern` | tests the jobs report, and the patterns that read them | from the day's last green commit |
 | `code_lines`, `test_lines`, `test_ratio` | | at the last green commit, by `measure` |
@@ -41,16 +42,19 @@ attempt's jobs, skipping jobs that were skipped.
 - `tests` is read from the job logs with patterns the agent writes for the
   repository's test runners, since every language prints its own summary.
   Each pattern is a regular expression whose groups capture counts; every
-  integer they capture, on every line that matches, is added up per job.
-  Timestamps and terminal colors are stripped first. Count tests run or
-  passed, not skipped. Jobs that differ only in their matrix values in
+  integer they capture, on every line that matches, is added up per job,
+  except a group named `skipped`, which is subtracted. Timestamps and
+  terminal colors are stripped first. Count tests run or passed, not
+  skipped. Jobs that differ only in their matrix values in
   parentheses run one suite, so they count once, at the largest. Logs are
   kept 90 days; older days have no `tests`.
 
 ## Code and coverage
 
 `ci.py measure` checks out the last green commit of the last day in a
-temporary worktree of a local clone and adds its figures to that day. It
+temporary worktree of a local clone and adds its figures to that day; with
+`--every-day` it adds the lines to every day, while coverage, which runs the
+suite, stays on the last day. It
 looks for two `mise` tasks by name and trusts the worktree's mise config for
 that run:
 
@@ -154,7 +158,8 @@ of that repository's corpus. It reads top to bottom:
    comes from.
 2. **Charts.** Line charts bound to `days`: wall time (the 7-day median and
    P95 of the total first, then each job of the last three days with green
-   commits, at most six, leaving out a job under 5 percent of the wall time,
+   commits, at most six, the latest day's jobs first and slowest first,
+   leaving out a job under 5 percent of the wall time,
    such as a summary job that only reads the others' results), tests, and, once measured, the test-to-code ratio
    and coverage.
 3. **Incidents.** Below the charts, the latest five, newest first, one list

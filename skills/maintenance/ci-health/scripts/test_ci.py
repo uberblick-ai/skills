@@ -40,6 +40,11 @@ class Tests(unittest.TestCase):
         patterns = [re.compile(r"test result: \w+\. (\d+) passed; (\d+) failed"), re.compile(r"Passed:\s+(\d+),")]
         self.assertEqual(ci.tests_in(text, patterns), 55)
 
+    def test_skipped_group_subtracts(self):
+        text = log("Ran 1727 tests in 80.1s", "", "OK (skipped=2)")
+        patterns = [re.compile(r"^Ran (\d+) tests? in "), re.compile(r"^OK \(skipped=(?P<skipped>\d+)\)")]
+        self.assertEqual(ci.tests_in(text, patterns), 1725)
+
     def test_no_summary(self):
         self.assertIsNone(ci.tests_in(log("Lint passed", "done"), [re.compile(r"Ran (\d+) tests")]))
 
@@ -195,6 +200,12 @@ for line in sys.stdin:
         data["days"][0]["ci_result_min"] = 0.1
         wall = json.loads(ci.charts(data)[0]["text"])
         self.assertNotIn("ci_result_min", [y["field"] for y in wall["y"]], "a summary job does not move the total")
+        data["jobs"] |= {"ci_mac_min": "CI / mac", "ci_old_min": "CI / old"}
+        data["days"] = [dict(data["days"][0], day="2026-09-30", ci_old_min=9.0),
+                        dict(data["days"][0], ci_mac_min=6.0, ci_tests_min=4.0)]
+        wall = json.loads(ci.charts(data)[0]["text"])
+        self.assertEqual([y["field"] for y in wall["y"]][2:], ["ci_mac_min", "ci_tests_min", "ci_old_min"],
+                         "current jobs first, slowest first, retired ones last")
         self.assertEqual([y["field"] for y in charts[0]["y"][:2]], ["wall_min_7d", "wall_p95_7d"])
         self.assertTrue(all(len(c["y"]) <= 8 for c in charts))
         self.assertTrue(len(doc["description"]) <= 300 and len(doc["tldr"]) <= 300)

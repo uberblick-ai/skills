@@ -103,14 +103,16 @@ def clean(text):
 
 def tests_in(text, patterns):
     """Tests a job reports, by the agent's patterns for this repository's runners: every integer a pattern's groups
-    capture, on every line it matches, summed. None when no pattern matched."""
+    capture, on every line it matches, summed; a group named `skipped` is subtracted instead, for runners whose total
+    includes skipped tests. None when no pattern matched."""
     total, found = 0, False
     for line in clean(text).splitlines():
         for pattern in patterns:
             if m := pattern.search(line):
-                total += sum(int(g) for g in m.groups() if g and g.isdigit())
+                skipped = m.groupdict().get("skipped")
+                total += sum(int(g) for g in m.groups() if g and g.isdigit()) - 2 * int(skipped or 0)
                 found = True
-    return total if found else None
+    return max(total, 0) if found else None
 
 
 def job_log(repo, job_id):
@@ -163,7 +165,8 @@ def collect(repo, first, last, required=(), floor=None):
             "title": (run.get("head_commit") or {}).get("message", "").split("\n")[0][:200],
             "workflows": {}, "jobs": []})
         c["workflows"][run["name"]] = run["conclusion"]
-        c["jobs"] += [{"id": j["id"], "workflow": run["name"], "name": j["name"], "started": j["started_at"],
+        c["jobs"] += [{"id": j["id"], "workflow": run["name"], "name": j["name"],
+                       "created": j.get("created_at") or j["started_at"], "started": j["started_at"],
                        "completed": j["completed_at"], "conclusion": j["conclusion"],
                        "min": minutes(j["started_at"], j["completed_at"])} for j in jobs]
     rows = []
@@ -174,6 +177,8 @@ def collect(repo, first, last, required=(), floor=None):
         c["ok"] = all(v in ("success", "skipped", "neutral") for v in c["workflows"].values())
         c["wall_min"] = minutes(min(j["started"] for j in c["jobs"]), max(j["completed"] for j in c["jobs"]))
         c["wait_min"] = max(0, minutes(c["created"], min(j["started"] for j in c["jobs"])))
+        # A job can also wait for a runner after the first one started: macOS runners, a busy pool. Part of wall time.
+        c["queue_min"] = max(max(0, minutes(j["created"], j["started"])) for j in c["jobs"])
         c["execution_min"] = round(sum(j["min"] for j in c["jobs"]), 2)
         rows.append(c)
     rows.sort(key=lambda c: c["created"])
@@ -193,7 +198,8 @@ def collect(repo, first, last, required=(), floor=None):
                   "wall_spread_7d": spread(c["wall_min"] for c in recent),
                   "wall_p95_7d": p95(c["wall_min"] for c in recent),
                   "execution_min": median(c["execution_min"] for c in green),
-                  "wait_min": median(c["wait_min"] for c in green)}
+                  "wait_min": median(c["wait_min"] for c in green),
+                  "queue_min": median(c.get("queue_min") for c in green)}
         per_job = {}
         for c in green:
             for j in c["jobs"]:
@@ -334,38 +340,40 @@ def count_lines(root):
     return {"code_lines": code, "test_lines": test}
 
 
-def measure(data, checkout, timeout=1800):
-    """Coverage and code against test lines at the last day's last green commit, from a detached worktree of
-    `checkout`. `mise run codecov` and `mise run loc` are used when the checkout defines them; lines fall back to
-    count_lines. Adds the figures to the last day."""
-    day = data["days"][-1]
-    commit = last_green(data, day["day"])
-    if not commit:
-        print(f"measure: no green commit on {day['day']}", file=sys.stderr)
-        return data
-    sha = commit["sha"]
+def measure(data, checkout, timeout=1800, every_day=False):
+    """Coverage and code against test lines at a day's last green commit, from a detached worktree of `checkout`.
+    `mise run codecov` and `mise run loc` are used when the checkout defines them; lines fall back to count_lines.
+    Adds the figures to the last day, or with `every_day` the lines to every day and coverage to the last, since
+    coverage runs the suite."""
+    days = data["days"] if every_day else data["days"][-1:]
     git = lambda *a, **k: subprocess.run(["git", "-C", checkout, *a], capture_output=True, text=True, **k)
-    if git("cat-file", "-e", f"{sha}^{{commit}}").returncode:
-        git("fetch", "-q", "origin", sha)
-    root = Path(tempfile.mkdtemp(prefix="ci-health-")) / "tree"
-    added = git("worktree", "add", "-q", "--detach", str(root), sha)
-    if added.returncode:
-        sys.exit(f"measure: cannot check out {sha[:12]} in {checkout}: {added.stderr.strip()}")
-    try:
-        tasks = mise_tasks(root)
-        found = {}
-        if "codecov" in tasks:
-            found |= {k: v for k, v in mise_json(root, "codecov", timeout).items() if k == "coverage_pct"}
-        if "loc" in tasks:
-            found |= {k: v for k, v in mise_json(root, "loc", timeout).items() if k in ("code_lines", "test_lines")}
-        if "code_lines" not in found or "test_lines" not in found:
-            found |= count_lines(root)
-    finally:
-        git("worktree", "remove", "--force", str(root))
-    if found.get("code_lines"):
-        found["test_ratio"] = round(found["test_lines"] / found["code_lines"], 2)
-    day |= {k: v for k, v in found.items() if isinstance(v, (int, float))}
-    day["measured_sha"] = sha[:12]
+    for day in days:
+        commit = last_green(data, day["day"])
+        if not commit:
+            print(f"measure: no green commit on {day['day']}", file=sys.stderr)
+            continue
+        sha = commit["sha"]
+        if git("cat-file", "-e", f"{sha}^{{commit}}").returncode:
+            git("fetch", "-q", "origin", sha)
+        root = Path(tempfile.mkdtemp(prefix="ci-health-")) / "tree"
+        added = git("worktree", "add", "-q", "--detach", str(root), sha)
+        if added.returncode:
+            sys.exit(f"measure: cannot check out {sha[:12]} in {checkout}: {added.stderr.strip()}")
+        try:
+            tasks = mise_tasks(root)
+            found = {}
+            if "codecov" in tasks and day is data["days"][-1]:
+                found |= {k: v for k, v in mise_json(root, "codecov", timeout).items() if k == "coverage_pct"}
+            if "loc" in tasks:
+                found |= {k: v for k, v in mise_json(root, "loc", timeout).items() if k in ("code_lines", "test_lines")}
+            if "code_lines" not in found or "test_lines" not in found:
+                found |= count_lines(root)
+        finally:
+            git("worktree", "remove", "--force", str(root))
+        if found.get("code_lines"):
+            found["test_ratio"] = round(found["test_lines"] / found["code_lines"], 2)
+        day |= {k: v for k, v in found.items() if isinstance(v, (int, float))}
+        day["measured_sha"] = sha[:12]
     return data
 
 
@@ -471,7 +479,7 @@ def schema(data):
     fields = {"day": DAY, "repo": TEXT, "workflows": TEXT, "start": DAY, "measured_sha": TEXT, "tests_pattern": TEXT,
               **dict.fromkeys(["commits", "failed", "tests", "code_lines", "test_lines"], COUNT),
               "coverage_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
-              **dict.fromkeys(["wall_min", "wall_min_7d", "wall_spread_7d", "wall_p95_7d", "execution_min", "wait_min", "test_ratio", *data["jobs"]], NUM)}
+              **dict.fromkeys(["wall_min", "wall_min_7d", "wall_spread_7d", "wall_p95_7d", "execution_min", "queue_min", "wait_min", "test_ratio", *data["jobs"]], NUM)}
     return {"version": 1, "schema": {"type": "object", "required": ["day", "repo", "commits"], "properties": fields}}
 
 
@@ -526,6 +534,8 @@ def charts(data):
     # A job under 5 percent of the wall time, such as a summary job that only reads the others' results, would
     # crowd the chart without moving the total.
     jobs = [k for k in data["jobs"] if any(d.get(k, 0) >= 0.05 * d["wall_min"] for d in recent)] or list(data["jobs"])
+    # The jobs running now come first, slowest first, so a reworked matrix never pushes them out for retired ones.
+    jobs.sort(key=lambda k: next(((-i, d[k]) for i, d in enumerate(reversed(recent)) if k in d), (-99, 0)), reverse=True)
     x = {"field": "day", "type": "date", "label": "Day"}
     blocks = [chart({"version": 1, "type": "line", "collection": "days", "title": f"Wall time on {data['branch']}",
                      "x": x, "missing": "connect",
@@ -696,6 +706,7 @@ def main():
     m.add_argument("data")
     m.add_argument("--checkout", required=True, help="a local clone of the repository")
     m.add_argument("--timeout", type=int, default=1800, help="seconds each mise task may take")
+    m.add_argument("--every-day", action="store_true", help="lines on every day, for a backfill; coverage stays last-day")
     r = commands.add_parser("records")
     r.add_argument("data")
     r.add_argument("incidents", nargs="?")
@@ -734,7 +745,7 @@ def main():
         Path(args.data).write_text(json.dumps(add_tests(load(args.data), args.pattern), indent=1))
         return
     elif args.command == "measure":
-        Path(args.data).write_text(json.dumps(measure(load(args.data), args.checkout, args.timeout), indent=1))
+        Path(args.data).write_text(json.dumps(measure(load(args.data), args.checkout, args.timeout, args.every_day), indent=1))
         return
     elif args.command == "summary":
         print(summary(load(args.data)))

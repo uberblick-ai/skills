@@ -72,9 +72,11 @@ the document layout are in [references/data.md](references/data.md).
    Pass `--workflow` when the repository also runs a workflow on only some
    pushes (path filters, a release proof), naming the workflow every push
    runs, so a commit that skipped CI does not read as a fast one. Pass
-   `--start` with the day CI was reworked or re-enabled, so older runs stay
-   out of the 7-day median. A stored day's `workflows` and `start` fields
-   give the values to reuse.
+   `--start` only when the runs before a day cannot be compared at all: CI
+   re-enabled after a gap, or moved to another system. A rework of the
+   workflow is not a reason; it is an incident, and the step should show.
+   Once a document holds days, reuse their `workflows` and `start` fields on
+   every run, or the history shifts.
 
 3. Count the tests. Test runners differ by language and setup, so you read
    the summary off the logs rather than the script guessing:
@@ -87,7 +89,10 @@ the document layout are in [references/data.md](references/data.md).
    Find the lines where the repository's test runners say how many tests
    ran; the checkout's languages and test setup tell you which runners to
    look for. Write one regular expression per runner whose groups capture
-   the counts to add up: tests run or passed, not skipped ones. Then:
+   the counts to add up: tests run or passed, not skipped ones. When a
+   runner's total includes skipped tests, add a pattern for its skipped
+   count with a group named `skipped`, which is subtracted, for example
+   `^OK \(skipped=(?P<skipped>\d+)\)`. Then:
 
    ```sh
    python3 scripts/ci.py tests DIR/data.json --pattern 'REGEX' [--pattern 'REGEX']
@@ -102,11 +107,12 @@ the document layout are in [references/data.md](references/data.md).
 4. Measure the code, when you run inside a checkout of `REPO`:
 
    ```sh
-   python3 scripts/ci.py measure DIR/data.json --checkout PATH
+   python3 scripts/ci.py measure DIR/data.json --checkout PATH [--every-day]
    ```
 
    It checks out the last green commit in a temporary worktree and adds
-   `test_ratio` (with `code_lines` and `test_lines`) to the last day, plus
+   `test_ratio` (with `code_lines` and `test_lines`) to the last day, or to
+   every day with `--every-day`, which a backfill wants, plus
    `coverage_pct` when the checkout defines `mise run codecov`. A `mise run
    loc` task replaces the built-in line count. Without a coverage task,
    mention once that adding one charts coverage too; the conventions are in
@@ -141,8 +147,10 @@ the document layout are in [references/data.md](references/data.md).
    day, the repository, `slower` or `faster` (a hang is `slower` when it
    starts and `faster` when the change that ended it lands), the medians
    before and after, a title naming the change, `ref` as `owner/name#number`
-   or a commit, and `why` in one sentence (what moved and why). A step whose
-   cause you cannot confirm from the changes is left out, not guessed.
+   or a commit, and `why` in one sentence (what moved and why). Several
+   incidents on one day go newest first, as the changelog lists them. A step
+   whose cause you cannot confirm from the changes is left out, not
+   guessed.
 
 7. Without `DOC`, reply with the summary table and any incidents; stop here.
 
