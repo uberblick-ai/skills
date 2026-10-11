@@ -35,8 +35,8 @@ the repository. Definitions, the records, the `mise` task conventions and
 the document layout are in [references/data.md](references/data.md).
 
 1. Decide where the figures will be kept. Each repository keeps its own "CI
-   health" document in the Uberblick workspace its checkout is bound to;
-   never put two repositories in one document. Uberblick is reached one of
+   Health Report" document in the Uberblick workspace its checkout is bound
+   to; never put two repositories in one document. Uberblick is reached one of
    two ways:
 
    - the `uberblick` MCP tools (`search`, `get_doc`, `get_data`,

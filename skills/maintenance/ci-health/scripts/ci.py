@@ -589,7 +589,7 @@ def create_document(data, incidents=()):
         {"type": "paragraph", "text": "The latest steps in total wall time, up or down, and the change behind each."},
         *changelog(list(incidents)),
     ]
-    return {"title": "CI health",
+    return {"title": "CI Health Report",
             "description": f"How long CI takes on {data['branch']} in {repo}: daily GitHub Actions wall time, its "
                            "slow tail, test counts, and the incidents that made CI slower or faster. "
                            "Data in the document's days and incidents, refreshed by the ci-health skill.",

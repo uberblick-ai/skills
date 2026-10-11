@@ -150,7 +150,7 @@ repository.
 
 ## Document
 
-Each repository has its own "CI health" document, in the Uberblick workspace
+Each repository has its own "CI Health Report" document, in the Uberblick workspace
 of that repository's corpus. It reads top to bottom:
 
 1. **Intent.** One paragraph: what is measured and why wall time, not

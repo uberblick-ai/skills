@@ -193,6 +193,7 @@ for line in sys.stdin:
         with self.assertRaises(SystemExit):
             ci.records(data, [dict(incidents[0], repo="o/other")])
         doc = ci.create_document(data, incidents)
+        self.assertEqual(doc["title"], "CI Health Report")
         types = [b["type"] for b in doc["blocks"]]
         self.assertLess(types.index("chart"), types.index("heading"), "incidents sit below the charts")
         charts = [json.loads(b["text"]) for b in doc["blocks"] if b["type"] == "chart"]
