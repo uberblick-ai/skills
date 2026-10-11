@@ -1,0 +1,3 @@
+# The site is indexed under skills.uberblick.ai only; keep the pages.dev copy out of search.
+https://:project.pages.dev/*
+  X-Robots-Tag: noindex
