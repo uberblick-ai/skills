@@ -92,6 +92,12 @@ class Tests(unittest.TestCase):
             subprocess.run(["git", "init", "-q", root], check=True)
             subprocess.run(["git", "-C", root, "add", "."], check=True)
             self.assertEqual(ci.count_lines(root), {"code_lines": 2, "test_lines": 1})
+            path = os.environ["PATH"]
+            os.environ["PATH"] = "/nonexistent"
+            try:
+                self.assertEqual(ci.mise_tasks(root), set(), "no mise is no tasks, not a crash")
+            finally:
+                os.environ["PATH"] = path
 
     def test_tail_and_spread(self):
         walls = [10.0, 11.0, 12.0, 13.0, 30.0]
@@ -106,6 +112,14 @@ class Tests(unittest.TestCase):
         self.assertEqual((found[0]["day"], found[0]["direction"], found[0]["change_min"]), ("2026-10-02", "slower", 4.0))
         self.assertIn(10, [s["pr"] for s in found[0]["suspects"]])
 
+    def test_only_collected_days_and_failed_suspects(self):
+        commits = [commit(n, 5.0) for n in range(10)] + [commit(10, 6.0, "2026-10-02", ok=False)] + \
+                  [commit(n, 9.0, "2026-10-02") for n in range(11, 20)]
+        found = ci.shifts({"repo": "o/r", "commits": commits, "first": "2026-10-02", "last": "2026-10-02"})
+        self.assertIn(10, [s["pr"] for s in found[0]["suspects"]], "a change can land on a red run")
+        self.assertEqual(ci.shifts({"repo": "o/r", "commits": commits, "first": "2026-10-03", "last": "2026-10-03"}),
+                         [], "steps in the lookback are context, not candidates")
+
     def test_noise_is_not_a_shift(self):
         commits = [commit(n, 5.0 + (n % 3) * 0.2) for n in range(30)]
         self.assertEqual(ci.shifts({"repo": "o/r", "commits": commits}), [])
@@ -116,6 +130,7 @@ class Tests(unittest.TestCase):
         found = ci.hangs({"repo": "o/r", "commits": commits})
         self.assertEqual([(h["commits"], h["first"]["pr"], h["last"]["pr"], h["after"]["pr"]) for h in found],
                          [(3, 5, 7, 8)])
+        self.assertEqual(ci.hangs({"repo": "o/r", "commits": commits, "first": "2026-10-02", "last": "2026-10-03"}), [])
 
     def test_ub_bridge_uses_one_server_and_waits_for_sync(self):
         server = """#!/usr/bin/env python3
@@ -176,6 +191,10 @@ for line in sys.stdin:
         self.assertEqual([json.loads(b["text"])["title"] for b in ci.charts(data) if b["type"] == "chart"],
                          ["Wall time on main", "Tests", "Test to code ratio", "Test coverage"])
         self.assertIn("coverage_pct", ci.schema(data)["schema"]["properties"])
+        data["jobs"]["ci_result_min"] = "CI / result"
+        data["days"][0]["ci_result_min"] = 0.1
+        wall = json.loads(ci.charts(data)[0]["text"])
+        self.assertNotIn("ci_result_min", [y["field"] for y in wall["y"]], "a summary job does not move the total")
         self.assertEqual([y["field"] for y in charts[0]["y"][:2]], ["wall_min_7d", "wall_p95_7d"])
         self.assertTrue(all(len(c["y"]) <= 8 for c in charts))
         self.assertTrue(len(doc["description"]) <= 300 and len(doc["tldr"]) <= 300)

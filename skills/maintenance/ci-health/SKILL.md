@@ -121,12 +121,19 @@ the document layout are in [references/data.md](references/data.md).
 
    Each step is a point where the median wall time of the green commits
    before it and after it differs by at least a minute and 15 percent, with
-   the jobs' medians on both sides and the commits around it. Each `hang` is
-   a stretch of commits whose CI failed only after an hour or more, such as
-   tests hanging until the job timeout, with the commit that started it and
-   the first one after it. Drop a candidate already in `incidents` within
-   three days, and a step that no change explains, such as one that reverses
-   within a day or moves every job alike (runner speed).
+   the jobs' medians on both sides and the commits that can explain it,
+   failed ones included. Each `hang` is a stretch of commits whose CI failed
+   only after an hour or more, such as tests hanging until the job timeout,
+   with the commit that started it and the first one after it. Only
+   candidates on the collected days are listed; the weeks before them only
+   feed the medians. Drop a candidate already in `incidents` within three
+   days, and a step that no change explains, such as one that reverses
+   within a day or moves every job alike (runner speed). A step right after
+   a hang is usually the change that ended it: name it once, as the hang's
+   `faster` incident, with the new green time in `why`. A step needs eight
+   green commits on each side, so a change in the last day or two shows only
+   in the summary; when it shows jobs added or dropped, or the day's wall
+   time moving by a minute and 15 percent, find that change too.
 
 6. Name the cause of each remaining step. Look at the suspects' PRs and
    commits: workflow files, test setup, the jobs that moved. Write

@@ -106,9 +106,12 @@ by default).
 An incident is a step in total wall time with a known cause. `ci.py shifts`
 proposes candidates: at each green commit, the median of the eight green
 commits before against the eight from it on; a step moves at least a minute
-and 15 percent, and of nearby steps only the largest stays. It also lists
+and 15 percent, and of nearby steps only the largest stays, placed where
+the means before and after differ most. Its suspects are every commit since
+two green commits before it, failed ones included. It also lists
 hangs: stretches of commits whose CI failed after at least an hour and three
-times the green median, which wall time leaves out as failures. The agent
+times the green median, which wall time leaves out as failures. Both list
+only what falls on the collected days. The agent
 keeps a candidate only when a change explains it and writes
 `incidents.json`:
 
@@ -151,7 +154,8 @@ of that repository's corpus. It reads top to bottom:
    comes from.
 2. **Charts.** Line charts bound to `days`: wall time (the 7-day median and
    P95 of the total first, then each job of the last three days with green
-   commits, at most six), tests, and, once measured, the test-to-code ratio
+   commits, at most six, leaving out a job under 5 percent of the wall time,
+   such as a summary job that only reads the others' results), tests, and, once measured, the test-to-code ratio
    and coverage.
 3. **Incidents.** Below the charts, the latest five, newest first, one list
    item each: the day, the change linked, the direction with the medians

@@ -277,8 +277,11 @@ TEST_PATH = re.compile(r"(^|/)(tests?|__tests__|spec|specs|e2e|testing)/|(^|/)te
 
 def mise_tasks(root):
     """Task names the checkout's mise config defines; empty when mise is missing or has none."""
-    done = subprocess.run(["mise", "tasks", "ls", "--json"], cwd=root, capture_output=True, text=True,
-                          env=mise_env(root))
+    try:
+        done = subprocess.run(["mise", "tasks", "ls", "--json"], cwd=root, capture_output=True, text=True,
+                              env=mise_env(root))
+    except OSError:  # no mise on this host: the built-in line count still works
+        return set()
     if done.returncode:
         return set()
     try:
@@ -374,7 +377,8 @@ def number(title):
 def shifts(data, limit=5, span=8):
     """Steps in wall time over green commits: at each commit, the median of the `span` green commits before against
     the `span` from it on. A step must move at least a minute and 15 percent; nearby steps keep only the largest.
-    Each carries the commits around it, so the agent can name the change, and the jobs that moved."""
+    Each carries the commits that can explain it, so the agent can name the change, and the jobs that moved. The
+    lookback before the first collected day informs the medians; only steps on collected days are returned."""
     green = [c for c in data["commits"] if c["ok"]]
     found = []
     for i in range(span, len(green) - span + 1):
@@ -382,9 +386,11 @@ def shifts(data, limit=5, span=8):
         b, a = median(c["wall_min"] for c in before), median(c["wall_min"] for c in after)
         delta = a - b
         if abs(delta) >= max(1.0, 0.15 * b):
-            found.append((abs(delta), i, b, a))
+            # Medians tie over the commits around a clean step; the means peak where it landed.
+            sharp = abs(statistics.fmean(c["wall_min"] for c in after) - statistics.fmean(c["wall_min"] for c in before))
+            found.append((abs(delta), sharp, i, b, a))
     chosen = []
-    for size, i, b, a in sorted(found, reverse=True):
+    for size, _, i, b, a in sorted(found, key=lambda x: (-x[0], -x[1])):
         if all(abs(i - j) >= span for _, j, _, _ in chosen):
             chosen.append((size, i, b, a))
     out = []
@@ -398,11 +404,19 @@ def shifts(data, limit=5, span=8):
         out.append({"repo": data["repo"], "day": green[i]["day"], "direction": "slower" if a > b else "faster",
                     "before_min": b, "after_min": a, "change_min": round(a - b, 2),
                     "change_pct": round(100 * (a - b) / b) if b else None, "jobs": moved,
-                    "suspects": [{"sha": c["sha"][:12], "day": c["day"], "title": c["title"], "pr": number(c["title"]),
-                                  "wall_min": c["wall_min"]}
-                                 for c in data["commits"][max(0, data["commits"].index(green[i]) - 3):
-                                                          data["commits"].index(green[i]) + 2]]})
-    return out
+                    "suspects": suspects(data["commits"], green[i - 2], green[i])})
+    first, last = data.get("first", ""), data.get("last", "9999")
+    return [s for s in out if first <= s["day"] <= last]
+
+
+def suspects(commits, previous, step, cap=40):
+    """The commits that can explain a step at `step`: every one since `previous`, two green commits back, since the
+    detector places a step within a commit or two (failed ones included: a change can land on a red run), the step
+    itself and the one after."""
+    lo, hi = commits.index(previous) + 1, commits.index(step) + 2
+    pick = commits[max(lo, hi - cap):hi]
+    return [{"sha": c["sha"][:12], "day": c["day"], "title": c["title"], "pr": number(c["title"]), "ok": c["ok"],
+             "wall_min": c["wall_min"]} for c in pick]
 
 
 def hangs(data, floor=60):
@@ -423,7 +437,8 @@ def hangs(data, floor=60):
                         "hung_min": median(x["wall_min"] for x in stretch), "green_min": typical,
                         "first": pick(stretch[0]), "last": pick(stretch[-1]), "after": pick(c)})
             stretch = []
-    return out
+    first, last = data.get("first", ""), data.get("last", "9999")
+    return [h for h in out if h["day"] <= last and ((h["after"] or h["last"])["day"] >= first)]
 
 
 def summary(data):
@@ -508,7 +523,9 @@ def charts(data):
     # Job names change as CI is reworked: draw the jobs of the last three days with green commits; older ones
     # stay in the data.
     recent = [d for d in data["days"] if d.get("wall_min") is not None][-3:]
-    jobs = [k for k in data["jobs"] if any(k in d for d in recent)] or list(data["jobs"])
+    # A job under 5 percent of the wall time, such as a summary job that only reads the others' results, would
+    # crowd the chart without moving the total.
+    jobs = [k for k in data["jobs"] if any(d.get(k, 0) >= 0.05 * d["wall_min"] for d in recent)] or list(data["jobs"])
     x = {"field": "day", "type": "date", "label": "Day"}
     blocks = [chart({"version": 1, "type": "line", "collection": "days", "title": f"Wall time on {data['branch']}",
                      "x": x, "missing": "connect",
