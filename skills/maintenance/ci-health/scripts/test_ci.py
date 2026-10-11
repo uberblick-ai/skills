@@ -110,6 +110,11 @@ class Tests(unittest.TestCase):
         self.assertEqual(ci.p95(range(1, 41)), 38)
         self.assertIsNone(ci.spread([5.0]))
 
+    def test_late_start_inside_a_push(self):
+        job = lambda start, end, n: {"started": f"2026-10-10T23:{start}Z", "completed": f"2026-10-10T23:{end}Z", "min": n}
+        jobs = [job("00:00", "03:00", 3.0), job("05:00", "09:00", 4.0), job("09:10", "09:13", 0.05)]
+        self.assertEqual(ci.late_start(jobs), 5.0, "a summary job is left out")
+
     def test_shift_found_with_its_suspects(self):
         commits = [commit(n, 5.0) for n in range(10)] + [commit(n, 9.0, "2026-10-02") for n in range(10, 20)]
         found = ci.shifts({"repo": "o/r", "commits": commits})
@@ -196,17 +201,6 @@ for line in sys.stdin:
         self.assertEqual([json.loads(b["text"])["title"] for b in ci.charts(data) if b["type"] == "chart"],
                          ["Wall time on main", "Tests", "Test to code ratio", "Test coverage"])
         self.assertIn("coverage_pct", ci.schema(data)["schema"]["properties"])
-        data["jobs"]["ci_result_min"] = "CI / result"
-        data["days"][0]["ci_result_min"] = 0.1
-        wall = json.loads(ci.charts(data)[0]["text"])
-        self.assertNotIn("ci_result_min", [y["field"] for y in wall["y"]], "a summary job does not move the total")
-        data["jobs"] |= {"ci_mac_min": "CI / mac", "ci_old_min": "CI / old"}
-        data["days"] = [dict(data["days"][0], day="2026-09-30", ci_old_min=9.0),
-                        dict(data["days"][0], ci_mac_min=6.0, ci_tests_min=4.0)]
-        wall = json.loads(ci.charts(data)[0]["text"])
-        self.assertEqual([y["field"] for y in wall["y"]][2:], ["ci_mac_min", "ci_tests_min", "ci_old_min"],
-                         "current jobs first, slowest first, retired ones last")
-        self.assertEqual([y["field"] for y in charts[0]["y"][:2]], ["wall_min_7d", "wall_p95_7d"])
         self.assertTrue(all(len(c["y"]) <= 8 for c in charts))
         self.assertTrue(len(doc["description"]) <= 300 and len(doc["tldr"]) <= 300)
         items = [b for b in doc["blocks"] if b["type"] == "list-item"]

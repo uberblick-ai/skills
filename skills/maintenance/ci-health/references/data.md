@@ -19,7 +19,7 @@ attempt's jobs, skipping jobs that were skipped.
 | `<job>_min` | one job's start to end | median of the day's green commits |
 | `execution_min` | all job minutes added up | median, for contrast with wall time |
 | `wait_min` | push to the first job starting: concurrency and runner queueing | median, context only |
-| `queue_min` | the longest any job waited for a runner after it was queued, part of wall time | median, context only |
+| `late_start_min` | how long after the first job the last job of a minute or more started: runner waits (macOS, a busy pool) or `needs` | median, context only |
 | `commits`, `failed` | | commits whose runs all finished, and how many of them were not green |
 | `tests`, `tests_pattern` | tests the jobs report, and the patterns that read them | from the day's last green commit |
 | `code_lines`, `test_lines`, `test_ratio` | | at the last green commit, by `measure` |
@@ -156,12 +156,9 @@ of that repository's corpus. It reads top to bottom:
 1. **Intent.** One paragraph: what is measured and why wall time, not
    execution time. One more on how to read the charts and where the data
    comes from.
-2. **Charts.** Line charts bound to `days`: wall time (the 7-day median and
-   P95 of the total first, then each job of the last three days with green
-   commits, at most six, the latest day's jobs first and slowest first,
-   leaving out a job under 5 percent of the wall time,
-   such as a summary job that only reads the others' results), tests, and, once measured, the test-to-code ratio
-   and coverage.
+2. **Charts.** Line charts bound to `days`: total wall time (the 7-day
+   median and P95), tests, and, once measured, the test-to-code ratio and
+   coverage. Per-job times are in the data, not drawn.
 3. **Incidents.** Below the charts, the latest five, newest first, one list
    item each: the day, the change linked, the direction with the medians
    before and after, and why. `ci.py changelog` rewrites this list.

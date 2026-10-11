@@ -1,7 +1,7 @@
 {
   "question": "Is CI on main getting slower?",
-  "short": "Track how long a push to main waits for CI, split per parallel job, and how many tests it runs, in any repository and language. Name the changes that made CI slower or faster.",
-  "lede": "The wait that counts is wall time: from the first job starting to the last one finishing, not the job minutes added up. Splitting checks into parallel jobs is one way to cut it, so each job is tracked beside the total. Steps up or down are kept as incidents, each with the change behind it.",
+  "short": "Track how long a push to main waits for CI, and how many tests it runs, in any repository and language. Name the changes that made CI slower or faster.",
+  "lede": "The wait that counts is wall time: from the first job starting to the last one finishing, not the job minutes added up. The skill charts that total with its slow tail, keeps each job's time to explain a step, and records every step up or down as an incident with the change behind it.",
   "asks": [
     "How long does CI on main take?",
     "Did CI get slower this week?",
@@ -9,7 +9,7 @@
   ],
   "steps": [
     "Reads GitHub Actions runs on the default branch, grouped by commit, for a UTC day or a backfill of up to 90 days.",
-    "Takes the median wall time of green pushes, a 7-day median as the headline with its spread and P95, and each job's median beside it.",
+    "Takes the median wall time of green pushes, a 7-day median as the headline with its spread and P95.",
     "Reads the test count off the job logs, with patterns the agent writes for whatever runners the repository uses.",
     "Optionally measures the test-to-code ratio, and coverage when the repository defines <code>mise run codecov</code>.",
     "Finds steps in wall time and stretches of hung runs, then names the change behind each from the PRs around it.",
@@ -24,10 +24,6 @@
     [
       "Spread",
       "the 7-day median with its ± and P95, so the slow tail shows"
-    ],
-    [
-      "Per job",
-      "each parallel job's median, so a split shows"
     ],
     [
       "Tests",

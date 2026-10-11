@@ -2,9 +2,9 @@
 name: ci-health
 description: >-
   Track CI health on a repository's main branch from GitHub Actions: the
-  median wall time a push waits for CI, split per parallel job with the total
-  as the headline, the number of tests, optionally coverage and code against
-  test lines, and the changes that made CI slower or faster. Use when a
+  median wall time a push waits for CI and its slow tail, the number of
+  tests, optionally coverage and the test-to-code ratio, and the changes that
+  made CI slower or faster. Use when a
   maintainer asks how long CI takes, whether it got slower, or to record CI
   figures daily. Works for any repository and language. Not a CI fix, a
   flaky-test hunt or a merge gate.
@@ -25,8 +25,8 @@ metadata:
 
 CI should stay fast as a project grows: the wait that counts is wall time,
 from the first job starting to the last one finishing, not the minutes the
-jobs add up to. Splitting checks into parallel jobs is one way to cut it, so
-each job is tracked on its own beside the total. This skill records one day
+jobs add up to. The charts show that total only; each job's time stays in
+the data to show which job moved when the total steps. This skill records one day
 for one repository and keeps the steps that moved the total, with their
 cause.
 
@@ -175,9 +175,9 @@ the document layout are in [references/data.md](references/data.md).
    Storing a day again replaces it.
 
 9. With a `DOC` that existed before this run, compare its chart blocks with
-   `ci.py charts DIR/data.json`: replace a chart whose `y` fields changed
-   (jobs renamed, added or dropped) and insert one that is new (the ratio or
-   coverage measured for the first time) after the last chart. Through
+   `ci.py charts DIR/data.json`: replace a chart whose JSON differs and
+   insert one that is new (the ratio or coverage measured for the first
+   time) after the last chart. Through
    `ub`, gather these writes into one `--calls` file; several blocks
    inserted after the same block, in reverse order, end up in order, so
    the file needs only ids read before. When there are new incidents, read `incidents` again with `get_data`, write it to

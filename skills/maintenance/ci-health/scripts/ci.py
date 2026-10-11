@@ -165,8 +165,7 @@ def collect(repo, first, last, required=(), floor=None):
             "title": (run.get("head_commit") or {}).get("message", "").split("\n")[0][:200],
             "workflows": {}, "jobs": []})
         c["workflows"][run["name"]] = run["conclusion"]
-        c["jobs"] += [{"id": j["id"], "workflow": run["name"], "name": j["name"],
-                       "created": j.get("created_at") or j["started_at"], "started": j["started_at"],
+        c["jobs"] += [{"id": j["id"], "workflow": run["name"], "name": j["name"], "started": j["started_at"],
                        "completed": j["completed_at"], "conclusion": j["conclusion"],
                        "min": minutes(j["started_at"], j["completed_at"])} for j in jobs]
     rows = []
@@ -177,8 +176,7 @@ def collect(repo, first, last, required=(), floor=None):
         c["ok"] = all(v in ("success", "skipped", "neutral") for v in c["workflows"].values())
         c["wall_min"] = minutes(min(j["started"] for j in c["jobs"]), max(j["completed"] for j in c["jobs"]))
         c["wait_min"] = max(0, minutes(c["created"], min(j["started"] for j in c["jobs"])))
-        # A job can also wait for a runner after the first one started: macOS runners, a busy pool. Part of wall time.
-        c["queue_min"] = max(max(0, minutes(j["created"], j["started"])) for j in c["jobs"])
+        c["late_start_min"] = late_start(c["jobs"])
         c["execution_min"] = round(sum(j["min"] for j in c["jobs"]), 2)
         rows.append(c)
     rows.sort(key=lambda c: c["created"])
@@ -199,7 +197,7 @@ def collect(repo, first, last, required=(), floor=None):
                   "wall_p95_7d": p95(c["wall_min"] for c in recent),
                   "execution_min": median(c["execution_min"] for c in green),
                   "wait_min": median(c["wait_min"] for c in green),
-                  "queue_min": median(c.get("queue_min") for c in green)}
+                  "late_start_min": median(c.get("late_start_min") for c in green)}
         per_job = {}
         for c in green:
             for j in c["jobs"]:
@@ -215,6 +213,14 @@ def collect(repo, first, last, required=(), floor=None):
     return {"schema": SCHEMA, "repo": repo, "branch": branch, "first": first.isoformat(), "last": last.isoformat(),
             "collected": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "workflows": list(required), "jobs": dict(sorted(names.items())), "days": days, "commits": rows}
+
+
+def late_start(jobs, short=0.5):
+    """How long after the first job of a push the last real job started: waiting for a runner (macOS, a busy or
+    capped pool) or for jobs it `needs`. Jobs under `short` minutes, such as a summary job, are left out. The jobs
+    API cannot tell the two waits apart, and its `created_at` is stamped too late to show either."""
+    first = min(j["started"] for j in jobs)
+    return round(max((minutes(first, j["started"]) for j in jobs if j["min"] >= short), default=0), 2)
 
 
 def count_tests(repo, commit, patterns):
@@ -450,18 +456,17 @@ def hangs(data, floor=60):
 
 
 def summary(data):
-    jobs = [k for k in data["jobs"] if any(k in d for d in data["days"])]
-    extra = [k for k in ("tests", "coverage_pct", "code_lines", "test_lines") if any(k in d for d in data["days"])]
-    titles = {"tests": "Tests", "coverage_pct": "Coverage %", "code_lines": "Code lines", "test_lines": "Test lines"}
-    head = ["Day", "Commits", "Failed", "Wall (7d)", "P95 (7d)", "Wall", *[data["jobs"][k] for k in jobs], *[titles[k] for k in extra]]
-    lines = ["| " + " | ".join(head) + " |", "|" + " --- |" * len(head)]
+    cols = [("commits", "Commits"), ("failed", "Failed"), ("wall_min_7d", "Wall (7d)"), ("wall_p95_7d", "P95 (7d)"),
+            ("wall_min", "Wall"), ("late_start_min", "Late start"), ("tests", "Tests"), ("test_ratio", "Test ratio"),
+            ("coverage_pct", "Coverage %")]
+    cols = [(k, t) for k, t in cols if any(k in d for d in data["days"])]
     fmt = lambda v: "" if v is None else f"{v:.1f}" if isinstance(v, float) else str(v)
-    wall = lambda d: fmt(d.get("wall_min_7d")) + (f" ± {fmt(float(d['wall_spread_7d']))}" if "wall_spread_7d" in d else "")
-    for d in data["days"]:
-        lines.append("| " + " | ".join([d["day"], fmt(d["commits"]), fmt(d["failed"]), wall(d), fmt(d.get("wall_p95_7d")),
-                                        fmt(d.get("wall_min")), *[fmt(d.get(k)) for k in jobs],
-                                        *[fmt(d.get(k)) for k in extra]]) + " |")
-    return f"{data['repo']} ({data['branch']}), minutes, medians of green commits:\n\n" + "\n".join(lines)
+    cell = lambda d, k: fmt(d.get(k)) + (f" ± {fmt(float(d['wall_spread_7d']))}"
+                                         if k == "wall_min_7d" and "wall_spread_7d" in d else "")
+    lines = ["| Day | " + " | ".join(t for _, t in cols) + " |", "|" + " --- |" * (len(cols) + 1)]
+    lines += ["| " + " | ".join([d["day"], *[cell(d, k) for k, _ in cols]]) + " |" for d in data["days"]]
+    return (f"{data['repo']} ({data['branch']}), minutes, medians of green commits; per-job medians are in "
+            "data.json:\n\n" + "\n".join(lines))
 
 
 NUM = {"type": ["number", "null"], "minimum": 0}
@@ -479,7 +484,7 @@ def schema(data):
     fields = {"day": DAY, "repo": TEXT, "workflows": TEXT, "start": DAY, "measured_sha": TEXT, "tests_pattern": TEXT,
               **dict.fromkeys(["commits", "failed", "tests", "code_lines", "test_lines"], COUNT),
               "coverage_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
-              **dict.fromkeys(["wall_min", "wall_min_7d", "wall_spread_7d", "wall_p95_7d", "execution_min", "queue_min", "wait_min", "test_ratio", *data["jobs"]], NUM)}
+              **dict.fromkeys(["wall_min", "wall_min_7d", "wall_spread_7d", "wall_p95_7d", "execution_min", "late_start_min", "wait_min", "test_ratio", *data["jobs"]], NUM)}
     return {"version": 1, "schema": {"type": "object", "required": ["day", "repo", "commits"], "properties": fields}}
 
 
@@ -527,32 +532,19 @@ def chart(mapping):
 
 
 def charts(data):
-    """The wall-time and test charts, bound to the document's days."""
-    # Job names change as CI is reworked: draw the jobs of the last three days with green commits; older ones
-    # stay in the data.
-    recent = [d for d in data["days"] if d.get("wall_min") is not None][-3:]
-    # A job under 5 percent of the wall time, such as a summary job that only reads the others' results, would
-    # crowd the chart without moving the total.
-    jobs = [k for k in data["jobs"] if any(d.get(k, 0) >= 0.05 * d["wall_min"] for d in recent)] or list(data["jobs"])
-    # The jobs running now come first, slowest first, so a reworked matrix never pushes them out for retired ones.
-    jobs.sort(key=lambda k: next(((-i, d[k]) for i, d in enumerate(reversed(recent)) if k in d), (-99, 0)), reverse=True)
+    """The charts, bound to the document's days: total wall time (the 7-day median and P95), tests, and, once
+    measured, the test-to-code ratio and coverage. Per-job times stay in the data, to explain steps, not drawn."""
     x = {"field": "day", "type": "date", "label": "Day"}
-    blocks = [chart({"version": 1, "type": "line", "collection": "days", "title": f"Wall time on {data['branch']}",
-                     "x": x, "missing": "connect",
-                     "y": [{"field": "wall_min_7d", "label": "Total wall time, 7-day median", "unit": "min"},
-                           {"field": "wall_p95_7d", "label": "Total wall time, 7-day P95", "unit": "min"},
-                           *[{"field": k, "label": data["jobs"][k], "unit": "min"} for k in jobs[:6]]]}),
-              chart({"version": 1, "type": "line", "collection": "days", "title": "Tests", "x": x,
-                     "missing": "connect", "y": [{"field": "tests", "label": "Tests"}]})]
+    line = lambda title, y: chart({"version": 1, "type": "line", "collection": "days", "title": title, "x": x,
+                                   "missing": "connect", "y": y})
+    blocks = [line(f"Wall time on {data['branch']}",
+                   [{"field": "wall_min_7d", "label": "7-day median", "unit": "min"},
+                    {"field": "wall_p95_7d", "label": "7-day P95", "unit": "min"}]),
+              line("Tests", [{"field": "tests", "label": "Tests"}])]
     if any("test_ratio" in d for d in data["days"]):
-        blocks.append(chart({"version": 1, "type": "line", "collection": "days", "title": "Test to code ratio",
-                             "x": x, "missing": "connect",
-                             "y": [{"field": "test_ratio", "label": "Test lines per code line"}]}))
+        blocks.append(line("Test to code ratio", [{"field": "test_ratio", "label": "Test lines per code line"}]))
     if any("coverage_pct" in d for d in data["days"]):
-        blocks.append(chart({"version": 1, "type": "line", "collection": "days", "title": "Test coverage", "x": x,
-                             "missing": "connect", "y": [{"field": "coverage_pct", "label": "Coverage", "unit": "%"}]}))
-    if len(jobs) > 6:
-        blocks.insert(1, {"type": "paragraph", "text": f"{len(jobs) - 6} more jobs are in the data but not drawn."})
+        blocks.append(line("Test coverage", [{"field": "coverage_pct", "label": "Coverage", "unit": "%"}]))
     return blocks
 
 
@@ -585,9 +577,8 @@ def create_document(data, incidents=()):
          "the minutes the jobs add up to, so running checks in parallel is one way to bring it down."},
         {"type": "paragraph", "inline": [
             {"text": "Reading the charts: ", "marks": {"bold": True}},
-            {"text": "one point per day, over green commits, in minutes. The first two lines are the total wall time over "
-             "the last 7 days: the median, and the P95 that shows the slow tail. The others are each parallel job "
-             "on its own, the median per day. Lower is better. "
+            {"text": "one point per day, over green commits, in minutes. Wall time is the total over the last 7 days: the "
+             "median, and the P95 that shows the slow tail. Lower is better. "
              "Runner queueing before the first job is left out. Data from GitHub Actions, refreshed daily by the "
              "ci-health skill (npx skills@latest add uberblick-ai/skills).", "marks": {}}]},
         *charts(data),
@@ -596,8 +587,8 @@ def create_document(data, incidents=()):
         *changelog(list(incidents)),
     ]
     return {"title": "CI health",
-            "description": f"How long CI takes on {data['branch']} in {repo}: daily GitHub Actions wall time per "
-                           "parallel job and in total, test counts, and the incidents that made CI slower or faster. "
+            "description": f"How long CI takes on {data['branch']} in {repo}: daily GitHub Actions wall time, its "
+                           "slow tail, test counts, and the incidents that made CI slower or faster. "
                            "Data in the document's days and incidents, refreshed by the ci-health skill.",
             "tldr": f"Tracks how long a push to {data['branch']} in {name} waits for CI, how many tests run, and which "
                     "changes moved it.",
