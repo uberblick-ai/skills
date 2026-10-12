@@ -281,6 +281,13 @@ def add_tests(data, patterns):
 
 # Line counters that tell comments from code in every language they know, in the order tried.
 COUNTERS = ("scc", "cloc")
+# Commands that install a counter, by the first package manager on the PATH, as the scc and cloc READMEs give them:
+# scc where the manager packages it, cloc from the Linux distributions, which package cloc and not scc.
+INSTALL = (("brew", "brew install scc"), ("port", "sudo port install scc"), ("scoop", "scoop install scc"),
+           ("winget", "winget install --id benboyter.scc --source winget"), ("choco", "choco install scc"),
+           ("pkg", "pkg install scc"), ("apt-get", "sudo apt install cloc"), ("dnf", "sudo dnf install cloc"),
+           ("pacman", "sudo pacman -S cloc"), ("apk", "sudo apk add cloc"),
+           ("go", "go install github.com/boyter/scc/v4@latest"))
 # Prose and data, which the counters report as languages too, by the names scc and cloc give them, lowercased: the
 # ratio compares the code people write and test, style and markup included.
 NOT_CODE = {"asciidoc", "csv", "diff", "gitignore", "ini", "json", "json5", "jsonl", "license", "markdown",
@@ -337,6 +344,12 @@ def line_counter():
                                                                   text=True).stdout)
             return f"{tool} {version.group(0)}" if version else tool
     return None
+
+
+def install_hint():
+    """How to install a line counter on this host, by the first package manager it has."""
+    return next((f"run `{command}`" for manager, command in INSTALL if shutil.which(manager)),
+                "download scc from https://github.com/boyter/scc/releases")
 
 
 def file_lines(counter, root, files):
@@ -407,8 +420,9 @@ def measure(data, checkout, timeout=1800, every_day=False, paths=()):
                 found |= count_lines(root, counter, paths) | {"loc_tool": counter, "loc_paths": " || ".join(paths)}
             elif not told:
                 told = True
-                print(f"measure: no line counter: none of {', '.join(COUNTERS)} is installed and the checkout defines "
-                      "no `mise run loc`, so lines and the test ratio are left out", file=sys.stderr)
+                print(f"measure: no line counter: neither scc nor cloc is installed and the checkout defines no loc "
+                      f"task, so lines and the test ratio are left out; to count them, {install_hint()}",
+                      file=sys.stderr)
         finally:
             git("worktree", "remove", "--force", str(root))
         if found.get("code_lines"):

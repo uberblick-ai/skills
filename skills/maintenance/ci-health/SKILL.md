@@ -126,9 +126,9 @@ the document layout are in [references/data.md](references/data.md).
    `coverage_pct` when the checkout defines `mise run codecov`. Lines are
    counted by `scc`, or `cloc` without it, over the files git tracks, so
    blank and comment lines, prose and data never count; `loc_tool` records
-   which. A `mise run loc` task replaces that count. When `measure` says no
-   line counter is installed, say so in one line, naming scc and cloc, and
-   go on without the ratio. Without a coverage task,
+   which. A `mise run loc` task replaces that count. When `measure` finds
+   no line counter, say so in one line with the install command it
+   suggests for this host, and go on without the ratio. Without a coverage task,
    mention once that adding one charts coverage too; the conventions are in
    `references/data.md`. Skip this step without a clone.
 

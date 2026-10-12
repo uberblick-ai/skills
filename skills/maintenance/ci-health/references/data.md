@@ -77,8 +77,11 @@ the usual test locations (`tests/`, `__tests__/`, `spec/`, `e2e/`,
 
 The paths are the agent's call: the main source directories, as the build
 declares them, without documentation, sites, examples, scripts, fixtures,
-generated or vendored code. A repository whose layout the paths cannot
-express defines `loc`. `test_ratio` is test lines per code line. The two
+generated or vendored code. Without either counter, `measure` suggests
+the install command for the first package manager on the host: scc from
+Homebrew, MacPorts, Scoop, WinGet, Chocolatey or FreeBSD's pkg, cloc from
+apt, dnf, pacman or apk, scc through `go install`, or else an scc release.
+A repository whose layout the paths cannot express defines `loc`. `test_ratio` is test lines per code line. The two
 counters differ by about one percent, so `loc_tool` records which counted;
 a change of counter or paths moves the ratio without a change in the code.
 

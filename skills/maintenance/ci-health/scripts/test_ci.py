@@ -117,6 +117,14 @@ class Tests(unittest.TestCase):
             try:
                 self.assertEqual(ci.mise_tasks(root), set(), "no mise is no tasks, not a crash")
                 self.assertIsNone(ci.line_counter())
+                self.assertIn("github.com/boyter/scc/releases", ci.install_hint(), "no package manager: a release")
+                bin_dir = Path(root) / "bin"
+                bin_dir.mkdir()
+                for manager in ("apt-get", "go"):
+                    (bin_dir / manager).write_text("#!/bin/sh\n")
+                    (bin_dir / manager).chmod(0o755)
+                os.environ["PATH"] = str(bin_dir)
+                self.assertEqual(ci.install_hint(), "run `sudo apt install cloc`", "the distribution's package first")
             finally:
                 os.environ["PATH"] = path
 
