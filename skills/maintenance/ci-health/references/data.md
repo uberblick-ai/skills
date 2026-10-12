@@ -175,6 +175,9 @@ The agent writes `actions.json`, at most three, in rank order:
 [{"id": "split-browser-e2e", "since": "2026-10-11", "area": "Wall time",
   "title": "Split browser e2e across parallel runners",
   "why": "Browser e2e ends 10.7 min after the other jobs on every green push, 27 pushes a day. Three shards would save about 200 min of waiting a day.",
+  "where": "CI / browser e2e",
+  "cost": "10.7 min after the next job on every green push",
+  "evidence": [1588, 1591, "acme/tools#12"],
   "check": "Read .github/workflows/ci.yml and the Playwright config.",
   "impact_min_per_day": 200}]
 ```
@@ -185,15 +188,20 @@ one gets its `id` from the title and starts on the last collected day.
 go into the reply only, chosen afresh on every run, since nothing keeps
 them.
 
-`ci.py cards` renders each as a
-card: the area and since when as its label, the title, `why` as its body,
-and a footer link, "Discuss in Claude Code", to
-`claude://code/new?q=PROMPT`, which opens a new session in the Claude
-desktop app with the prompt filled in, not sent. The prompt names the
-repository and the document, the day of the data, the recommendation, its
-evidence and `check`, and asks for a plan before any change; the link
-cannot select a repository by name, only a local folder, so the prompt
-names it.
+`evidence` takes issues and PRs: a number in the repository or
+`owner/name#number` elsewhere.
+
+`ci.py cards` renders each as a card: the area and since when as its
+label, the title, `why` as its body, and the evidence as its footer:
+`where`, `cost` (or the minutes of waiting a day, without one) and the
+issues and PRs, linked. With `--button` the card also gets a button,
+"Discuss in Claude Code", to `claude://code/new?q=PROMPT`, which opens a
+new session in the Claude desktop app with the prompt filled in, not sent.
+The prompt names the repository and the document, the day of the data,
+the recommendation, its evidence and `check`, and asks for a plan before
+any change; the link cannot select a repository by name, only a local
+folder, so the prompt names it. Uberblick versions whose cards take no
+button refuse such a card, and the cards go in without it.
 
 ## Records
 
@@ -223,8 +231,8 @@ workspace of that repository's corpus. It reads top to bottom:
    median and P95), tests, and, once measured, the test-to-code ratio and
    coverage. Per-job times are in the data, not drawn.
 3. **Recommended Actions.** Below the charts, the current top three as
-   cards, each with a link to discuss it in Claude Code. `ci.py cards`
-   rewrites them on every run.
+   cards, each with its evidence in the footer and a button to discuss it
+   in Claude Code. `ci.py cards` rewrites them on every run.
 4. **Incidents.** Below the actions, the latest five, newest first, one list
    item each: the day, the change linked, the direction with the medians
    before and after, and why. `ci.py changelog` rewrites this list.

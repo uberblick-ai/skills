@@ -14,7 +14,7 @@
     "Reads the test count off the job logs, with patterns the agent writes for whatever runners the repository uses.",
     "Optionally measures the test-to-code ratio over the main source directories, comments left out, and coverage when the repository defines <code>mise run codecov</code>.",
     "Finds steps in wall time and stretches of hung runs, then names the change behind each from the PRs around it.",
-    "Keeps the top three actions that would most cut the wait, ranked by the minutes of waiting a day they could save, each with a link to discuss it in Claude Code.",
+    "Keeps the top three actions that would most cut the wait, ranked by the minutes of waiting a day they could save, each with its evidence and a button to discuss it in Claude Code.",
     "With Uberblick, stores the day, the actions and any incident in the repository's own <em>CI Health Report</em> document: charts, then recommended actions, then incidents. Without it, prints a table."
   ],
   "facts_title": "What it records",
@@ -37,7 +37,7 @@
     ],
     [
       "Actions",
-      "the top three changes that would cut the wait, kept until done or outranked, each with a link to discuss it in Claude Code"
+      "the top three changes that would cut the wait, kept until done or outranked, each with its evidence and a button to discuss it in Claude Code"
     ],
     [
       "Incidents",
