@@ -5,9 +5,10 @@ description: >-
   median wall time a push waits for CI and its slow tail, the number of
   tests, optionally coverage and the test-to-code ratio, the changes that
   made CI slower or faster, and the top three actions that would cut the
-  wait. Use when a maintainer asks how long CI takes,
-  whether it got slower, or to record CI figures daily. Works for any
-  repository and language. Not a CI fix, a flaky-test hunt or a merge gate.
+  wait. Use when a maintainer asks how long CI takes, whether it got slower
+  or what would make it faster, or to record CI figures daily. Works for
+  any repository and language. Not a CI fix, a flaky-test hunt or a merge
+  gate.
 license: MIT
 compatibility: >-
   Requires python3 and an authenticated GitHub CLI (gh); reads GitHub only.
@@ -225,25 +226,23 @@ the document layout are in [references/data.md](references/data.md).
    set.
 
 10. With a `DOC` that existed before this run, compare its chart blocks with
-   `ci.py charts DIR/data.json`: replace a chart whose JSON differs and
-   insert one that is new (the ratio or coverage measured for the first
-   time) after the last chart. When there are new incidents, read
-   `incidents` again with `get_data`, write it to `DIR/all-incidents.json`,
-   run `ci.py changelog DIR/all-incidents.json`, and replace the list items
-   under the "Incidents" heading, below the charts, with its blocks. On
-   every run, since their numbers move, run `ci.py cards DIR/data.json
-   DIR/actions.json --doc DOC` and replace the cards under the "Recommended
-   Actions" heading, or its "No action proposed yet." paragraph, with its
-   blocks; a document without that heading gets it after the last chart,
-   with the paragraph `create` writes below it. Each card links to a new
-   Claude Code session with a prompt to discuss the action before changing
-   anything.
-   Leave every other block as it is, since people may have edited it. The
-   document has no TL;DR: the charts, actions and incidents are the
-   summary, so do not add one when a tool suggests it. Through `ub`, gather
-   these writes into one `--calls` file; several blocks inserted after the
-   same block, in reverse order, end up in order, so the file needs only
-   ids read before.
+    `ci.py charts DIR/data.json`: replace a chart whose JSON differs and
+    insert one that is new (the ratio or coverage measured for the first time)
+    after the last chart. When there are new incidents, read `incidents` again
+    with `get_data`, write it to `DIR/all-incidents.json`, run `ci.py
+    changelog DIR/all-incidents.json`, and replace the list items under the
+    "Incidents" heading, below the charts, with its blocks. On every run,
+    since their numbers move, run `ci.py cards DIR/data.json DIR/actions.json
+    --doc DOC` and replace the cards under the "Recommended Actions" heading,
+    or its "No action proposed yet." paragraph, with its blocks; a document
+    without that heading gets it after the last chart, with the paragraph
+    `create` writes below it. Each card links to a new Claude Code session
+    with a prompt to discuss the action before changing anything. Leave every
+    other block as it is, since people may have edited it. The document has no
+    TL;DR: the charts, actions and incidents are the summary, so do not add
+    one when a tool suggests it. Through `ub`, gather these writes into one
+    `--calls` file; several blocks inserted after the same block, in reverse
+    order, end up in order, so the file needs only ids read before.
 
 11. Reply with the total wall time (the 7-day median with its ± and the
     P95), the tests, the test ratio and any coverage, any new incident with

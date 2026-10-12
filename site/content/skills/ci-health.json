@@ -1,10 +1,11 @@
 {
   "question": "Is CI on main getting slower?",
-  "short": "Track how long a push to main waits for CI, and how many tests it runs, in any repository and language. Name the changes that made CI slower or faster.",
-  "lede": "The wait that counts is wall time: from the first job starting to the last one finishing, not the job minutes added up. The skill charts that total with its slow tail, keeps each job's time to explain a step, and records every step up or down as an incident with the change behind it.",
+  "short": "Track how long a push to main waits for CI, and how many tests it runs, in any repository and language. Name the changes that made CI slower or faster, and the three that would cut the wait most.",
+  "lede": "The wait that counts is wall time: from the first job starting to the last one finishing, not the job minutes added up. The skill charts that total with its slow tail, keeps each job's time to explain a step, records every step up or down as an incident with the change behind it, and keeps the three actions that would most cut the wait.",
   "asks": [
     "How long does CI on main take?",
     "Did CI get slower this week?",
+    "What would make CI faster?",
     "Record yesterday's CI figures in the CI Health Report."
   ],
   "steps": [
@@ -14,7 +15,7 @@
     "Optionally measures the test-to-code ratio over the main source directories, comments left out, and coverage when the repository defines <code>mise run codecov</code>.",
     "Finds steps in wall time and stretches of hung runs, then names the change behind each from the PRs around it.",
     "Keeps the top three actions that would most cut the wait, ranked by the minutes of waiting a day they could save, each with a link to discuss it in Claude Code.",
-    "With Uberblick, stores the day, the actions and any incident in the repository's own <em>CI Health Report</em> document: charts, then actions, then incidents. Without it, prints a table."
+    "With Uberblick, stores the day, the actions and any incident in the repository's own <em>CI Health Report</em> document: charts, then recommended actions, then incidents. Without it, prints a table."
   ],
   "facts_title": "What it records",
   "facts": [
@@ -32,11 +33,11 @@
     ],
     [
       "Code",
-      "test lines per code line, and coverage through a mise task"
+      "test lines per code line over the main source directories, comments left out, and coverage through a mise task"
     ],
     [
       "Actions",
-      "the top three changes that would cut the wait, kept until done or outranked"
+      "the top three changes that would cut the wait, kept until done or outranked, each with a link to discuss it in Claude Code"
     ],
     [
       "Incidents",
@@ -50,7 +51,7 @@
     ],
     [
       "Optional",
-      "a local checkout for the ratio and coverage, with <code>scc</code> or <code>cloc</code> to count lines; the Uberblick MCP tools or the <code>ub</code> command, to keep the figures in a document."
+      "a local checkout for the ratio and coverage, with <code>scc</code> or <code>cloc</code> to count lines; the Uberblick MCP tools or the <code>ub</code> command, to keep the figures in a document; the Claude desktop app, to open an action's discussion."
     ],
     [
       "Leaves",

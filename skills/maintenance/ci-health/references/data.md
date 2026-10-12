@@ -81,9 +81,10 @@ generated or vendored code. Without either counter, `measure` suggests
 the install command for the first package manager on the host: scc from
 Homebrew, MacPorts, Scoop, WinGet, Chocolatey or FreeBSD's pkg, cloc from
 apt, dnf, pacman or apk, scc through `go install`, or else an scc release.
-A repository whose layout the paths cannot express defines `loc`. `test_ratio` is test lines per code line. The two
-counters differ by about one percent, so `loc_tool` records which counted;
-a change of counter or paths moves the ratio without a change in the code.
+A repository whose layout the paths cannot express defines `loc`.
+`test_ratio` is test lines per code line. The two counters differ by about
+one percent, so `loc_tool` records which counted; a change of counter or
+paths moves the ratio without a change in the code.
 
 The coverage task runs the test suite with the language's own coverage tool
 and prints the total. For example, in `mise.toml`:
@@ -180,9 +181,11 @@ The agent writes `actions.json`, at most three, in rank order:
 
 `id` and `since` carry over from the stored action an entry keeps; a new
 one gets its `id` from the title and starts on the last collected day.
-Without a document the actions go into the reply only, chosen afresh on
-every run, since nothing keeps them.
-`rank` and `updated` are set when stored. `ci.py cards` renders each as a
+`rank` and `updated` are set when stored. Without a document the actions
+go into the reply only, chosen afresh on every run, since nothing keeps
+them.
+
+`ci.py cards` renders each as a
 card: the area and since when as its label, the title, `why` as its body,
 and a footer link, "Discuss in Claude Code", to
 `claude://code/new?q=PROMPT`, which opens a new session in the Claude
@@ -210,8 +213,8 @@ repository.
 
 ## Document
 
-Each repository has its own "CI Health Report" document, in the Uberblick workspace
-of that repository's corpus. It reads top to bottom:
+Each repository has its own "CI Health Report" document, in the Uberblick
+workspace of that repository's corpus. It reads top to bottom:
 
 1. **Intent.** One paragraph: what is measured and why wall time, not
    execution time. One more on how to read the charts and where the data
@@ -219,9 +222,9 @@ of that repository's corpus. It reads top to bottom:
 2. **Charts.** Line charts bound to `days`: total wall time (the 7-day
    median and P95), tests, and, once measured, the test-to-code ratio and
    coverage. Per-job times are in the data, not drawn.
-3. **Recommended Actions.** Below the charts, the current top three as cards, each
-   with a link to discuss it in Claude Code. `ci.py cards` rewrites them
-   on every run.
+3. **Recommended Actions.** Below the charts, the current top three as
+   cards, each with a link to discuss it in Claude Code. `ci.py cards`
+   rewrites them on every run.
 4. **Incidents.** Below the actions, the latest five, newest first, one list
    item each: the day, the change linked, the direction with the medians
    before and after, and why. `ci.py changelog` rewrites this list.
@@ -231,6 +234,6 @@ the description names what the data holds, and the agent adds the fitting
 catalog tags. The document has no TL;DR; the charts, actions and incidents
 are the summary. `create` writes the whole document.
 Everything outside the charts, the action cards and the Incidents list is
-written once and may be edited by hand. The skill replaces a chart when `ci.py charts` gives
-a different one, after a skill update, and adds one when a new measure
-appears.
+written once and may be edited by hand. The skill replaces a chart when
+`ci.py charts` gives a different one, after a skill update, and adds one
+when a new measure appears.
