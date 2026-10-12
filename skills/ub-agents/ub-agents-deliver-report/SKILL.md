@@ -15,7 +15,7 @@ compatibility: >-
   uberblick MCP server; without it the skill still writes the page.
 metadata:
   author: uberblick-ai
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Deliver report
@@ -44,17 +44,19 @@ classes, the page and the records are defined in
 2. Decide where the day will be kept. Uberblick is available when the
    `uberblick` MCP tools (`search`, `get_doc`, `get_data`, `update_data`,
    `create_doc`, `insert_block`, `delete_block`) are in your tool list.
-   Without them, the page is the whole result: steps 3 and 4 name causes and
-   lessons from this day alone, since there is no registry to reuse; skip
-   steps 6 and 7, say so in one line of the reply, and add that
-   `ub mcp install` registers the server for next time when `ub` is on the
-   PATH. With them, find the project's delivery dataset:
-   an Uberblick document holding the `days`, `items`, `findings`, `causes`,
-   `lessons` and `changes` collections (search for "Delivery report"); call it
-   `DOC`, and read its `causes` and `lessons` with `get_data` before naming
-   anything. When no such document exists, ask the maintainer once whether to
-   create the delivery report document, and carry on with the page while
-   waiting: a yes creates `DOC` in step 6, a no skips steps 6 and 7.
+
+   - Without them, the page is the whole result. Steps 3 and 4 name causes
+     and lessons from this day alone, since there is no registry to reuse,
+     and steps 6 and 7 are skipped. Say so in one line of the reply; when
+     `ub` is on the PATH, add that `ub mcp install` registers the server
+     for next time.
+   - With them, search for "Delivery report" to find the document that
+     holds the `days`, `items`, `findings`, `causes`, `lessons` and
+     `changes` collections; call it `DOC`, and read its `causes` and
+     `lessons` with `get_data` before naming anything. When no such
+     document exists, ask the maintainer once whether to create one and
+     carry on with the page meanwhile: a yes creates `DOC` in step 6, a no
+     skips steps 6 and 7.
 
 3. For each loop delivery that is not autonomous, each wasted run and each
    reviewer send-back, name the cause from run summaries, denied commands and
@@ -66,12 +68,14 @@ classes, the page and the records are defined in
    count it only where the records agree. Group the day's retrospectives by
    cause, one summary sentence per group.
 
-4. Propose at most four changes, each giving clearer authority, better wording,
-   fewer instructions or more autonomy. Quote any line you would change. Never
-   add a role, label, gate, review round or checklist, and prefer deleting text
-   or moving a step into config or tooling over adding prose. Reuse a lesson id
-   the registry already has. Then search the repositories' issues and PRs for
-   one that addresses each proposed lesson, new or registered: mark it
+4. Propose at most four lessons: changes that give clearer authority,
+   better wording, fewer instructions or more autonomy. Quote any line you
+   would change. Never add a role, label, gate, review round or checklist,
+   and prefer deleting text or moving a step into config or tooling over
+   adding prose. Reuse a lesson id the registry already has. Write `cost`
+   with dates ("5 runs on 11 October"), never "today": a lesson can stay a
+   recommended action for 14 days. Then search the repositories' issues and
+   PRs for one that addresses each proposed lesson, new or registered: mark it
    `tracked` with `addressed_by` when an open one does, `applied` when a merged
    one did. Rank up to five still-proposed lessons from the last 14 days,
    most runs saved first, as the day's `actions`; re-propose an older lesson
@@ -94,12 +98,14 @@ classes, the page and the records are defined in
    maintainer said yes to a new document:
 
    ```sh
-   python3 scripts/review.py create DIR/report.json > DIR/create.json
+   python3 scripts/review.py create DIR/report.json --button > DIR/create.json
    ```
 
    Pass the file's `title`, `description` and `blocks` to `create_doc`; the
    document it returns is `DOC`, laid out as `references/report.md` describes
-   with this day's actions already in place. Then, with `DOC`:
+   with this day's recommended actions already in place. When Uberblick
+   refuses a card with `invalid_card` because its cards take no button yet,
+   run `create` again without `--button`. Then, with `DOC`:
 
    ```sh
    python3 scripts/review.py records DIR/report.json > DIR/operations.json
@@ -110,20 +116,25 @@ classes, the page and the records are defined in
    Storing a day again overwrites its records; delete a finding that no
    longer applies with `deleteRecords`.
 
-7. With a `DOC` that existed before this run, refresh its Actions and
-   Changelog sections (a document created in step 6 already carries them).
+7. With a `DOC` that existed before this run, refresh its Recommended
+   Actions and Changelog sections (a document created in step 6 already
+   carries them).
    Read `lessons` and `changes` with `get_data` and write them to
    `DIR/dataset.json` as `{"lessons": [...], "changes": [...]}`, each a list
    of `{id, value}`. Then:
 
    ```sh
-   python3 scripts/review.py document DIR/dataset.json DIR/report.json > DIR/sections.json
+   python3 scripts/review.py document DIR/dataset.json DIR/report.json --doc DOC --button > DIR/sections.json
    ```
 
-   In `DOC`, replace the blocks under the "Actions" and "Changelog" headings
-   with the `actions` and `changelog` blocks: delete the old ones, then insert
-   the new ones in order after the heading. Leave every other block as it is;
-   the charts and the Recent days table follow the data by themselves.
+   In `DOC`, replace the blocks under the "Recommended Actions" and
+   "Changelog" headings with the `actions` and `changelog` blocks: delete
+   the old ones, then insert the new ones in order after the heading. Each
+   action is a card whose button opens a Claude Code session to discuss
+   it; when Uberblick refuses a card with `invalid_card` because its cards
+   take no button yet, run `document` again without `--button`. Leave every
+   other block as it is; the charts and the Recent days table follow the
+   data by themselves.
 
 8. Reply with the headline, the KPIs, one line per change, and where the day
    was stored or why it was not. The page and the records may be shared: keep

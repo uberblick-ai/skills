@@ -111,12 +111,14 @@ same gap recurring is worth fixing.
    denials, PRs merged with lines and files, issues closed and opened, the open
    queue split into to-prepare and prepared, and machines with loops and peak
    parallel runs.
-3. **What to change.** At most four cards, each one lesson: the lever
-   (clearer authority, better wording, fewer instructions, more autonomy), a
-   title, the change in one or two sentences quoting any line it would
-   change, where it lives, what it cost, the causes it targets and the items
-   that are its evidence. Never a new role, label, gate, review round or
-   checklist.
+3. **What to change.** At most four cards, each one lesson the day
+   proposed: the lever (clearer authority, better wording, fewer
+   instructions, more autonomy), a title, the change in one or two
+   sentences quoting any line it would change, where it lives, what it
+   cost, the causes it targets, the items that are its evidence, and a
+   link to discuss it in Claude Code. Never a new role, label, gate, review
+   round or checklist. The document's Recommended Actions rank lessons
+   across 14 days instead.
 4. **Where extra runs went.** One card per finding, costliest first: the cost
    and class as the label, the concrete example, the cause id with its
    mechanism and state, and the items.
@@ -135,6 +137,11 @@ or hostnames. The script replaces local paths in run summaries; the notes must
 not add any.
 
 ## Notes
+
+Three words keep one meaning each. A **lesson** is a change someone could
+make, kept in the `lessons` registry; the **actions** are the lessons the
+document recommends now, up to five; a **change** is something that
+landed, kept in `changes` and listed in the Changelog.
 
 The reviewing agent writes `notes.json`; `render` refuses notes with an
 unknown class, state or lever, a missing field, one cause in two findings, a
@@ -164,9 +171,11 @@ lesson without `addressed_by`, or more than five actions.
 
 A lesson is `proposed` until an issue or PR addresses it: `tracked` while that
 is open, `applied` once it merged, `rejected` when a person declines it.
-`addressed_by` names it as `owner/name#number`. `actions` ranks up to five
-proposed lessons proposed or re-proposed in the last 14 days, most runs saved
-first; an older lesson drops off until a day proposes it again. A change is
+`addressed_by` names it as `owner/name#number`. `actions` lists up to five
+lessons still `proposed` that this day or one of the 13 before it proposed,
+most runs saved first; an older lesson drops off until a day proposes it
+again. Write a lesson's `cost` with dates ("5 runs on 11 October"), never
+"today", since it may stay an action for 14 days. A change is
 anything that landed on this day to fix a cause or apply a lesson; `ref` is
 `owner/name#number` or a commit, with `url` for a commit. `records` gives every
 change a `url`, derived from `ref` when the notes give none.
@@ -258,19 +267,23 @@ bottom:
     "columns": [{"field": "day", "label": "Day", "format": "date"},
                 {"field": "autonomous", "label": "Autonomous", "format": "number"},
                 {"field": "wasted_pct", "label": "Wasted share", "format": "number", "unit": "%", "decimals": 0}],
-    "sort": {"field": "day", "direction": "desc"}}
+    "sort": {"field": "day", "direction": "desc"}, "limit": 7}
    ```
 
-4. **Actions.** The day's `actions`: up to five proposed lessons, each a
-   heading, the change, and a line with the lever, where it lives, its cost,
-   its causes and its evidence. A lesson leaves the list once an issue or PR
+4. **Recommended Actions.** The day's `actions` as cards, up to five: the
+   lever as label, the title, the change as body, a footer with where it
+   lives, its cost, its causes and the evidence items, linked, and a button
+   that opens a new Claude Code session in the desktop app
+   (`claude://code/new`) with a prompt to discuss the lesson before
+   changing anything. An Uberblick whose cards take no button gets the
+   cards without it. A lesson leaves the list once an issue or PR
    addresses it.
 5. **Changelog.** A bullet list of the five latest `changes`, newest first:
    the day, the change linked to its issue, PR or commit in ub-agents or the
    project, and why it was made.
 
-The skill rewrites the "Actions" and "Changelog" sections, from `document`'s
-output, after each stored day. Everything else is written once, by `create`
-or by a person, and may be edited by hand; the charts and tables follow the
-data by themselves. A chart plots and a table lists every stored day: neither
-mapping has a window yet, so a year of days shows as one long table.
+The skill rewrites the "Recommended Actions" and "Changelog" sections, from
+`document`'s output, after each stored day. Everything else is written
+once, by `create` or by a person, and may be edited by hand; the charts and
+tables follow the data by themselves. The charts plot every stored day; the
+Recent days table shows the latest seven (`"limit": 7`).
