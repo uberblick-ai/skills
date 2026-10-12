@@ -12,9 +12,9 @@ compatibility: >-
   Requires python3 and an authenticated GitHub CLI (gh); reads GitHub only.
   The test count reads job logs, so the host must reach GitHub's log storage.
   Coverage and line counts need a local checkout; line counts also need
-  scc or cloc, and coverage a `mise run codecov` task. Storing the figures in an Uberblick document is
-  optional and needs the uberblick MCP tools or the `ub` command; without
-  either the skill prints a table.
+  scc or cloc, and coverage a `mise run codecov` task. Storing the figures
+  in an Uberblick document is optional and needs the uberblick MCP tools or
+  the `ub` command; without either the skill prints a table.
 metadata:
   author: uberblick-ai
   version: "1.1"
