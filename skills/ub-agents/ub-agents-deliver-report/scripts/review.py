@@ -5,8 +5,8 @@ standard library and `gh`.
     review.py collect --repo OWNER/NAME [--day YYYY-MM-DD] > data.json
     review.py render data.json notes.json OUT_DIR [--no-open]   # writes report.html and report.json
     review.py records report.json > operations.json             # update_data operations for the day
-    review.py document dataset.json report.json > sections.json # the dataset document's Actions and Changelog
-    review.py create report.json > create.json                  # create_doc arguments for a new dataset document
+    review.py document dataset.json report.json [--doc UUID] [--button] > sections.json  # Recommended Actions and Changelog
+    review.py create report.json [--button] > create.json      # create_doc arguments for a new dataset document
     review.py queue --repo OWNER/NAME [--day YYYY-MM-DD]         # only the open-queue figures for a day
 
 The day runs from local midnight to local midnight; the default is yesterday. Only runs that started
@@ -27,6 +27,7 @@ import subprocess
 import sys
 import webbrowser
 from pathlib import Path
+from urllib.parse import quote
 
 SCHEMA = "ub-agents-deliver-report/1"
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
@@ -445,6 +446,8 @@ a { color: var(--accent); } h1, h2, h3 { font-family: var(--head); margin: 0; te
 .scroll { overflow-x: auto; } table { border-collapse: collapse; width: 100%; font-size: 14px; }
 th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 td.r { text-align: right; white-space: nowrap; }
+.discuss { display: inline-block; margin-top: 10px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px;
+  color: var(--fg); text-decoration: none; font-weight: 600; } .discuss:hover { border-color: var(--accent); }
 """
 TONE = {"forward": "ok", "back": "back", "stop": "fail", "waste": "fail", "pending": "wait"}
 
@@ -500,7 +503,9 @@ def report(data):
     out.append("</section><section><h2>What to change</h2>")
     out += [f'<div class="box"><div class="label">{esc(LEVERS[l["lever"]])}</div><h3>{esc(l["title"])}</h3>'
             f'<p>{esc(l["change"])}</p><div class="label">{esc(l.get("where", ""))} · {esc(l.get("cost", ""))} · '
-            f'{esc(", ".join(l.get("causes", [])))} · {refs(repo, l.get("evidence", []))}</div></div>' for l in data["lessons"]]
+            f'{esc(", ".join(l.get("causes", [])))} · {refs(repo, l.get("evidence", []))}</div>'
+            f'<a class="discuss" href="{esc(discuss_link(repo, data["day"], l))}">Discuss in Claude Code</a></div>'
+            for l in data["lessons"]]
     out.append('</section><section><h2>Where extra runs went</h2>')
     out += [f'<div class="box"><div class="label">{esc(f["cost"])} · {esc(f["class"])}</div><p>{esc(f["example"])}</p>'
             f'<p class="muted">{esc(f["cause"])}: {esc(f["mechanism"])} {esc(f["state"].capitalize())}'
@@ -695,31 +700,56 @@ def changelog(changes, limit=5):
     return blocks
 
 
-def document(dataset, data):
-    """The dataset document's generated sections as insert_block arguments: the Actions (up to five proposed
-    lessons) and the Changelog (the latest changes). Recent days is a table block bound to the data.
+# A card's button opens a new Claude Code session in the desktop app with the prompt filled in, not sent; the prompt
+# names the repository, since the link can only select a local folder.
+CLAUDE_CODE = "claude://code/new?q="
+
+
+def discuss_link(repo, day, lesson, doc=None):
+    """A link that opens Claude Code with a prompt to discuss a lesson before changing anything: the change, where it
+    lives, what it cost, its causes and evidence, the skill's rule against adding process, then a plan."""
+    source = f"the delivery report for {repo}" + (f" (Uberblick document {doc})" if doc else "")
+    facts = [("Change", lesson["change"]), ("Where", lesson.get("where")), ("Cost", lesson.get("cost")),
+             ("Causes", ", ".join(lesson.get("causes", []))),
+             ("Evidence", ", ".join(f"#{n}" for n in lesson.get("evidence", [])))]
+    prompt = (f"From {source}, data as of {day}:\n\nRecommendation: {lesson['title'].rstrip('.')}.\n"
+              + "".join(f"{k}: {v}\n" for k, v in facts if v)
+              + "\nLet's discuss this before changing anything. Read where it lives and the evidence: is it sound, "
+              "what would it change, what are the risks, and is there a simpler way? Prefer deleting text or moving a "
+              "step into config or tooling; never add a role, label, gate, review round or checklist. Then propose a "
+              "plan and wait for my go-ahead.")
+    return CLAUDE_CODE + quote(prompt, safe="")
+
+
+def action_card(repo, day, lesson, doc=None, button=False):
+    """One recommended action as a card block: the lever as label, the title, the change as body, and a footer with
+    the evidence: where it lives, what it cost, its causes and the items, linked. With `button`, also a button to
+    discuss it in Claude Code, for an Uberblick whose cards take one."""
+    one_line = lambda text: " ".join(str(text).split())
+    items = " ".join(f"[#{n}](https://github.com/{repo}/issues/{n})" for n in lesson.get("evidence", []))
+    footer = " · ".join(one_line(x) for x in (lesson.get("where"), lesson.get("cost"),
+                                              ", ".join(lesson.get("causes", [])), items) if x)
+    head = [f"label: {LEVERS[lesson['lever']]}", f"title: {one_line(lesson['title'])}"]
+    head += [f"footer: {footer}"] * bool(footer)
+    head += [f"button: [Discuss in Claude Code]({discuss_link(repo, day, lesson, doc)})"] * button
+    return {"type": "card", "text": "\n".join(head) + f"\n\n{lesson['change']}"}
+
+
+def document(dataset, data, doc=None, button=False):
+    """The dataset document's generated sections as insert_block arguments: Recommended Actions (up to five proposed
+    lessons, as cards) and the Changelog (the latest changes). Recent days is a table block bound to the data.
     See references/report.md."""
     repo = data["repo"]
     lessons = {l["id"]: l for l in data["lessons"]} | values(dataset.get("lessons"))
     ranked = data.get("actions") or sorted((i for i, l in lessons.items() if l.get("state") == "proposed"),
                                            key=lambda i: lessons[i].get("day", ""), reverse=True)
-    actions = [{"type": "paragraph", "text": "The most valuable changes not yet taken up, most runs saved first. An action "
+    actions = [{"type": "paragraph", "text": "Up to five changes not yet taken up, most runs saved first. An action "
                 "leaves this list once an issue or PR addresses it."}]
     # Actions look back ITEM_DAYS: a lesson nobody proposed again in that window drops off.
     since = (dt.date.fromisoformat(data["day"]) - dt.timedelta(days=ITEM_DAYS - 1)).isoformat()
     current = [k for k in ranked if k in lessons and lessons[k].get("state", "proposed") == "proposed"
                and lessons[k].get("day", data["day"]) >= since]
-    for n, key in enumerate(current[:5], 1):
-        l = lessons[key]
-        meta = " · ".join(filter(None, [LEVERS[l["lever"]], l.get("where"), l.get("cost"),
-                                        "causes: " + ", ".join(l.get("causes", [])) if l.get("causes") else None]))
-        evidence = [{"text": " · evidence: ", "marks": {}}] * bool(l.get("evidence"))
-        for i, number in enumerate(l.get("evidence", [])):
-            evidence += [{"text": ", ", "marks": {}}] * bool(i)
-            evidence.append({"text": f"#{number}", "marks": {"link": f"https://github.com/{repo}/issues/{number}"}})
-        actions += [{"type": "heading", "level": 3, "text": f'{n}. {l["title"]}'},
-                    {"type": "paragraph", "text": l["change"]},
-                    {"type": "paragraph", "inline": [{"text": meta, "marks": {"italic": True}}] + evidence}]
+    actions += [action_card(repo, data["day"], lessons[key], doc, button) for key in current[:5]]
     changes = values(dataset.get("changes")) | {c["ref"]: c for c in data.get("changes", [])}
     return {"actions": actions, "changelog": changelog(changes)}
 
@@ -743,10 +773,10 @@ def column(field, label, fmt="number", **extra):
     return {"field": field, "label": label, "format": fmt} | extra
 
 
-def create_document(data):
+def create_document(data, button=False):
     """create_doc arguments for a new dataset document, laid out as references/report.md describes: intro, KPIs,
     charts and a Recent days table bound to `days`, this day's Actions, and the Changelog."""
-    repo, sections = data["repo"], document({}, data)
+    repo, sections = data["repo"], document({}, data, button=button)
     percent = {"unit": "%", "decimals": 0}
     hours = {"unit": "h", "decimals": 1}
     blocks = [
@@ -756,7 +786,7 @@ def create_document(data):
          "changes that would have saved them."},
         {"type": "paragraph", "text": "The ub-agents-deliver-report skill (npx skills@latest add uberblick-ai/skills) "
          "stores one record per day in this document's data. The charts and tables below follow that data; the "
-         "Actions section is rewritten after each stored day."},
+         "Recommended Actions are rewritten after each stored day."},
         {"type": "heading", "level": 2, "text": "KPIs"},
         {"type": "table", "text": "| KPI | Goal | Definition |\n| --- | --- | --- |\n" + "\n".join(
             f"| {kpi} | {goal} | {definition} |" for kpi, goal, definition in KPIS)},
@@ -794,8 +824,8 @@ def create_document(data):
                            column("run_h_median", "Run time", **hours), column("denial_pct", "Denials", **percent),
                            column("backlog", "Actionable queue"), column("waiting_to_start", "Waiting to start"),
                            column("open_issues", "Open issues"), column("machines", "Machines")],
-               "sort": {"field": "day", "direction": "desc"}}),
-        {"type": "heading", "level": 2, "text": "Actions"},
+               "sort": {"field": "day", "direction": "desc"}, "limit": 7}),
+        {"type": "heading", "level": 2, "text": "Recommended Actions"},
         *sections["actions"],
         {"type": "heading", "level": 2, "text": "Changelog"},
         *sections["changelog"],
@@ -823,8 +853,12 @@ def main():
     d = commands.add_parser("document")
     d.add_argument("dataset", help="lessons and changes as read with get_data")
     d.add_argument("report", help="report.json written by render")
+    d.add_argument("--doc", help="the dataset document's uuid, named in each action's prompt")
+    d.add_argument("--button", action="store_true",
+                   help="give each action a button to discuss it in Claude Code, for an Uberblick whose cards take one")
     n = commands.add_parser("create")
     n.add_argument("report", help="report.json written by render")
+    n.add_argument("--button", action="store_true", help="as for document")
     args = parser.parse_args()
     if args.command == "collect":
         print(json.dumps(collect(args.repo, *day_window(args.day)), indent=1))
@@ -836,10 +870,11 @@ def main():
     elif args.command == "records":
         print(json.dumps(records(json.loads(Path(args.report).read_text())), indent=1))
     elif args.command == "create":
-        print(json.dumps(create_document(json.loads(Path(args.report).read_text())), indent=1, ensure_ascii=False))
+        print(json.dumps(create_document(json.loads(Path(args.report).read_text()), args.button), indent=1,
+                         ensure_ascii=False))
     elif args.command == "document":
-        print(json.dumps(document(json.loads(Path(args.dataset).read_text()), json.loads(Path(args.report).read_text())),
-                         indent=1, ensure_ascii=False))
+        print(json.dumps(document(json.loads(Path(args.dataset).read_text()), json.loads(Path(args.report).read_text()),
+                                  args.doc, args.button), indent=1, ensure_ascii=False))
     else:
         data = merge(json.loads(Path(args.data).read_text()), json.loads(Path(args.notes).read_text()))
         out = Path(args.out)
