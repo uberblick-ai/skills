@@ -7,10 +7,12 @@
     ci.py tests data.json --pattern REGEX...           # each day's test count from that line, added in place
     ci.py measure data.json --checkout PATH [--path SPEC]... [--every-day]  # optional: test ratio and coverage, added in place
     ci.py summary data.json                            # the days as a Markdown table, for a reply
-    ci.py records data.json [incidents.json] [--doc UUID] > update.json  # update_data batch for the document
-    ci.py create data.json [--incidents incidents.json] [--tag ID]... > create.json  # create_doc arguments
+    ci.py signals data.json [--days 7] > signals.json  # what the last days show, to choose the top actions
+    ci.py records data.json [incidents.json] [--actions actions.json] [--doc UUID] > update.json  # update_data batch
+    ci.py create data.json [--incidents F] [--actions F] [--tag ID]... > create.json  # create_doc arguments
     ci.py charts data.json > charts.json               # the chart blocks, to compare with an existing document's
     ci.py changelog incidents.json > changelog.json    # the document's Incidents list, latest five
+    ci.py cards data.json actions.json [--doc UUID]  # the Actions section's cards
     ci.py ub TOOL [ARGS] | --calls calls.json [--checkout PATH]  # Uberblick tools through one `ub mcp serve`
 
 Days are UTC calendar days; the default is yesterday. A commit counts on the day its first push run was
@@ -34,6 +36,7 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path
+from urllib.parse import quote
 
 SCHEMA = "ci-health/1"
 WINDOW = 7  # rolling median over this many days, the headline
@@ -507,6 +510,54 @@ def hangs(data, floor=60):
     return [h for h in out if h["day"] <= last and ((h["after"] or h["last"])["day"] >= first)]
 
 
+def signals(data, days=WINDOW):
+    """What the pushes of the last `days` days show, for choosing actions: how often main is pushed, the job that
+    finishes last and how far ahead of the next one, which jobs fail, runner waits and hangs. Each comes with a rough
+    count of the minutes of waiting a day it accounts for, one scale to rank actions on."""
+    last = data["last"]
+    first = (dt.date.fromisoformat(last) - dt.timedelta(days=days - 1)).isoformat()
+    recent = [c for c in data["commits"] if first <= c["day"] <= last]
+    out = {"repo": data["repo"], "from": first, "to": last, "pushes": len(recent)}
+    if not recent:
+        return out
+    span = (dt.date.fromisoformat(last) - dt.date.fromisoformat(min(c["day"] for c in recent))).days + 1
+    green, failed = [c for c in recent if c["ok"]], [c for c in recent if not c["ok"]]
+    name = lambda j: f"{j['workflow']} / {j['name']}"
+    jobs = {}
+    for c in recent:
+        for j in c["jobs"]:
+            job = jobs.setdefault(name(j), {"min": [], "ahead": [], "failed": 0})
+            if c["ok"]:
+                job["min"].append(j["min"])
+            elif j.get("conclusion") in ("failure", "timed_out"):
+                job["failed"] += 1
+        # A summary job under half a minute often ends last; the job before it is what the push waits for.
+        ends = sorted(((when(j["completed"]), name(j)) for j in c["jobs"] if j.get("completed") and j["min"] >= 0.5),
+                      reverse=True)
+        if c["ok"] and ends:
+            jobs[ends[0][1]]["ahead"].append(
+                (ends[0][0] - ends[1][0]).total_seconds() / 60 if len(ends) > 1 else c["wall_min"])
+    rows = [{"job": job, "median_min": median(j["min"]),
+             "ends_last": round(len(j["ahead"]) / len(green), 2) if green else 0,
+             "ahead_min": median(j["ahead"]), "failed": j["failed"]} for job, j in jobs.items()]
+    rows.sort(key=lambda r: (-r["ends_last"], -(r["median_min"] or 0)))
+    wall = median(c["wall_min"] for c in green) or 0
+    wait = (median(c["wait_min"] for c in green) or 0) + (median(c["late_start_min"] for c in green) or 0)
+    stuck = [h for h in hangs(data) if h["day"] >= first]
+    lead = rows[0] if rows and rows[0]["ahead_min"] else None
+    per_day = lambda minutes: round(minutes / span, 1)
+    return out | {
+        "days": span, "pushes_per_day": round(len(recent) / span, 1), "failed": len(failed), "wall_min": wall,
+        "wall_p95_min": p95(c["wall_min"] for c in green), "wait_min": round(wait, 2), "jobs": rows, "hangs": stuck,
+        # Rough minutes of waiting a day: the last job's lead on every push it ends, a full run more for each failed
+        # push, the runner waits of every push, and the time hung runs held before failing.
+        "waiting_min_per_day": {
+            "slowest_job": per_day(lead["ahead_min"] * len(jobs[lead["job"]]["ahead"])) if lead else 0,
+            "failed_pushes": per_day(len(failed) * wall),
+            "runner_waits": per_day(wait * len(recent)),
+            "hangs": per_day(sum(h["hung_min"] * h["commits"] for h in stuck))}}
+
+
 def summary(data):
     cols = [("commits", "Commits"), ("failed", "Failed"), ("wall_min_7d", "Wall (7d)"), ("wall_p95_7d", "P95 (7d)"),
             ("wall_min", "Wall"), ("late_start_min", "Late start"), ("tests", "Tests"), ("test_ratio", "Test ratio"),
@@ -530,6 +581,13 @@ INCIDENTS = {"version": 1, "schema": {"type": "object", "required": ["day", "rep
                             "before_min": NUM, "after_min": NUM, "change_min": {"type": ["number", "null"]},
                             "change_pct": {"type": ["number", "null"]}, "title": TEXT, "why": TEXT, "ref": TEXT,
                             "url": TEXT, "jobs": TEXT, "time": TEXT}}}
+
+ACTIONS = {"version": 1, "schema": {"type": "object", "required": ["repo", "rank", "area", "title", "why", "since",
+                                                                  "updated"],
+           "properties": {"repo": TEXT, "rank": {"type": "integer", "minimum": 1, "maximum": 3}, "area": TEXT,
+                          "title": TEXT, "why": TEXT, "check": TEXT, "impact_min_per_day": NUM, "since": DAY,
+                          "updated": DAY}}}
+TOP = 3  # actions on the document at a time
 
 
 def schema(data):
@@ -569,14 +627,38 @@ def incident_rows(incidents):
     return rows
 
 
-def records(data, incidents=()):
-    """One update_data batch: the repository's days, keyed by day so a refresh replaces them, and any incidents."""
+def action_rows(data, actions):
+    """The current top actions, ranked in the order given. A kept action keeps its id and `since`, so its age shows;
+    a new one starts on the last collected day."""
+    if len(actions) > TOP:
+        sys.exit(f"actions: at most {TOP}, the ones that would save the most waiting")
+    rows = []
+    for rank, a in enumerate(actions, 1):
+        missing = [k for k in ("area", "title", "why") if not a.get(k)]
+        if missing:
+            sys.exit(f"action {rank}: missing {', '.join(missing)}")
+        if a.get("repo") not in (None, data["repo"]):
+            sys.exit(f"actions: every action must be for {data['repo']}, the repository of this document")
+        value = {"repo": data["repo"], "rank": rank, "since": a.get("since") or data["last"], "updated": data["last"],
+                 **{k: a[k] for k in ("area", "title", "why", "check", "impact_min_per_day") if a.get(k) is not None}}
+        rows.append({"id": a.get("id") or slug(a["title"]).replace("_", "-"), "value": value})
+    ids = [r["id"] for r in rows]
+    if len(ids) != len(set(ids)):
+        sys.exit(f"actions: the same id twice: {sorted({x for x in ids if ids.count(x) > 1})}")
+    return rows
+
+
+def records(data, incidents=(), actions=None):
+    """One update_data batch: the repository's days, keyed by day so a refresh replaces them, any incidents, and
+    with `actions` the current top actions, which replace the ones before."""
     if any(i.get("repo") not in (None, data["repo"]) for i in incidents):
         sys.exit(f"incidents: every incident must be for {data['repo']}, the repository of this document")
     batch = [{"collection": "days", "schema": schema(data),
               "upsert": [{"id": d["day"], "value": d} for d in data["days"]]}]
     if incidents:
         batch.append({"collection": "incidents", "schema": INCIDENTS, "upsert": incident_rows(incidents)})
+    if actions is not None:
+        batch.append({"collection": "actions", "schema": ACTIONS, "replaceRecords": action_rows(data, actions)})
     return batch
 
 
@@ -622,11 +704,43 @@ def changelog(incidents, limit=5):
 
 
 SKILL_URL = "https://skills.uberblick.ai/skills/ci-health"
+# A card's link opens a new Claude Code session in the desktop app with the prompt filled in; the prompt names the
+# repository, since the link can only select a local folder.
+CLAUDE_CODE = "claude://code/new?q="
+CHECK = "Check it against the repository: is it sound, what would it change, what are the risks, and is there a simpler way?"
 
 
-def create_document(data, incidents=()):
-    """create_doc arguments for a repository's CI health document: intent, how to read it, the charts, then the
-    incidents."""
+def discuss_link(data, action, doc=None):
+    """A link that opens Claude Code with a prompt to discuss the action before changing anything: the repository,
+    the recommendation, its evidence, what to check, then a plan. The prompt is filled in, not sent."""
+    source = f"the CI Health Report for {data['repo']}" + (f" (Uberblick document {doc})" if doc else "")
+    prompt = (f"From {source}, data as of {action.get('updated') or data['last']}:\n\n"
+              f"Recommendation: {action['title'].rstrip('.')}.\nEvidence: {action['why']}\n\n"
+              f"Let's discuss this before changing anything. {action.get('check') or CHECK} "
+              "Then propose a plan and wait for my go-ahead.")
+    return CLAUDE_CODE + quote(prompt, safe="")
+
+
+def cards(data, actions, doc=None):
+    """The actions as cards in rank order: the area and since when, the action, why with its numbers, and a link to
+    discuss it in Claude Code. Takes the agent's actions or the stored records."""
+    rows = actions.get("records", actions) if isinstance(actions, dict) else actions
+    stored = [r["value"] for r in rows if "value" in r]
+    values = sorted(stored, key=lambda a: a["rank"]) if stored else [r["value"] for r in action_rows(data, rows)]
+    one_line = lambda text: " ".join(text.split())
+    blocks = []
+    for a in values:
+        since = dt.date.fromisoformat(a["since"]).strftime("%-d %b %Y")
+        blocks.append({"type": "card", "text": f"label: {one_line(a['area'])} · since {since}\n"
+                                               f"title: {one_line(a['title'])}\n"
+                                               f"footer: [Discuss in Claude Code]({discuss_link(data, a, doc)})\n\n"
+                                               f"{a['why']}"})
+    return blocks or [{"type": "paragraph", "text": "No action proposed yet."}]
+
+
+def create_document(data, incidents=(), actions=()):
+    """create_doc arguments for a repository's CI health document: intent, how to read it, the charts, the top
+    actions, then the incidents."""
     repo = data["repo"]
     blocks = [
         {"type": "paragraph", "text": f"How long a push to {data['branch']} in {repo} waits for CI, and how many tests "
@@ -641,14 +755,18 @@ def create_document(data, incidents=()):
             {"text": "ci-health skill", "marks": {"link": SKILL_URL}},
             {"text": ".", "marks": {}}]},
         *charts(data),
+        {"type": "heading", "level": 2, "text": "Actions"},
+        {"type": "paragraph", "text": f"The {TOP} changes that would most cut the time pushes wait for a green "
+         f"{data['branch']}, from the last days of CI, kept until done or outranked."},
+        *cards(data, list(actions)),
         {"type": "heading", "level": 2, "text": "Incidents"},
         {"type": "paragraph", "text": "The latest steps in total wall time, up or down, and the change behind each."},
         *changelog(list(incidents)),
     ]
     return {"title": "CI Health Report",
             "description": f"How long CI takes on {data['branch']} in {repo}: daily GitHub Actions wall time, its "
-                           "slow tail, test counts, and the incidents that made CI slower or faster. "
-                           "Data in the document's days and incidents, refreshed by the ci-health skill.",
+                           "slow tail, test counts, the incidents that made CI slower or faster, and the top "
+                           "actions to cut the wait. Data in days, incidents and actions, refreshed by ci-health.",
             "blocks": blocks}
 
 
@@ -739,6 +857,9 @@ def main():
     s.add_argument("data")
     s.add_argument("--limit", type=int, default=5)
     commands.add_parser("summary").add_argument("data")
+    g = commands.add_parser("signals", help="what the last days of pushes show, for choosing actions")
+    g.add_argument("data")
+    g.add_argument("--days", type=int, default=WINDOW)
     lg = commands.add_parser("logs", help="save a day's job logs for reading")
     lg.add_argument("data")
     lg.add_argument("--out", required=True)
@@ -757,13 +878,19 @@ def main():
     r = commands.add_parser("records")
     r.add_argument("data")
     r.add_argument("incidents", nargs="?")
+    r.add_argument("--actions", help="the current top actions, which replace the stored ones")
     r.add_argument("--doc", help="the document's uuid: print update_data arguments instead of the operations alone")
     n = commands.add_parser("create")
     n.add_argument("data")
     n.add_argument("--incidents")
+    n.add_argument("--actions")
     n.add_argument("--tag", action="append", default=[], help="a catalog tag id from list_tags")
     commands.add_parser("charts").add_argument("data")
     commands.add_parser("changelog").add_argument("incidents")
+    k = commands.add_parser("cards", help="the actions as card blocks, for the Actions section")
+    k.add_argument("data")
+    k.add_argument("actions", help="the agent's actions, or the stored ones from get_data")
+    k.add_argument("--doc", help="the document's uuid, named in each card's prompt")
     u = commands.add_parser("ub", help="call Uberblick MCP tools through one `ub mcp serve`")
     u.add_argument("tool", nargs="?", help="one tool; or pass --calls")
     u.add_argument("arguments", nargs="?", help="the tool's arguments: inline JSON or a JSON file (default none)")
@@ -794,19 +921,25 @@ def main():
     elif args.command == "measure":
         Path(args.data).write_text(json.dumps(measure(load(args.data), args.checkout, args.timeout, args.every_day, args.path), indent=1))
         return
+    elif args.command == "signals":
+        out = signals(load(args.data), args.days)
     elif args.command == "summary":
         print(summary(load(args.data)))
         return
     elif args.command == "records":
-        out = records(load(args.data), load(args.incidents) if args.incidents else ())
+        out = records(load(args.data), load(args.incidents) if args.incidents else (),
+                      load(args.actions) if args.actions else None)
         if args.doc:
             out = {"uuid": args.doc, "operations": out}
     elif args.command == "create":
-        out = create_document(load(args.data), load(args.incidents) if args.incidents else ())
+        out = create_document(load(args.data), load(args.incidents) if args.incidents else (),
+                              load(args.actions) if args.actions else ())
         if args.tag:
             out["tags"] = args.tag
     elif args.command == "charts":
         out = charts(load(args.data))
+    elif args.command == "cards":
+        out = cards(load(args.data), load(args.actions), args.doc)
     elif args.command == "ub":
         if bool(args.calls) == bool(args.tool):
             sys.exit("ub: pass one TOOL or --calls FILE")

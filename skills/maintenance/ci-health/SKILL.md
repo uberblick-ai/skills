@@ -3,8 +3,9 @@ name: ci-health
 description: >-
   Track CI health on a repository's main branch from GitHub Actions: the
   median wall time a push waits for CI and its slow tail, the number of
-  tests, optionally coverage and the test-to-code ratio, and the changes that
-  made CI slower or faster. Use when a maintainer asks how long CI takes,
+  tests, optionally coverage and the test-to-code ratio, the changes that
+  made CI slower or faster, and the top three actions that would cut the
+  wait. Use when a maintainer asks how long CI takes,
   whether it got slower, or to record CI figures daily. Works for any
   repository and language. Not a CI fix, a flaky-test hunt or a merge gate.
 license: MIT
@@ -17,7 +18,7 @@ compatibility: >-
   either the skill prints a table.
 metadata:
   author: uberblick-ai
-  version: "1.1"
+  version: "1.2"
 ---
 
 # CI health
@@ -26,8 +27,9 @@ CI should stay fast as a project grows: the wait that counts is wall time,
 from the first job starting to the last one finishing, not the minutes the
 jobs add up to. The charts show that total only; each job's time stays in
 the data to show which job moved when the total steps. This skill records
-one day for one repository and keeps the steps that moved the total, with
-their cause.
+one day for one repository, keeps the steps that moved the total, with
+their cause, and keeps the three actions that would most cut the wait,
+judged again on every run.
 
 `scripts/ci.py` lives next to this file; call it by its path inside this
 skill's directory. `REPO` is `OWNER/NAME`, `DIR` a scratch directory outside
@@ -52,11 +54,11 @@ the document layout are in [references/data.md](references/data.md).
      it fails because the checkout is not bound, say so and go on without
      Uberblick.
 
-   With neither, steps 8 and 9 are skipped: the table and the incidents are
-   the result; say so in one line. With one, `search` for "CI health" in
-   the workspace; when the document found is about this repository, call it
-   `DOC` and read with `get_data` its `incidents` and its latest `days`
-   record. When no such document exists, ask the maintainer once whether to
+   With neither, steps 9 and 10 are skipped: the table, the incidents and
+   the actions are the result; say so in one line. With one, `search` for
+   "CI health" in the workspace; when the document found is about this
+   repository, call it `DOC` and read with `get_data` its `incidents`, its
+   `actions` and its latest `days` records. When no such document exists, ask the maintainer once whether to
    create it, and carry on meanwhile.
 
 2. Collect:
@@ -166,14 +168,45 @@ the document layout are in [references/data.md](references/data.md).
    whose cause you cannot confirm from the changes is left out, not
    guessed.
 
-7. Without `DOC`, reply with the summary table and any incidents; stop here.
+7. Choose the top three actions: the changes that would most cut the time
+   pushes wait for a green main, judged on the last days, not the collected
+   day alone:
 
-8. Store the day, unless the maintainer asked for the table only. For a new
+   ```sh
+   python3 scripts/ci.py signals DIR/data.json > DIR/signals.json
+   ```
+
+   It covers the 7 days ending the last day: pushes a day, the job that
+   ends last on green pushes and how far ahead of the next one, failures by
+   job, runner waits and hangs, with a rough count of the minutes of
+   waiting a day each accounts for (`waiting_min_per_day`). Add what the
+   recent `days` records, the incidents and the workflow files show: a job
+   that sets the wall time (split, shard or cache it, or move work off the
+   critical path), jobs that fail or hang on changes they should not care
+   about, runner waits, a suite that runs twice. Each action is one change
+   a person can make in the repository, with its evidence in numbers and
+   dates and the minutes a day it could save; rank by those minutes.
+
+   Start from the stored `actions`. Keep one while its evidence holds, with
+   its `id` and `since` and today's numbers in `why`; drop one that a
+   merged change addressed or the data no longer shows; replace one only
+   when a candidate saves clearly more. Fewer than three is fine, and no
+   action goes without data behind it. Write `DIR/actions.json` in rank
+   order, in the shape `references/data.md` gives: `area`, `title` (the
+   change), `why` (the evidence and the expected saving, two or three
+   sentences), `check` (what to read in the repository before changing
+   anything), `impact_min_per_day`, and for a kept action its `id` and
+   `since`.
+
+8. Without `DOC`, reply with the summary table, any incidents and the
+   actions; stop here.
+
+9. Store the day, unless the maintainer asked for the table only. For a new
    document the maintainer said yes to, pick from `list_tags` the active ids
    that fit CI, testing or engineering health, then:
 
    ```sh
-   python3 scripts/ci.py create DIR/data.json --incidents DIR/incidents.json [--tag ID]... > DIR/create.json
+   python3 scripts/ci.py create DIR/data.json --incidents DIR/incidents.json --actions DIR/actions.json [--tag ID]... > DIR/create.json
    ```
 
    Pass it as the arguments of `create_doc`; the result's uuid is `DOC`. If
@@ -181,28 +214,36 @@ the document layout are in [references/data.md](references/data.md).
    untagged. Then, for a new document or an existing one:
 
    ```sh
-   python3 scripts/ci.py records DIR/data.json [DIR/incidents.json] --doc DOC > DIR/update.json
+   python3 scripts/ci.py records DIR/data.json [DIR/incidents.json] --actions DIR/actions.json --doc DOC > DIR/update.json
    ```
 
    Pass it as the arguments of `update_data`, then read the area summary
-   back with `get_data` and confirm `days` and `incidents` are valid.
-   Storing a day again replaces it.
+   back with `get_data` and confirm `days`, `incidents` and `actions` are
+   valid. Storing a day again replaces it; the actions replace the stored
+   set.
 
-9. With a `DOC` that existed before this run, compare its chart blocks with
+10. With a `DOC` that existed before this run, compare its chart blocks with
    `ci.py charts DIR/data.json`: replace a chart whose JSON differs and
    insert one that is new (the ratio or coverage measured for the first
    time) after the last chart. When there are new incidents, read
    `incidents` again with `get_data`, write it to `DIR/all-incidents.json`,
    run `ci.py changelog DIR/all-incidents.json`, and replace the list items
-   under the "Incidents" heading, below the charts, with its blocks. Leave
-   every other block as it is, since people may have edited it. The
-   document has no TL;DR: the charts and incidents are the summary, so do
-   not add one when a tool suggests it. Through `ub`, gather
+   under the "Incidents" heading, below the charts, with its blocks. On
+   every run, since their numbers move, run `ci.py cards DIR/data.json
+   DIR/actions.json --doc DOC` and replace the cards under the "Actions"
+   heading, or its "No action proposed yet." paragraph, with its blocks; a
+   document without that heading gets it after the last chart, with the
+   paragraph `create` writes below it. Each card links to a new Claude Code
+   session with a prompt to discuss the action before changing anything.
+   Leave every other block as it is, since people may have edited it. The
+   document has no TL;DR: the charts, actions and incidents are the
+   summary, so do not add one when a tool suggests it. Through `ub`, gather
    these writes into one `--calls` file; several blocks inserted after the
    same block, in reverse order, end up in order, so the file needs only
    ids read before.
 
-10. Reply with the total wall time (the 7-day median with its ± and the
+11. Reply with the total wall time (the 7-day median with its ± and the
     P95), the tests, the test ratio and any coverage, any new incident with
-    the job that moved, and where the day was stored. When the skill runs on
-    a schedule with nothing new, a single line is enough.
+    the job that moved, the actions with which are new or dropped, and
+    where the day was stored. When the skill runs on a schedule with
+    nothing new, a single line is enough.
