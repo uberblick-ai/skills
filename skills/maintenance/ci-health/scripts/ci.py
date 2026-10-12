@@ -12,7 +12,7 @@
     ci.py create data.json [--incidents F] [--actions F] [--tag ID]... > create.json  # create_doc arguments
     ci.py charts data.json > charts.json               # the chart blocks, to compare with an existing document's
     ci.py changelog incidents.json > changelog.json    # the document's Incidents list, latest five
-    ci.py cards data.json actions.json [--doc UUID]  # the Actions section's cards
+    ci.py cards data.json actions.json [--doc UUID]  # the Recommended Actions cards
     ci.py ub TOOL [ARGS] | --calls calls.json [--checkout PATH]  # Uberblick tools through one `ub mcp serve`
 
 Days are UTC calendar days; the default is yesterday. A commit counts on the day its first push run was
@@ -755,7 +755,7 @@ def create_document(data, incidents=(), actions=()):
             {"text": "ci-health skill", "marks": {"link": SKILL_URL}},
             {"text": ".", "marks": {}}]},
         *charts(data),
-        {"type": "heading", "level": 2, "text": "Actions"},
+        {"type": "heading", "level": 2, "text": "Recommended Actions"},
         {"type": "paragraph", "text": f"The {TOP} changes that would most cut the time pushes wait for a green "
          f"{data['branch']}, from the last days of CI, kept until done or outranked."},
         *cards(data, list(actions)),
@@ -887,7 +887,7 @@ def main():
     n.add_argument("--tag", action="append", default=[], help="a catalog tag id from list_tags")
     commands.add_parser("charts").add_argument("data")
     commands.add_parser("changelog").add_argument("incidents")
-    k = commands.add_parser("cards", help="the actions as card blocks, for the Actions section")
+    k = commands.add_parser("cards", help="the actions as card blocks, for Recommended Actions")
     k.add_argument("data")
     k.add_argument("actions", help="the agent's actions, or the stored ones from get_data")
     k.add_argument("--doc", help="the document's uuid, named in each card's prompt")

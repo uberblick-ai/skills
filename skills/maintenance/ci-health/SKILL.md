@@ -230,10 +230,10 @@ the document layout are in [references/data.md](references/data.md).
    run `ci.py changelog DIR/all-incidents.json`, and replace the list items
    under the "Incidents" heading, below the charts, with its blocks. On
    every run, since their numbers move, run `ci.py cards DIR/data.json
-   DIR/actions.json --doc DOC` and replace the cards under the "Actions"
-   heading, or its "No action proposed yet." paragraph, with its blocks; a
-   document without that heading gets it after the last chart, with the
-   paragraph `create` writes below it. Each card links to a new Claude Code
+   DIR/actions.json --doc DOC` and replace the cards under the "Recommended
+   Actions" heading, or its "No action proposed yet." paragraph, with its
+   blocks; a document without that heading gets it after the last chart,
+   with the paragraph `create` writes below it. Each card links to a new Claude Code
    session with a prompt to discuss the action before changing anything.
    Leave every other block as it is, since people may have edited it. The
    document has no TL;DR: the charts, actions and incidents are the

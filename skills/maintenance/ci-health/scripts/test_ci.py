@@ -296,7 +296,7 @@ for line in sys.stdin:
 
         doc = ci.create_document(data | {"days": [dict(data["days"][0], wall_min_7d=5.0)]}, (), actions)
         headings = [b["text"] for b in doc["blocks"] if b["type"] == "heading"]
-        self.assertEqual(headings, ["Actions", "Incidents"], "actions above the incidents")
+        self.assertEqual(headings, ["Recommended Actions", "Incidents"], "actions above the incidents")
         self.assertEqual(len([b for b in doc["blocks"] if b["type"] == "card"]), 2)
 
 

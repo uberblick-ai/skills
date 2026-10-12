@@ -217,7 +217,7 @@ of that repository's corpus. It reads top to bottom:
 2. **Charts.** Line charts bound to `days`: total wall time (the 7-day
    median and P95), tests, and, once measured, the test-to-code ratio and
    coverage. Per-job times are in the data, not drawn.
-3. **Actions.** Below the charts, the current top three as cards, each
+3. **Recommended Actions.** Below the charts, the current top three as cards, each
    with a link to discuss it in Claude Code. `ci.py cards` rewrites them
    on every run.
 4. **Incidents.** Below the actions, the latest five, newest first, one list
