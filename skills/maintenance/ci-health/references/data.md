@@ -23,6 +23,7 @@ attempt's jobs, skipping jobs that were skipped.
 | `commits`, `failed` | | commits whose runs all finished, and how many of them were not green |
 | `tests`, `tests_pattern` | tests the jobs report, and the patterns that read them | from the day's last green commit |
 | `code_lines`, `test_lines`, `test_ratio` | | at the day's last green commit, by `measure` |
+| `loc_tool`, `loc_paths` | | the line counter and the pathspecs it counted, joined by ` \|\| ` |
 | `coverage_pct`, `measured_sha` | | the same commit, by `mise run codecov`; the last day only |
 
 - A day is a UTC calendar day; a commit belongs to the day its first run was
@@ -62,11 +63,27 @@ trusts the worktree's mise config for that run:
 | `mise run codecov` | `{"coverage_pct": 81.2}`, line coverage in percent | no coverage |
 | `mise run loc` | `{"code_lines": 12000, "test_lines": 4800}` | a built-in count |
 
-The built-in count takes the source files git tracks, by extension, and
-counts non-blank lines; a file is a test when its path matches the usual
-test locations (`tests/`, `__tests__/`, `spec/`, `test_*`, `*_test.*`,
-`*.test.*`, `*.spec.*`, `*Tests.*`). A repository whose layout differs
-defines `loc`. `test_ratio` is test lines per code line.
+The built-in count lists the files git tracks under the `--path`
+pathspecs, all of them without one, so untracked trees such as
+dependencies, build output or nested worktrees never count. It runs the
+first line counter installed, [scc](https://github.com/boyter/scc) or
+[cloc](https://github.com/AlDanial/cloc); both know the comment syntax of
+hundreds of languages, and a line of code is neither blank nor only a
+comment, so trimming comments does not read as less code. Prose and data
+(Markdown, text, JSON, YAML, TOML, XML, CSV and the like) are left out;
+style, markup and scripts count. A file is a test when its path matches
+the usual test locations (`tests/`, `__tests__/`, `spec/`, `e2e/`,
+`test_*`, `*_test.*`, `*.test.*`, `*.spec.*`, `*Tests.*`).
+
+The paths are the agent's call: the main source directories, as the build
+declares them, without documentation, sites, examples, scripts, fixtures,
+generated or vendored code. Without either counter, `measure` suggests
+the install command for the first package manager on the host: scc from
+Homebrew, MacPorts, Scoop, WinGet, Chocolatey or FreeBSD's pkg, cloc from
+apt, dnf, pacman or apk, scc through `go install`, or else an scc release.
+A repository whose layout the paths cannot express defines `loc`. `test_ratio` is test lines per code line. The two
+counters differ by about one percent, so `loc_tool` records which counted;
+a change of counter or paths moves the ratio without a change in the code.
 
 The coverage task runs the test suite with the language's own coverage tool
 and prints the total. For example, in `mise.toml`:

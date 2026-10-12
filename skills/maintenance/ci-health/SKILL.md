@@ -11,13 +11,13 @@ license: MIT
 compatibility: >-
   Requires python3 and an authenticated GitHub CLI (gh); reads GitHub only.
   The test count reads job logs, so the host must reach GitHub's log storage.
-  Coverage and line counts need a local checkout; coverage also needs a
-  `mise run codecov` task. Storing the figures in an Uberblick document is
-  optional and needs the uberblick MCP tools or the `ub` command; without
-  either the skill prints a table.
+  Coverage and line counts need a local checkout; line counts also need
+  scc or cloc, and coverage a `mise run codecov` task. Storing the figures
+  in an Uberblick document is optional and needs the uberblick MCP tools or
+  the `ub` command; without either the skill prints a table.
 metadata:
   author: uberblick-ai
-  version: "1.0"
+  version: "1.1"
 ---
 
 # CI health
@@ -104,18 +104,31 @@ the document layout are in [references/data.md](references/data.md).
    still match. When no job prints a count, leave `tests` out and say so.
 
 4. Measure the code, given a local clone of `REPO`; a scratch clone works
-   and keeps the maintainer's checkout untouched:
+   and keeps the maintainer's checkout untouched. First choose what to
+   count: the main source directories, where the product's code and its
+   tests live. The build usually declares them (workspace members in
+   `pnpm-workspace.yaml`, `package.json`, `Cargo.toml`, `go.work` or
+   `settings.gradle`, the projects of a `.sln`); otherwise `src/` and
+   `tests/`. Leave out documentation, websites, examples, scripts and
+   tooling, fixtures, generated and vendored code. Give each as a git
+   pathspec with `--path`, `:!DIR` to leave one out inside another. A
+   stored day's `loc_paths` holds them joined by ` || `; reuse them while
+   the layout holds, since a change of paths moves the ratio.
 
    ```sh
-   python3 scripts/ci.py measure DIR/data.json --checkout PATH [--every-day]
+   python3 scripts/ci.py measure DIR/data.json --checkout PATH --path SPEC [--path SPEC]... [--every-day]
    ```
 
    It fetches the last green commit if the clone lacks it, checks it out in
    a temporary worktree, which it removes afterwards, and adds
    `test_ratio` (with `code_lines` and `test_lines`) to the last day, or to
    every day with `--every-day`, which a backfill wants, plus
-   `coverage_pct` when the checkout defines `mise run codecov`. A `mise run
-   loc` task replaces the built-in line count. Without a coverage task,
+   `coverage_pct` when the checkout defines `mise run codecov`. Lines are
+   counted by `scc`, or `cloc` without it, over the files git tracks, so
+   blank and comment lines, prose and data never count; `loc_tool` records
+   which. A `mise run loc` task replaces that count. When `measure` finds
+   no line counter, say so in one line with the install command it
+   suggests for this host, and go on without the ratio. Without a coverage task,
    mention once that adding one charts coverage too; the conventions are in
    `references/data.md`. Skip this step without a clone.
 

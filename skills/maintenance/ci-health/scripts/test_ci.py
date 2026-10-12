@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -89,18 +90,41 @@ class Tests(unittest.TestCase):
         self.assertEqual([c for c in code if ci.TEST_PATH.search(c)], [])
 
     def test_count_lines_splits_code_and_tests(self):
+        counters = [c for c in ci.COUNTERS if shutil.which(c)]
+        if not counters:
+            self.skipTest("no line counter installed")
         with tempfile.TemporaryDirectory() as root:
-            for name, text in {"src/app.py": "a = 1\n\nb = 2\n", "tests/test_app.py": "assert 1\n",
-                               "README.md": "words\n" * 50}.items():
+            for name, text in {"src/app.py": "# note\na = 1\n\nb = 2\n", "tests/test_app.py": "assert 1\n",
+                               "README.md": "words\n" * 50, "config.json": '{"a": 1}\n',
+                               "scripts/tool.py": "x = 1\n", "untracked/app.py": "y = 1\n"}.items():
                 (Path(root) / name).parent.mkdir(parents=True, exist_ok=True)
                 (Path(root) / name).write_text(text)
             subprocess.run(["git", "init", "-q", root], check=True)
-            subprocess.run(["git", "-C", root, "add", "."], check=True)
-            self.assertEqual(ci.count_lines(root), {"code_lines": 2, "test_lines": 1})
+            subprocess.run(["git", "-C", root, "add", ".", ":!untracked"], check=True)
+            for counter in counters:
+                self.assertEqual(ci.count_lines(root, counter), {"code_lines": 3, "test_lines": 1},
+                                 f"{counter}: tracked code only, no blanks, comments, prose or data")
+                self.assertEqual(ci.count_lines(root, counter, ["src", "tests"]), {"code_lines": 2, "test_lines": 1},
+                                 f"{counter}: only the paths given")
+                self.assertEqual(ci.count_lines(root, counter, [".", ":!scripts"]), {"code_lines": 2, "test_lines": 1},
+                                 f"{counter}: a pathspec leaves a directory out")
+
+    def test_no_counter_or_mise(self):
+        with tempfile.TemporaryDirectory() as root:
+            subprocess.run(["git", "init", "-q", root], check=True)
             path = os.environ["PATH"]
             os.environ["PATH"] = "/nonexistent"
             try:
                 self.assertEqual(ci.mise_tasks(root), set(), "no mise is no tasks, not a crash")
+                self.assertIsNone(ci.line_counter())
+                self.assertIn("github.com/boyter/scc/releases", ci.install_hint(), "no package manager: a release")
+                bin_dir = Path(root) / "bin"
+                bin_dir.mkdir()
+                for manager in ("apt-get", "go"):
+                    (bin_dir / manager).write_text("#!/bin/sh\n")
+                    (bin_dir / manager).chmod(0o755)
+                os.environ["PATH"] = str(bin_dir)
+                self.assertEqual(ci.install_hint(), "run `sudo apt install cloc`", "the distribution's package first")
             finally:
                 os.environ["PATH"] = path
 

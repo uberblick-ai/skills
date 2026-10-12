@@ -5,7 +5,7 @@
     ci.py shifts data.json [--limit 5]                 # candidate incidents: steps in wall time, and hangs
     ci.py logs data.json --out DIR [--day DAY]         # a day's job logs, cleaned, to find the test summary line
     ci.py tests data.json --pattern REGEX...           # each day's test count from that line, added in place
-    ci.py measure data.json --checkout PATH [--every-day]  # optional: test ratio and coverage, added in place
+    ci.py measure data.json --checkout PATH [--path SPEC]... [--every-day]  # optional: test ratio and coverage, added in place
     ci.py summary data.json                            # the days as a Markdown table, for a reply
     ci.py records data.json [incidents.json] [--doc UUID] > update.json  # update_data batch for the document
     ci.py create data.json [--incidents incidents.json] [--tag ID]... > create.json  # create_doc arguments
@@ -26,6 +26,7 @@ import json
 import math
 import os
 import re
+import shutil
 import statistics
 import subprocess
 import sys
@@ -278,10 +279,19 @@ def add_tests(data, patterns):
     return data
 
 
-# Source files for the built-in line count, by extension; everything else (docs, data, lockfiles) is left out.
-SOURCE = {"c", "cc", "cpp", "cs", "cxx", "dart", "ex", "exs", "fs", "go", "h", "hpp", "java", "js", "jsx", "kt",
-          "kts", "lua", "m", "mjs", "cjs", "mm", "php", "pl", "py", "rb", "rs", "scala", "sh", "swift", "ts", "tsx",
-          "vb", "vue", "svelte", "zig"}
+# Line counters that tell comments from code in every language they know, in the order tried.
+COUNTERS = ("scc", "cloc")
+# Commands that install a counter, by the first package manager on the PATH, as the scc and cloc READMEs give them:
+# scc where the manager packages it, cloc from the Linux distributions, which package cloc and not scc.
+INSTALL = (("brew", "brew install scc"), ("port", "sudo port install scc"), ("scoop", "scoop install scc"),
+           ("winget", "winget install --id benboyter.scc --source winget"), ("choco", "choco install scc"),
+           ("pkg", "pkg install scc"), ("apt-get", "sudo apt install cloc"), ("dnf", "sudo dnf install cloc"),
+           ("pacman", "sudo pacman -S cloc"), ("apk", "sudo apk add cloc"),
+           ("go", "go install github.com/boyter/scc/v4@latest"))
+# Prose and data, which the counters report as languages too, by the names scc and cloc give them, lowercased: the
+# ratio compares the code people write and test, style and markup included.
+NOT_CODE = {"asciidoc", "csv", "diff", "gitignore", "ini", "json", "json5", "jsonl", "license", "markdown",
+            "plain text", "properties", "restructuredtext", "svg", "tex", "text", "toml", "xml", "yaml"}
 # Test files by path, across ecosystems: test directories, and test_*, *_test, *.test, *.spec, *Test(s), *Spec.
 TEST_PATH = re.compile(r"(^|/)(tests?|__tests__|spec|specs|e2e|testing)/|(^|/)test_[^/]*$|[^/]*(_test|_tests|_spec|"
                        r"\.test|\.spec|Tests?|Spec)\.[^/.]+$")
@@ -326,32 +336,64 @@ def mise_json(root, task, timeout):
     return {}
 
 
-def count_lines(root):
-    """Code and test lines over the source files git tracks, by extension and test path. A rough, language-agnostic
-    split; a repository that wants its own defines `mise run loc`."""
-    files = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True, check=True).stdout.split(b"\0")
+def line_counter():
+    """The first line counter on the PATH, as `name version`, or None."""
+    for tool in COUNTERS:
+        if shutil.which(tool):
+            version = re.search(r"\d+(?:\.\d+)+", subprocess.run([tool, "--version"], capture_output=True,
+                                                                  text=True).stdout)
+            return f"{tool} {version.group(0)}" if version else tool
+    return None
+
+
+def install_hint():
+    """How to install a line counter on this host, by the first package manager it has."""
+    return next((f"run `{command}`" for manager, command in INSTALL if shutil.which(manager)),
+                "download scc from https://github.com/boyter/scc/releases")
+
+
+def file_lines(counter, root, files):
+    """(path, language, lines of code) for each of `files` the counter knows; blank and comment lines are not code."""
+    if counter.startswith("scc"):
+        rows = []
+        for i in range(0, len(files), 1000):  # in batches, under the argument length limit
+            out = subprocess.run(["scc", "--by-file", "--format", "json", *files[i:i + 1000]], cwd=root,
+                                 capture_output=True, text=True).stdout
+            rows += [(f["Location"], lang["Name"], f["Code"]) for lang in json.loads(out or "[]") for f in lang["Files"]]
+        return rows
+    with tempfile.NamedTemporaryFile("w", suffix=".txt") as listing:
+        listing.write("\n".join(files))
+        listing.flush()
+        out = subprocess.run(["cloc", "--by-file", "--json", "--quiet", f"--list-file={listing.name}"], cwd=root,
+                             capture_output=True, text=True).stdout
+    return [(name, f["language"], f["code"]) for name, f in json.loads(out or "{}").items()
+            if name not in ("header", "SUM")]
+
+
+def count_lines(root, counter, paths=()):
+    """Code and test lines over the files git tracks under `paths`, git pathspecs (everything by default), so
+    untracked trees such as dependencies, build output or nested worktrees never count. Prose and data are left out,
+    and a file is a test when its path matches TEST_PATH."""
+    listed = subprocess.run(["git", "ls-files", "-z", "--", *paths], cwd=root, capture_output=True, text=True,
+                            check=True).stdout
     code = test = 0
-    for name in filter(None, (f.decode(errors="replace") for f in files)):
-        if name.rsplit(".", 1)[-1].lower() not in SOURCE or "." not in name:
+    for name, language, n in file_lines(counter, root, [f for f in listed.split("\0") if f]):
+        if language.lower() in NOT_CODE:
             continue
-        try:
-            with open(Path(root) / name, "rb") as f:
-                n = sum(1 for line in f if line.strip())
-        except OSError:
-            continue
-        if TEST_PATH.search(name):
+        if TEST_PATH.search(name.removeprefix("./")):
             test += n
         else:
             code += n
     return {"code_lines": code, "test_lines": test}
 
 
-def measure(data, checkout, timeout=1800, every_day=False):
+def measure(data, checkout, timeout=1800, every_day=False, paths=()):
     """Coverage and code against test lines at a day's last green commit, from a detached worktree of `checkout`.
-    `mise run codecov` and `mise run loc` are used when the checkout defines them; lines fall back to count_lines.
-    Adds the figures to the last day, or with `every_day` the lines to every day and coverage to the last, since
-    coverage runs the suite."""
+    `mise run codecov` and `mise run loc` are used when the checkout defines them; lines fall back to count_lines
+    over `paths`, with the first line counter installed. Adds the figures to the last day, or with `every_day` the
+    lines to every day and coverage to the last, since coverage runs the suite."""
     days = data["days"] if every_day else data["days"][-1:]
+    counter, told = line_counter(), False
     git = lambda *a, **k: subprocess.run(["git", "-C", checkout, *a], capture_output=True, text=True, **k)
     for day in days:
         commit = last_green(data, day["day"])
@@ -372,13 +414,21 @@ def measure(data, checkout, timeout=1800, every_day=False):
                 found |= {k: v for k, v in mise_json(root, "codecov", timeout).items() if k == "coverage_pct"}
             if "loc" in tasks:
                 found |= {k: v for k, v in mise_json(root, "loc", timeout).items() if k in ("code_lines", "test_lines")}
-            if "code_lines" not in found or "test_lines" not in found:
-                found |= count_lines(root)
+            if "code_lines" in found and "test_lines" in found:
+                found["loc_tool"] = "mise run loc"
+            elif counter:
+                found |= count_lines(root, counter, paths) | {"loc_tool": counter, "loc_paths": " || ".join(paths)}
+            elif not told:
+                told = True
+                print(f"measure: no line counter: neither scc nor cloc is installed and the checkout defines no loc "
+                      f"task, so lines and the test ratio are left out; to count them, {install_hint()}",
+                      file=sys.stderr)
         finally:
             git("worktree", "remove", "--force", str(root))
         if found.get("code_lines"):
             found["test_ratio"] = round(found["test_lines"] / found["code_lines"], 2)
-        day |= {k: v for k, v in found.items() if isinstance(v, (int, float))}
+        day |= {k: v for k, v in found.items()
+                if isinstance(v, (int, float)) or (k in ("loc_tool", "loc_paths") and v)}
         day["measured_sha"] = sha[:12]
     return data
 
@@ -484,6 +534,7 @@ INCIDENTS = {"version": 1, "schema": {"type": "object", "required": ["day", "rep
 
 def schema(data):
     fields = {"day": DAY, "repo": TEXT, "workflows": TEXT, "start": DAY, "measured_sha": TEXT, "tests_pattern": TEXT,
+              "loc_tool": TEXT, "loc_paths": TEXT,
               **dict.fromkeys(["commits", "failed", "tests", "code_lines", "test_lines"], COUNT),
               "coverage_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
               **dict.fromkeys(["wall_min", "wall_min_7d", "wall_spread_7d", "wall_p95_7d", "execution_min", "late_start_min", "wait_min", "test_ratio", *data["jobs"]], NUM)}
@@ -701,6 +752,8 @@ def main():
     m.add_argument("--checkout", required=True, help="a local clone of the repository")
     m.add_argument("--timeout", type=int, default=1800, help="seconds each mise task may take")
     m.add_argument("--every-day", action="store_true", help="lines on every day, for a backfill; coverage stays last-day")
+    m.add_argument("--path", action="append", default=[],
+                   help="a git pathspec of main source to count, ':!dir' to leave one out (repeatable; default all)")
     r = commands.add_parser("records")
     r.add_argument("data")
     r.add_argument("incidents", nargs="?")
@@ -739,7 +792,7 @@ def main():
         Path(args.data).write_text(json.dumps(add_tests(load(args.data), args.pattern), indent=1))
         return
     elif args.command == "measure":
-        Path(args.data).write_text(json.dumps(measure(load(args.data), args.checkout, args.timeout, args.every_day), indent=1))
+        Path(args.data).write_text(json.dumps(measure(load(args.data), args.checkout, args.timeout, args.every_day, args.path), indent=1))
         return
     elif args.command == "summary":
         print(summary(load(args.data)))
