@@ -81,9 +81,10 @@ generated or vendored code. Without either counter, `measure` suggests
 the install command for the first package manager on the host: scc from
 Homebrew, MacPorts, Scoop, WinGet, Chocolatey or FreeBSD's pkg, cloc from
 apt, dnf, pacman or apk, scc through `go install`, or else an scc release.
-A repository whose layout the paths cannot express defines `loc`. `test_ratio` is test lines per code line. The two
-counters differ by about one percent, so `loc_tool` records which counted;
-a change of counter or paths moves the ratio without a change in the code.
+A repository whose layout the paths cannot express defines `loc`.
+`test_ratio` is test lines per code line. The two counters differ by about
+one percent, so `loc_tool` records which counted; a change of counter or
+paths moves the ratio without a change in the code.
 
 The coverage task runs the test suite with the language's own coverage tool
 and prints the total. For example, in `mise.toml`:
@@ -150,6 +151,50 @@ incidents on one day. The id is
 hyphens, so several changes on one day stay apart and storing an incident
 again replaces it.
 
+## Actions
+
+The top three changes that would most cut the time pushes wait for a green
+main, judged again on every run. `ci.py signals` gives the evidence over
+the 7 days ending the last day: pushes a day, failed pushes, the green
+median and P95, and per job its median minutes, how often it ends last on
+a green push and by how much (`ends_last`, `ahead_min`; a job under half a
+minute, such as a summary job, is left out), and how often it failed. It
+also lists hangs, and `waiting_min_per_day` puts each on one scale, the
+rough minutes of waiting a day they account for:
+
+| Key | Estimate |
+| --- | --- |
+| `slowest_job` | the last job's lead over the next one, on every green push it ends |
+| `failed_pushes` | one more green run for every failed push |
+| `runner_waits` | queueing plus late starts, on every push |
+| `hangs` | the time hung runs held before failing |
+
+The agent writes `actions.json`, at most three, in rank order:
+
+```json
+[{"id": "split-browser-e2e", "since": "2026-10-11", "area": "Wall time",
+  "title": "Split browser e2e across parallel runners",
+  "why": "Browser e2e ends 10.7 min after the other jobs on every green push, 27 pushes a day. Three shards would save about 200 min of waiting a day.",
+  "check": "Read .github/workflows/ci.yml and the Playwright config.",
+  "impact_min_per_day": 200}]
+```
+
+`id` and `since` carry over from the stored action an entry keeps; a new
+one gets its `id` from the title and starts on the last collected day.
+`rank` and `updated` are set when stored. Without a document the actions
+go into the reply only, chosen afresh on every run, since nothing keeps
+them.
+
+`ci.py cards` renders each as a
+card: the area and since when as its label, the title, `why` as its body,
+and a footer link, "Discuss in Claude Code", to
+`claude://code/new?q=PROMPT`, which opens a new session in the Claude
+desktop app with the prompt filled in, not sent. The prompt names the
+repository and the document, the day of the data, the recommendation, its
+evidence and `check`, and asks for a plan before any change; the link
+cannot select a repository by name, only a local folder, so the prompt
+names it.
+
 ## Records
 
 `ci.py records` writes one `update_data` batch for the repository's
@@ -159,6 +204,7 @@ document; with `--doc UUID` it prints the full `update_data` arguments:
 | --- | --- | --- |
 | `days` | `2026-10-09` | day, every field above |
 | `incidents` | `2026-10-04/acme-app-189` | incident |
+| `actions` | `split-browser-e2e` | current action; `--actions` replaces the set |
 
 The schema lists every job field seen, so a batch that adds a job widens it;
 earlier records stay valid. A day takes about 400 bytes, so a year stays far
@@ -167,8 +213,8 @@ repository.
 
 ## Document
 
-Each repository has its own "CI Health Report" document, in the Uberblick workspace
-of that repository's corpus. It reads top to bottom:
+Each repository has its own "CI Health Report" document, in the Uberblick
+workspace of that repository's corpus. It reads top to bottom:
 
 1. **Intent.** One paragraph: what is measured and why wall time, not
    execution time. One more on how to read the charts and where the data
@@ -176,15 +222,18 @@ of that repository's corpus. It reads top to bottom:
 2. **Charts.** Line charts bound to `days`: total wall time (the 7-day
    median and P95), tests, and, once measured, the test-to-code ratio and
    coverage. Per-job times are in the data, not drawn.
-3. **Incidents.** Below the charts, the latest five, newest first, one list
+3. **Recommended Actions.** Below the charts, the current top three as
+   cards, each with a link to discuss it in Claude Code. `ci.py cards`
+   rewrites them on every run.
+4. **Incidents.** Below the actions, the latest five, newest first, one list
    item each: the day, the change linked, the direction with the medians
    before and after, and why. `ci.py changelog` rewrites this list.
 
 Search indexes the title, description and block text, not the records, so
 the description names what the data holds, and the agent adds the fitting
-catalog tags. The document has no TL;DR; the charts and incidents are the
-summary. `create` writes the whole document.
-Everything outside the Incidents list and the charts is written once and
-may be edited by hand. The skill replaces a chart when `ci.py charts` gives
-a different one, after a skill update, and adds one when a new measure
-appears.
+catalog tags. The document has no TL;DR; the charts, actions and incidents
+are the summary. `create` writes the whole document.
+Everything outside the charts, the action cards and the Incidents list is
+written once and may be edited by hand. The skill replaces a chart when
+`ci.py charts` gives a different one, after a skill update, and adds one
+when a new measure appears.

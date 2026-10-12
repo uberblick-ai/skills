@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import unquote
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -240,6 +241,63 @@ for line in sys.stdin:
         self.assertIn("Split the tests", items[0]["inline"][1]["text"])
         with self.assertRaises(SystemExit):
             ci.incident_rows([{"day": "2026-10-01", "repo": "o/r", "direction": "up", "title": "t", "why": "w"}])
+
+    def test_signals_rank_the_waiting(self):
+        def push(n, day, ok=True, e2e_end="00:12", failing=()):
+            job = lambda name, end, mins: {"workflow": "CI", "name": name, "started": f"{day}T00:00:00Z",
+                                           "completed": f"{day}T{end}:00Z", "min": mins,
+                                           "conclusion": "failure" if name in failing else "success"}
+            return {"sha": f"{n:040d}", "day": day, "created": f"{day}T00:00:00Z", "ok": ok, "title": f"C (#{n})",
+                    "wall_min": 12.0, "wait_min": 0.5, "late_start_min": 0.5, "workflows": {"CI": "success"},
+                    "jobs": [job("e2e", e2e_end, 12.0), job("unit", "00:04", 4.0), job("summary", "00:12", 0.1)]}
+        commits = [push(1, "2026-09-20")] + [push(n, "2026-10-01") for n in range(2, 6)] + \
+                  [push(6, "2026-10-02", ok=False, failing=("e2e",))]
+        found = ci.signals({"repo": "o/r", "last": "2026-10-02", "commits": commits})
+        self.assertEqual((found["pushes"], found["days"], found["failed"]), (5, 2, 1), "the week only")
+        e2e = found["jobs"][0]
+        self.assertEqual((e2e["job"], e2e["ends_last"], e2e["ahead_min"], e2e["failed"]), ("CI / e2e", 1.0, 8.0, 1),
+                         "a summary job ending last is not what the push waits for")
+        self.assertEqual(found["waiting_min_per_day"],
+                         {"slowest_job": 16.0, "failed_pushes": 6.0, "runner_waits": 2.5, "hangs": 0})
+
+    def test_actions_records_and_cards(self):
+        data = {"repo": "o/r", "branch": "main", "last": "2026-10-03", "jobs": {},
+                "days": [{"day": "2026-10-03", "repo": "o/r", "commits": 9}]}
+        actions = [{"id": "shard-e2e", "area": "Wall time", "title": "Shard e2e", "since": "2026-09-20",
+                    "why": "It ends 8 min after the rest.", "check": "Look at ci.yml.", "impact_min_per_day": 90},
+                   {"area": "Reliability", "title": "Fix flaky login spec", "why": "Failed 4 of 30 pushes."}]
+        batch = ci.records(data, (), actions)
+        stored = batch[-1]
+        self.assertEqual((stored["collection"], [r["id"] for r in stored["replaceRecords"]]),
+                         ("actions", ["shard-e2e", "fix-flaky-login-spec"]), "the set replaces the stored one")
+        kept, new = (r["value"] for r in stored["replaceRecords"])
+        self.assertEqual((kept["rank"], kept["since"], kept["updated"]), (1, "2026-09-20", "2026-10-03"))
+        self.assertEqual((new["rank"], new["since"]), (2, "2026-10-03"), "a new action starts on the last day")
+        self.assertNotIn("actions", [b["collection"] for b in ci.records(data)], "no actions given, none touched")
+        for bad in ([actions[1]] * 2, actions * 2, [dict(actions[1], repo="o/x")], [{"area": "a", "title": "t"}]):
+            with self.assertRaises(SystemExit):
+                ci.action_rows(data, bad)
+
+        blocks = ci.cards(data, actions, doc="d0c")
+        self.assertEqual([b["type"] for b in blocks], ["card", "card"])
+        head, _, body = blocks[0]["text"].partition("\n\n")
+        self.assertIn("label: Wall time · since 20 Sep 2026\ntitle: Shard e2e\nfooter: [Discuss in Claude Code]", head)
+        self.assertEqual(body, "It ends 8 min after the rest.")
+        url = re.search(r"\]\((\S+)\)", head).group(1)
+        self.assertTrue(url.startswith("claude://code/new?q="), "a new session in the desktop app")
+        prompt = unquote(url.split("q=", 1)[1])
+        for part in ("CI Health Report for o/r (Uberblick document d0c)", "Recommendation: Shard e2e.",
+                     "Evidence: It ends 8 min after the rest.", "Look at ci.yml.", "wait for my go-ahead"):
+            self.assertIn(part, prompt)
+        records = {"records": [{"id": r["id"], "value": r["value"]} for r in reversed(stored["replaceRecords"])]}
+        self.assertEqual([b["text"] for b in ci.cards(data, records, doc="d0c")], [b["text"] for b in blocks],
+                         "stored records render the same, in rank order")
+        self.assertEqual(ci.cards(data, []), [{"type": "paragraph", "text": "No action proposed yet."}])
+
+        doc = ci.create_document(data | {"days": [dict(data["days"][0], wall_min_7d=5.0)]}, (), actions)
+        headings = [b["text"] for b in doc["blocks"] if b["type"] == "heading"]
+        self.assertEqual(headings, ["Recommended Actions", "Incidents"], "actions above the incidents")
+        self.assertEqual(len([b for b in doc["blocks"] if b["type"] == "card"]), 2)
 
 
 if __name__ == "__main__":
