@@ -588,7 +588,7 @@ ACTIONS = {"version": 1, "schema": {"type": "object", "required": ["repo", "rank
                           "title": TEXT, "why": TEXT, "where": TEXT, "cost": TEXT,
                           "evidence": {"type": "array", "items": TEXT}, "check": TEXT, "impact_min_per_day": NUM,
                           "since": DAY, "updated": DAY}}}
-TOP = 3  # actions on the document at a time
+TOP = 3  # actions on the document at most; the Recommended Actions intro says "Up to three"
 REF = re.compile(r"(?:[\w.-]+/[\w.-]+)?#\d+")  # an issue or PR: #12 in the repository, or owner/name#12
 
 
@@ -772,7 +772,7 @@ def create_document(data, incidents=(), actions=()):
             {"text": ".", "marks": {}}]},
         *charts(data),
         {"type": "heading", "level": 2, "text": "Recommended Actions"},
-        {"type": "paragraph", "text": f"The {TOP} changes that would most cut the time pushes wait for a green "
+        {"type": "paragraph", "text": "Up to three changes that would most cut the time pushes wait for a green "
          f"{data['branch']}, from the last days of CI, kept until done or outranked."},
         *cards(data, list(actions)),
         {"type": "heading", "level": 2, "text": "Incidents"},

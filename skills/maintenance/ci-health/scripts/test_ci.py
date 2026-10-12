@@ -308,6 +308,8 @@ for line in sys.stdin:
         doc = ci.create_document(data | {"days": [dict(data["days"][0], wall_min_7d=5.0)]}, (), actions)
         headings = [b["text"] for b in doc["blocks"] if b["type"] == "heading"]
         self.assertEqual(headings, ["Recommended Actions", "Incidents"], "actions above the incidents")
+        intro = doc["blocks"][[b.get("text") for b in doc["blocks"]].index("Recommended Actions") + 1]["text"]
+        self.assertTrue(intro.startswith("Up to three changes"), "no count the cards may not reach")
         self.assertEqual(len([b for b in doc["blocks"] if b["type"] == "card"]), 2)
 
 

@@ -153,8 +153,8 @@ again replaces it.
 
 ## Actions
 
-The top three changes that would most cut the time pushes wait for a green
-main, judged again on every run. `ci.py signals` gives the evidence over
+Up to three changes that would most cut the time pushes wait for a green
+main, judged again on every run; fewer when the data backs fewer. `ci.py signals` gives the evidence over
 the 7 days ending the last day: pushes a day, failed pushes, the green
 median and P95, and per job its median minutes, how often it ends last on
 a green push and by how much (`ends_last`, `ahead_min`; a job under half a
@@ -230,9 +230,9 @@ workspace of that repository's corpus. It reads top to bottom:
 2. **Charts.** Line charts bound to `days`: total wall time (the 7-day
    median and P95), tests, and, once measured, the test-to-code ratio and
    coverage. Per-job times are in the data, not drawn.
-3. **Recommended Actions.** Below the charts, the current top three as
-   cards, each with its evidence in the footer and a button to discuss it
-   in Claude Code. `ci.py cards` rewrites them on every run.
+3. **Recommended Actions.** Below the charts, the current actions, up to
+   three, as cards, each with its evidence in the footer and a button to
+   discuss it in Claude Code. `ci.py cards` rewrites them on every run.
 4. **Incidents.** Below the actions, the latest five, newest first, one list
    item each: the day, the change linked, the direction with the medians
    before and after, and why. `ci.py changelog` rewrites this list.
