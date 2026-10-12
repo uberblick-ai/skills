@@ -58,8 +58,8 @@ the document layout are in [references/data.md](references/data.md).
    the actions are the result; say so in one line. With one, `search` for
    "CI health" in the workspace; when the document found is about this
    repository, call it `DOC` and read with `get_data` its `incidents`, its
-   `actions` and its latest `days` records. When no such document exists, ask the maintainer once whether to
-   create it, and carry on meanwhile.
+   `actions` and its latest `days` records. When no such document exists,
+   ask the maintainer once whether to create it, and carry on meanwhile.
 
 2. Collect:
 
@@ -130,9 +130,9 @@ the document layout are in [references/data.md](references/data.md).
    blank and comment lines, prose and data never count; `loc_tool` records
    which. A `mise run loc` task replaces that count. When `measure` finds
    no line counter, say so in one line with the install command it
-   suggests for this host, and go on without the ratio. Without a coverage task,
-   mention once that adding one charts coverage too; the conventions are in
-   `references/data.md`. Skip this step without a clone.
+   suggests for this host, and go on without the ratio. Without a coverage
+   task, mention once that adding one charts coverage too; the conventions
+   are in `references/data.md`. Skip this step without a clone.
 
 5. Find the steps:
 
@@ -180,20 +180,22 @@ the document layout are in [references/data.md](references/data.md).
    ends last on green pushes and how far ahead of the next one, failures by
    job, runner waits and hangs, with a rough count of the minutes of
    waiting a day each accounts for (`waiting_min_per_day`). Add what the
-   recent `days` records, the incidents and the workflow files show: a job
-   that sets the wall time (split, shard or cache it, or move work off the
-   critical path), jobs that fail or hang on changes they should not care
-   about, runner waits, a suite that runs twice. Each action is one change
-   a person can make in the repository, with its evidence in numbers and
-   dates and the minutes a day it could save; rank by those minutes.
+   workflow files, the incidents and, with `DOC`, its recent `days` show:
+   a job that sets the wall time (split, shard or cache it, or move work
+   off the critical path), jobs that fail or hang on changes they should
+   not care about, runner waits, a suite that runs twice. Each action is
+   one change a person can make in the repository, with its evidence in
+   numbers and dates and the minutes a day it could save; rank by those
+   minutes.
 
-   Start from the stored `actions`. Keep one while its evidence holds, with
-   its `id` and `since` and today's numbers in `why`; drop one that a
-   merged change addressed or the data no longer shows; replace one only
-   when a candidate saves clearly more. Fewer than three is fine, and no
-   action goes without data behind it. Write `DIR/actions.json` in rank
-   order, in the shape `references/data.md` gives: `area`, `title` (the
-   change), `why` (the evidence and the expected saving, two or three
+   With `DOC`, start from its stored `actions`. Keep one while its evidence
+   holds, with its `id` and `since` and today's numbers in `why`; drop one
+   that a merged change addressed or the data no longer shows; replace one
+   only when a candidate saves clearly more. Without `DOC`, nothing keeps
+   actions between runs, so choose them afresh. Fewer than three is fine,
+   and no action goes without data behind it. Write `DIR/actions.json` in
+   rank order, in the shape `references/data.md` gives: `area`, `title`
+   (the change), `why` (the evidence and the expected saving, two or three
    sentences), `check` (what to read in the repository before changing
    anything), `impact_min_per_day`, and for a kept action its `id` and
    `since`.
@@ -233,8 +235,9 @@ the document layout are in [references/data.md](references/data.md).
    DIR/actions.json --doc DOC` and replace the cards under the "Recommended
    Actions" heading, or its "No action proposed yet." paragraph, with its
    blocks; a document without that heading gets it after the last chart,
-   with the paragraph `create` writes below it. Each card links to a new Claude Code
-   session with a prompt to discuss the action before changing anything.
+   with the paragraph `create` writes below it. Each card links to a new
+   Claude Code session with a prompt to discuss the action before changing
+   anything.
    Leave every other block as it is, since people may have edited it. The
    document has no TL;DR: the charts, actions and incidents are the
    summary, so do not add one when a tool suggests it. Through `ub`, gather

@@ -180,6 +180,8 @@ The agent writes `actions.json`, at most three, in rank order:
 
 `id` and `since` carry over from the stored action an entry keeps; a new
 one gets its `id` from the title and starts on the last collected day.
+Without a document the actions go into the reply only, chosen afresh on
+every run, since nothing keeps them.
 `rank` and `updated` are set when stored. `ci.py cards` renders each as a
 card: the area and since when as its label, the title, `why` as its body,
 and a footer link, "Discuss in Claude Code", to
