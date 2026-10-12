@@ -264,7 +264,8 @@ for line in sys.stdin:
         data = {"repo": "o/r", "branch": "main", "last": "2026-10-03", "jobs": {},
                 "days": [{"day": "2026-10-03", "repo": "o/r", "commits": 9}]}
         actions = [{"id": "shard-e2e", "area": "Wall time", "title": "Shard e2e", "since": "2026-09-20",
-                    "why": "It ends 8 min after the rest.", "check": "Look at ci.yml.", "impact_min_per_day": 90},
+                    "why": "It ends 8 min after the rest.", "check": "Look at ci.yml.", "impact_min_per_day": 90,
+                    "where": "CI / e2e", "evidence": [7, "#8", "o/tools#3"]},
                    {"area": "Reliability", "title": "Fix flaky login spec", "why": "Failed 4 of 30 pushes."}]
         batch = ci.records(data, (), actions)
         stored = batch[-1]
@@ -272,18 +273,28 @@ for line in sys.stdin:
                          ("actions", ["shard-e2e", "fix-flaky-login-spec"]), "the set replaces the stored one")
         kept, new = (r["value"] for r in stored["replaceRecords"])
         self.assertEqual((kept["rank"], kept["since"], kept["updated"]), (1, "2026-09-20", "2026-10-03"))
+        self.assertEqual(kept["evidence"], ["#7", "#8", "o/tools#3"], "numbers become references")
         self.assertEqual((new["rank"], new["since"]), (2, "2026-10-03"), "a new action starts on the last day")
         self.assertNotIn("actions", [b["collection"] for b in ci.records(data)], "no actions given, none touched")
-        for bad in ([actions[1]] * 2, actions * 2, [dict(actions[1], repo="o/x")], [{"area": "a", "title": "t"}]):
+        for bad in ([actions[1]] * 2, actions * 2, [dict(actions[1], repo="o/x")], [{"area": "a", "title": "t"}],
+                    [dict(actions[1], evidence=["https://example.com"])]):
             with self.assertRaises(SystemExit):
                 ci.action_rows(data, bad)
 
         blocks = ci.cards(data, actions, doc="d0c")
         self.assertEqual([b["type"] for b in blocks], ["card", "card"])
         head, _, body = blocks[0]["text"].partition("\n\n")
-        self.assertIn("label: Wall time · since 20 Sep 2026\ntitle: Shard e2e\nfooter: [Discuss in Claude Code]", head)
+        self.assertEqual(head, "label: Wall time · since 20 Sep 2026\ntitle: Shard e2e\n"
+                               "footer: CI / e2e · about 90 min of waiting a day · [#7](https://github.com/o/r/issues/7) "
+                               "[#8](https://github.com/o/r/issues/8) [o/tools#3](https://github.com/o/tools/issues/3)",
+                         "the footer carries the evidence; no button unless asked for")
         self.assertEqual(body, "It ends 8 min after the rest.")
-        url = re.search(r"\]\((\S+)\)", head).group(1)
+        self.assertEqual(blocks[1]["text"], "label: Reliability · since 3 Oct 2026\ntitle: Fix flaky login spec\n\n"
+                                            "Failed 4 of 30 pushes.", "no evidence, no footer")
+        head = ci.cards(data, actions, doc="d0c", button=True)[0]["text"].partition("\n\n")[0]
+        button = head.split("\n")[-1]
+        self.assertTrue(button.startswith("button: [Discuss in Claude Code](claude://code/new?q="), "after the footer")
+        url = re.search(r"\]\((\S+)\)", button).group(1)
         self.assertTrue(url.startswith("claude://code/new?q="), "a new session in the desktop app")
         prompt = unquote(url.split("q=", 1)[1])
         for part in ("CI Health Report for o/r (Uberblick document d0c)", "Recommendation: Shard e2e.",
@@ -297,6 +308,8 @@ for line in sys.stdin:
         doc = ci.create_document(data | {"days": [dict(data["days"][0], wall_min_7d=5.0)]}, (), actions)
         headings = [b["text"] for b in doc["blocks"] if b["type"] == "heading"]
         self.assertEqual(headings, ["Recommended Actions", "Incidents"], "actions above the incidents")
+        intro = doc["blocks"][[b.get("text") for b in doc["blocks"]].index("Recommended Actions") + 1]["text"]
+        self.assertTrue(intro.startswith("Up to three changes"), "no count the cards may not reach")
         self.assertEqual(len([b for b in doc["blocks"] if b["type"] == "card"]), 2)
 
 
