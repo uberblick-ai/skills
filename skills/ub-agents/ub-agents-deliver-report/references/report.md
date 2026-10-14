@@ -261,16 +261,25 @@ bottom:
     "sort": {"field": "day", "direction": "desc"}}
    ```
 
-4. **Actions.** The day's `actions`: up to five proposed lessons, each a
-   heading, the change, and a line with the lever, where it lives, its cost,
-   its causes and its evidence. A lesson leaves the list once an issue or PR
-   addresses it.
+4. **Recommended Actions.** The day's `actions`: up to five proposed
+   lessons, each a card with the lever as its label, the title, the change as
+   its body, and a footer with where it lives, its cost, its causes and its
+   evidence. A lesson leaves the list once an issue or PR addresses it. Each
+   card has a "Discuss in Claude Code" button to
+   `claude://code/new?q=PROMPT`, which opens a new session in the Claude
+   desktop app with the prompt filled in, not sent. The prompt names the
+   repository, the document and the day of the data, the change, where it
+   lives and its evidence, and asks for a plan before any change; the link
+   cannot select a repository by name, only a local folder, so the prompt
+   names it. Card prose takes only http(s) links, so the link is a `button:`
+   line, which Uberblick reads from the release after 0.4.3; `--no-button`
+   leaves it out for older versions.
 5. **Changelog.** A bullet list of the five latest `changes`, newest first:
    the day, the change linked to its issue, PR or commit in ub-agents or the
    project, and why it was made.
 
-The skill rewrites the "Actions" and "Changelog" sections, from `document`'s
-output, after each stored day. Everything else is written once, by `create`
+The skill rewrites the "Recommended Actions" and "Changelog" sections, from
+`document`'s output, after each stored day. Everything else is written once, by `create`
 or by a person, and may be edited by hand; the charts and tables follow the
 data by themselves. A chart plots and a table lists every stored day: neither
 mapping has a window yet, so a year of days shows as one long table.

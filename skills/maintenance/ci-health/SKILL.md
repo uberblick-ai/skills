@@ -19,7 +19,7 @@ compatibility: >-
   the `ub` command; without either the skill prints a table.
 metadata:
   author: uberblick-ai
-  version: "1.2"
+  version: "1.3"
 ---
 
 # CI health
@@ -236,8 +236,10 @@ the document layout are in [references/data.md](references/data.md).
     --doc DOC` and replace the cards under the "Recommended Actions" heading,
     or its "No action proposed yet." paragraph, with its blocks; a document
     without that heading gets it after the last chart, with the paragraph
-    `create` writes below it. Each card links to a new Claude Code session
-    with a prompt to discuss the action before changing anything. Leave every
+    `create` writes below it. Each card's button opens a new Claude Code
+    session with a prompt to discuss the action before changing anything; if
+    Uberblick refuses a card with `invalid_card` (0.4.3 has no card buttons),
+    run `cards` or `create` again with `--no-button`. Leave every
     other block as it is, since people may have edited it. The document has no
     TL;DR: the charts, actions and incidents are the summary, so do not add
     one when a tool suggests it. Through `ub`, gather these writes into one

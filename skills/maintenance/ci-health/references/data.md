@@ -187,13 +187,14 @@ them.
 
 `ci.py cards` renders each as a
 card: the area and since when as its label, the title, `why` as its body,
-and a footer link, "Discuss in Claude Code", to
-`claude://code/new?q=PROMPT`, which opens a new session in the Claude
-desktop app with the prompt filled in, not sent. The prompt names the
-repository and the document, the day of the data, the recommendation, its
-evidence and `check`, and asks for a plan before any change; the link
-cannot select a repository by name, only a local folder, so the prompt
-names it.
+and a "Discuss in Claude Code" button to `claude://code/new?q=PROMPT`,
+which opens a new session in the Claude desktop app with the prompt filled
+in, not sent. The prompt names the repository and the document, the day of
+the data, the recommendation, its evidence and `check`, and asks for a plan
+before any change; the link cannot select a repository by name, only a
+local folder, so the prompt names it. Card prose takes only http(s) links,
+so the link is a `button:` line, which Uberblick reads from the release
+after 0.4.3; `--no-button` leaves it out for older versions.
 
 ## Records
 
@@ -223,7 +224,7 @@ workspace of that repository's corpus. It reads top to bottom:
    median and P95), tests, and, once measured, the test-to-code ratio and
    coverage. Per-job times are in the data, not drawn.
 3. **Recommended Actions.** Below the charts, the current top three as
-   cards, each with a link to discuss it in Claude Code. `ci.py cards`
+   cards, each with a button to discuss it in Claude Code. `ci.py cards`
    rewrites them on every run.
 4. **Incidents.** Below the actions, the latest five, newest first, one list
    item each: the day, the change linked, the direction with the medians

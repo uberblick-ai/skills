@@ -15,7 +15,7 @@ compatibility: >-
   uberblick MCP server; without it the skill still writes the page.
 metadata:
   author: uberblick-ai
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Deliver report
@@ -99,7 +99,9 @@ classes, the page and the records are defined in
 
    Pass the file's `title`, `description` and `blocks` to `create_doc`; the
    document it returns is `DOC`, laid out as `references/report.md` describes
-   with this day's actions already in place. Then, with `DOC`:
+   with this day's actions already in place. If it refuses an action card with
+   `invalid_card` (Uberblick 0.4.3 has no card buttons), run `create` again
+   with `--no-button`. Then, with `DOC`:
 
    ```sh
    python3 scripts/review.py records DIR/report.json > DIR/operations.json
@@ -110,20 +112,25 @@ classes, the page and the records are defined in
    Storing a day again overwrites its records; delete a finding that no
    longer applies with `deleteRecords`.
 
-7. With a `DOC` that existed before this run, refresh its Actions and
-   Changelog sections (a document created in step 6 already carries them).
+7. With a `DOC` that existed before this run, refresh its Recommended Actions
+   and Changelog sections (a document created in step 6 already carries them).
    Read `lessons` and `changes` with `get_data` and write them to
    `DIR/dataset.json` as `{"lessons": [...], "changes": [...]}`, each a list
    of `{id, value}`. Then:
 
    ```sh
-   python3 scripts/review.py document DIR/dataset.json DIR/report.json > DIR/sections.json
+   python3 scripts/review.py document DIR/dataset.json DIR/report.json --doc DOC > DIR/sections.json
    ```
 
-   In `DOC`, replace the blocks under the "Actions" and "Changelog" headings
-   with the `actions` and `changelog` blocks: delete the old ones, then insert
-   the new ones in order after the heading. Leave every other block as it is;
-   the charts and the Recent days table follow the data by themselves.
+   In `DOC`, replace the blocks under the "Recommended Actions" and
+   "Changelog" headings with the `actions` and `changelog` blocks: delete the
+   old ones, then insert the new ones in order after the heading; a document
+   whose heading still reads "Actions" gets it renamed. Each action is a card
+   whose "Discuss in Claude Code" button opens a new session with a prompt to
+   discuss the change before making it. If Uberblick refuses a card with
+   `invalid_card` (0.4.3 has no card buttons), run `document` again with
+   `--no-button`. Leave every other block as it is; the charts and the Recent
+   days table follow the data by themselves.
 
 8. Reply with the headline, the KPIs, one line per change, and where the day
    was stored or why it was not. The page and the records may be shared: keep

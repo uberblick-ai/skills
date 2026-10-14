@@ -9,10 +9,10 @@
     ci.py summary data.json                            # the days as a Markdown table, for a reply
     ci.py signals data.json [--days 7] > signals.json  # what the last days show, to choose the top actions
     ci.py records data.json [incidents.json] [--actions actions.json] [--doc UUID] > update.json  # update_data batch
-    ci.py create data.json [--incidents F] [--actions F] [--tag ID]... > create.json  # create_doc arguments
+    ci.py create data.json [--incidents F] [--actions F] [--tag ID]... [--no-button] > create.json  # create_doc args
     ci.py charts data.json > charts.json               # the chart blocks, to compare with an existing document's
     ci.py changelog incidents.json > changelog.json    # the document's Incidents list, latest five
-    ci.py cards data.json actions.json [--doc UUID]  # the Recommended Actions cards
+    ci.py cards data.json actions.json [--doc UUID] [--no-button]  # the Recommended Actions cards
     ci.py ub TOOL [ARGS] | --calls calls.json [--checkout PATH]  # Uberblick tools through one `ub mcp serve`
 
 Days are UTC calendar days; the default is yesterday. A commit counts on the day its first push run was
@@ -704,8 +704,9 @@ def changelog(incidents, limit=5):
 
 
 SKILL_URL = "https://skills.uberblick.ai/skills/ci-health"
-# A card's link opens a new Claude Code session in the desktop app with the prompt filled in; the prompt names the
-# repository, since the link can only select a local folder.
+# A card's button opens a new Claude Code session in the desktop app with the prompt filled in; the prompt names the
+# repository, since the link can only select a local folder. Prose parts take only http(s) links, so the link is a
+# `button:` line, which Uberblick reads from the release after 0.4.3.
 CLAUDE_CODE = "claude://code/new?q="
 CHECK = "Check it against the repository: is it sound, what would it change, what are the risks, and is there a simpler way?"
 
@@ -721,9 +722,9 @@ def discuss_link(data, action, doc=None):
     return CLAUDE_CODE + quote(prompt, safe="")
 
 
-def cards(data, actions, doc=None):
-    """The actions as cards in rank order: the area and since when, the action, why with its numbers, and a link to
-    discuss it in Claude Code. Takes the agent's actions or the stored records."""
+def cards(data, actions, doc=None, button=True):
+    """The actions as cards in rank order: the area and since when, the action, why with its numbers, and a button
+    to discuss it in Claude Code. Takes the agent's actions or the stored records."""
     rows = actions.get("records", actions) if isinstance(actions, dict) else actions
     stored = [r["value"] for r in rows if "value" in r]
     values = sorted(stored, key=lambda a: a["rank"]) if stored else [r["value"] for r in action_rows(data, rows)]
@@ -733,12 +734,13 @@ def cards(data, actions, doc=None):
         since = dt.date.fromisoformat(a["since"]).strftime("%-d %b %Y")
         blocks.append({"type": "card", "text": f"label: {one_line(a['area'])} · since {since}\n"
                                                f"title: {one_line(a['title'])}\n"
-                                               f"footer: [Discuss in Claude Code]({discuss_link(data, a, doc)})\n\n"
-                                               f"{a['why']}"})
+                                               + (f"button: [Discuss in Claude Code]({discuss_link(data, a, doc)})\n"
+                                                  if button else "")
+                                               + f"\n{a['why']}"})
     return blocks or [{"type": "paragraph", "text": "No action proposed yet."}]
 
 
-def create_document(data, incidents=(), actions=()):
+def create_document(data, incidents=(), actions=(), button=True):
     """create_doc arguments for a repository's CI health document: intent, how to read it, the charts, the top
     actions, then the incidents."""
     repo = data["repo"]
@@ -758,7 +760,7 @@ def create_document(data, incidents=(), actions=()):
         {"type": "heading", "level": 2, "text": "Recommended Actions"},
         {"type": "paragraph", "text": f"The {TOP} changes that would most cut the time pushes wait for a green "
          f"{data['branch']}, from the last days of CI, kept until done or outranked."},
-        *cards(data, list(actions)),
+        *cards(data, list(actions), button=button),
         {"type": "heading", "level": 2, "text": "Incidents"},
         {"type": "paragraph", "text": "The latest steps in total wall time, up or down, and the change behind each."},
         *changelog(list(incidents)),
@@ -885,12 +887,14 @@ def main():
     n.add_argument("--incidents")
     n.add_argument("--actions")
     n.add_argument("--tag", action="append", default=[], help="a catalog tag id from list_tags")
+    n.add_argument("--no-button", action="store_true", help="cards without the Claude Code button, for Uberblick 0.4.3")
     commands.add_parser("charts").add_argument("data")
     commands.add_parser("changelog").add_argument("incidents")
     k = commands.add_parser("cards", help="the actions as card blocks, for Recommended Actions")
     k.add_argument("data")
     k.add_argument("actions", help="the agent's actions, or the stored ones from get_data")
     k.add_argument("--doc", help="the document's uuid, named in each card's prompt")
+    k.add_argument("--no-button", action="store_true", help="cards without the Claude Code button, for Uberblick 0.4.3")
     u = commands.add_parser("ub", help="call Uberblick MCP tools through one `ub mcp serve`")
     u.add_argument("tool", nargs="?", help="one tool; or pass --calls")
     u.add_argument("arguments", nargs="?", help="the tool's arguments: inline JSON or a JSON file (default none)")
@@ -933,13 +937,13 @@ def main():
             out = {"uuid": args.doc, "operations": out}
     elif args.command == "create":
         out = create_document(load(args.data), load(args.incidents) if args.incidents else (),
-                              load(args.actions) if args.actions else ())
+                              load(args.actions) if args.actions else (), not args.no_button)
         if args.tag:
             out["tags"] = args.tag
     elif args.command == "charts":
         out = charts(load(args.data))
     elif args.command == "cards":
-        out = cards(load(args.data), load(args.actions), args.doc)
+        out = cards(load(args.data), load(args.actions), args.doc, not args.no_button)
     elif args.command == "ub":
         if bool(args.calls) == bool(args.tool):
             sys.exit("ub: pass one TOOL or --calls FILE")

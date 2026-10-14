@@ -281,7 +281,8 @@ for line in sys.stdin:
         blocks = ci.cards(data, actions, doc="d0c")
         self.assertEqual([b["type"] for b in blocks], ["card", "card"])
         head, _, body = blocks[0]["text"].partition("\n\n")
-        self.assertIn("label: Wall time · since 20 Sep 2026\ntitle: Shard e2e\nfooter: [Discuss in Claude Code]", head)
+        self.assertIn("label: Wall time · since 20 Sep 2026\ntitle: Shard e2e\nbutton: [Discuss in Claude Code]", head)
+        self.assertNotIn("footer:", head, "prose takes only http(s) links, so the app link is a button")
         self.assertEqual(body, "It ends 8 min after the rest.")
         url = re.search(r"\]\((\S+)\)", head).group(1)
         self.assertTrue(url.startswith("claude://code/new?q="), "a new session in the desktop app")
@@ -293,6 +294,9 @@ for line in sys.stdin:
         self.assertEqual([b["text"] for b in ci.cards(data, records, doc="d0c")], [b["text"] for b in blocks],
                          "stored records render the same, in rank order")
         self.assertEqual(ci.cards(data, []), [{"type": "paragraph", "text": "No action proposed yet."}])
+        plain = ci.cards(data, actions, doc="d0c", button=False)[0]["text"]
+        self.assertEqual(plain, "label: Wall time · since 20 Sep 2026\ntitle: Shard e2e\n\nIt ends 8 min after the rest.",
+                         "without buttons, for Uberblick 0.4.3")
 
         doc = ci.create_document(data | {"days": [dict(data["days"][0], wall_min_7d=5.0)]}, (), actions)
         headings = [b["text"] for b in doc["blocks"] if b["type"] == "heading"]
