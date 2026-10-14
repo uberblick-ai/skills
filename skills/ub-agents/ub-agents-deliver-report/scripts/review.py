@@ -5,8 +5,8 @@ standard library and `gh`.
     review.py collect --repo OWNER/NAME [--day YYYY-MM-DD] > data.json
     review.py render data.json notes.json OUT_DIR [--no-open]   # writes report.html and report.json
     review.py records report.json > operations.json             # update_data operations for the day
-    review.py document dataset.json report.json > sections.json # the dataset document's Actions and Changelog
-    review.py create report.json > create.json                  # create_doc arguments for a new dataset document
+    review.py document dataset.json report.json [--doc UUID] [--no-button] > sections.json  # Actions, Changelog
+    review.py create report.json [--no-button] > create.json    # create_doc arguments for a new dataset document
     review.py queue --repo OWNER/NAME [--day YYYY-MM-DD]         # only the open-queue figures for a day
 
 The day runs from local midnight to local midnight; the default is yesterday. Only runs that started
@@ -27,6 +27,7 @@ import subprocess
 import sys
 import webbrowser
 from pathlib import Path
+from urllib.parse import quote
 
 SCHEMA = "ub-agents-deliver-report/1"
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
@@ -695,31 +696,63 @@ def changelog(changes, limit=5):
     return blocks
 
 
-def document(dataset, data):
-    """The dataset document's generated sections as insert_block arguments: the Actions (up to five proposed
-    lessons) and the Changelog (the latest changes). Recent days is a table block bound to the data.
-    See references/report.md."""
+# A card's button opens a new Claude Code session in the desktop app with the prompt filled in, not sent; the prompt
+# names the repository, since the link can only select a local folder. Prose parts take only http(s) links, so the
+# link is a `button:` line, which Uberblick reads from the release after 0.4.3.
+CLAUDE_CODE = "claude://code/new?q="
+CHECK = "Check it against the repository: is it sound, what would it change, what are the risks, and is there a simpler way?"
+
+
+def inline(text):
+    """Text for a card's inline Markdown: one line, Markdown characters escaped outside `code` spans."""
+    parts = re.split(r"(`[^`]*`)", " ".join(text.split()))
+    return "".join(p if p.startswith("`") else re.sub(r"([\\*_\[\]])", r"\\\1", p) for p in parts)
+
+
+def discuss_link(data, lesson, doc=None):
+    """A link that opens Claude Code with a prompt to discuss the lesson before changing anything: the repository,
+    the change, its evidence, what to check, then a plan."""
+    source = f"the delivery report for {data['repo']}" + (f" (Uberblick document {doc})" if doc else "")
+    evidence = "; ".join(filter(None, [lesson.get("cost"),
+                                       "causes: " + ", ".join(lesson["causes"]) if lesson.get("causes") else None,
+                                       "items: " + ", ".join(f"#{n}" for n in lesson["evidence"])
+                                       if lesson.get("evidence") else None]))
+    prompt = (f"From {source}, data as of {data['day']}:\n\n"
+              f"Recommendation: {lesson['title'].rstrip('.')}.\nChange: {lesson['change']}\n"
+              + (f"Where: {lesson['where']}\n" if lesson.get("where") else "")
+              + (f"Evidence: {evidence}\n" if evidence else "")
+              + f"\nLet's discuss this before changing anything. {CHECK} Then propose a plan and wait for my go-ahead.")
+    return CLAUDE_CODE + quote(prompt, safe="")
+
+
+def action_card(data, lesson, doc=None, button=True):
+    """One proposed lesson as a card: the lever as its label, the title, where it lives, its cost, causes and
+    evidence as the footer, the change as the body, and a button to discuss it in Claude Code."""
     repo = data["repo"]
+    evidence = " ".join(f"[#{n}](https://github.com/{repo}/issues/{n})" for n in lesson.get("evidence", []))
+    footer = " · ".join(filter(None, [inline(lesson.get("where") or ""), inline(lesson.get("cost") or ""),
+                                      inline(", ".join(lesson.get("causes", []))), evidence]))
+    return {"type": "card", "text": f"label: {LEVERS[lesson['lever']]}\ntitle: {inline(lesson['title'])}\n"
+                                    + (f"footer: {footer}\n" if footer else "")
+                                    + (f"button: [Discuss in Claude Code]({discuss_link(data, lesson, doc)})\n"
+                                       if button else "")
+                                    + f"\n{inline(lesson['change'])}"}
+
+
+def document(dataset, data, doc=None, button=True):
+    """The dataset document's generated sections as insert_block arguments: the Recommended Actions (up to five
+    proposed lessons, as cards) and the Changelog (the latest changes). Recent days is a table block bound to the
+    data. See references/report.md."""
     lessons = {l["id"]: l for l in data["lessons"]} | values(dataset.get("lessons"))
     ranked = data.get("actions") or sorted((i for i, l in lessons.items() if l.get("state") == "proposed"),
                                            key=lambda i: lessons[i].get("day", ""), reverse=True)
-    actions = [{"type": "paragraph", "text": "The most valuable changes not yet taken up, most runs saved first. An action "
+    actions = [{"type": "paragraph", "text": "Up to five changes not yet taken up, most runs saved first. An action "
                 "leaves this list once an issue or PR addresses it."}]
     # Actions look back ITEM_DAYS: a lesson nobody proposed again in that window drops off.
     since = (dt.date.fromisoformat(data["day"]) - dt.timedelta(days=ITEM_DAYS - 1)).isoformat()
     current = [k for k in ranked if k in lessons and lessons[k].get("state", "proposed") == "proposed"
                and lessons[k].get("day", data["day"]) >= since]
-    for n, key in enumerate(current[:5], 1):
-        l = lessons[key]
-        meta = " · ".join(filter(None, [LEVERS[l["lever"]], l.get("where"), l.get("cost"),
-                                        "causes: " + ", ".join(l.get("causes", [])) if l.get("causes") else None]))
-        evidence = [{"text": " · evidence: ", "marks": {}}] * bool(l.get("evidence"))
-        for i, number in enumerate(l.get("evidence", [])):
-            evidence += [{"text": ", ", "marks": {}}] * bool(i)
-            evidence.append({"text": f"#{number}", "marks": {"link": f"https://github.com/{repo}/issues/{number}"}})
-        actions += [{"type": "heading", "level": 3, "text": f'{n}. {l["title"]}'},
-                    {"type": "paragraph", "text": l["change"]},
-                    {"type": "paragraph", "inline": [{"text": meta, "marks": {"italic": True}}] + evidence}]
+    actions += [action_card(data, lessons[key], doc, button) for key in current[:5]]
     changes = values(dataset.get("changes")) | {c["ref"]: c for c in data.get("changes", [])}
     return {"actions": actions, "changelog": changelog(changes)}
 
@@ -743,10 +776,10 @@ def column(field, label, fmt="number", **extra):
     return {"field": field, "label": label, "format": fmt} | extra
 
 
-def create_document(data):
+def create_document(data, button=True):
     """create_doc arguments for a new dataset document, laid out as references/report.md describes: intro, KPIs,
-    charts and a Recent days table bound to `days`, this day's Actions, and the Changelog."""
-    repo, sections = data["repo"], document({}, data)
+    charts and a Recent days table bound to `days`, this day's Recommended Actions, and the Changelog."""
+    repo, sections = data["repo"], document({}, data, button=button)
     percent = {"unit": "%", "decimals": 0}
     hours = {"unit": "h", "decimals": 1}
     blocks = [
@@ -756,7 +789,7 @@ def create_document(data):
          "changes that would have saved them."},
         {"type": "paragraph", "text": "The ub-agents-deliver-report skill (npx skills@latest add uberblick-ai/skills) "
          "stores one record per day in this document's data. The charts and tables below follow that data; the "
-         "Actions section is rewritten after each stored day."},
+         "Recommended Actions are rewritten after each stored day."},
         {"type": "heading", "level": 2, "text": "KPIs"},
         {"type": "table", "text": "| KPI | Goal | Definition |\n| --- | --- | --- |\n" + "\n".join(
             f"| {kpi} | {goal} | {definition} |" for kpi, goal, definition in KPIS)},
@@ -795,7 +828,7 @@ def create_document(data):
                            column("backlog", "Actionable queue"), column("waiting_to_start", "Waiting to start"),
                            column("open_issues", "Open issues"), column("machines", "Machines")],
                "sort": {"field": "day", "direction": "desc"}}),
-        {"type": "heading", "level": 2, "text": "Actions"},
+        {"type": "heading", "level": 2, "text": "Recommended Actions"},
         *sections["actions"],
         {"type": "heading", "level": 2, "text": "Changelog"},
         *sections["changelog"],
@@ -823,8 +856,11 @@ def main():
     d = commands.add_parser("document")
     d.add_argument("dataset", help="lessons and changes as read with get_data")
     d.add_argument("report", help="report.json written by render")
+    d.add_argument("--doc", help="the dataset document's uuid, named in each action card's prompt")
+    d.add_argument("--no-button", action="store_true", help="cards without the Claude Code button, for Uberblick 0.4.3")
     n = commands.add_parser("create")
     n.add_argument("report", help="report.json written by render")
+    n.add_argument("--no-button", action="store_true", help="cards without the Claude Code button, for Uberblick 0.4.3")
     args = parser.parse_args()
     if args.command == "collect":
         print(json.dumps(collect(args.repo, *day_window(args.day)), indent=1))
@@ -836,10 +872,11 @@ def main():
     elif args.command == "records":
         print(json.dumps(records(json.loads(Path(args.report).read_text())), indent=1))
     elif args.command == "create":
-        print(json.dumps(create_document(json.loads(Path(args.report).read_text())), indent=1, ensure_ascii=False))
+        print(json.dumps(create_document(json.loads(Path(args.report).read_text()), not args.no_button), indent=1,
+                         ensure_ascii=False))
     elif args.command == "document":
-        print(json.dumps(document(json.loads(Path(args.dataset).read_text()), json.loads(Path(args.report).read_text())),
-                         indent=1, ensure_ascii=False))
+        print(json.dumps(document(json.loads(Path(args.dataset).read_text()), json.loads(Path(args.report).read_text()),
+                                  args.doc, not args.no_button), indent=1, ensure_ascii=False))
     else:
         data = merge(json.loads(Path(args.data).read_text()), json.loads(Path(args.notes).read_text()))
         out = Path(args.out)
