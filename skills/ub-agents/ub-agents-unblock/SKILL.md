@@ -80,7 +80,9 @@ How the launcher works; the project decides the labels, roles and policy.
    notice's and its checks. Open with two or three sentences in plain,
    technical English: what the issue or PR sets out to accomplish, where it
    stands now (what is done, what failed, what changed since the notice), and
-   what the decision unblocks. Then form your own recommendation from that and
+   what the decision unblocks. Stay at the level of outcomes ("most checks
+   pass, one unrelated WebKit test failed"); leave file names, line numbers,
+   SHAs and check names out unless asked. Then form your own recommendation from that and
    what step 1 found; say in one line where and why it differs from the
    agent's.
 
