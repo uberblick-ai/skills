@@ -77,8 +77,11 @@ How the launcher works; the project decides the labels, roles and policy.
 
 4. For each item, read what the decision needs: the notice's evidence, the
    discussion since, linked items and, for a PR, its head SHA against the
-   notice's and its checks. Form your own recommendation from that and what
-   step 1 found; say in one line where and why it differs from the
+   notice's and its checks. Open with two or three sentences in plain,
+   technical English: what the issue or PR sets out to accomplish, where it
+   stands now (what is done, what failed, what changed since the notice), and
+   what the decision unblocks. Then form your own recommendation from that and
+   what step 1 found; say in one line where and why it differs from the
    agent's.
 
 5. Ask with your interactive question tool (AskUserQuestion in Claude Code;
@@ -91,7 +94,8 @@ How the launcher works; the project decides the labels, roles and policy.
    - **Answer:** comment the decision on the item the notice names, quoting
      the option and the maintainer's words (body in a scratch file outside the
      checkout). Remove the stop label, then add the trigger of the role that
-     acts next, as step 1 mapped it.
+     acts next, as step 1 mapped it. Apply any other change the answer names,
+     such as a milestone.
      ```sh
      gh api repos/REPO/issues/N/comments -F body=@FILE
      gh api -X DELETE repos/REPO/issues/N/labels/STOP
