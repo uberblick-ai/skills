@@ -192,7 +192,23 @@ which opens a new session in the Claude desktop app with the prompt filled
 in, not sent. The prompt names the repository and the document, the day of
 the data, the recommendation, its evidence and `check`, and asks for a plan
 before any change; the link cannot select a repository by name, only a
-local folder, so the prompt names it. Card prose takes only http(s) links,
+local folder, so the prompt names it.
+
+When the discussion settles on applying the action, the prompt asks that
+session to mark it once a pull request implements it or an issue plans
+it. The card's title and why are struck through, the button goes, and a
+footer that is not struck through names the change, for example `Planned
+in [acme/app#212](https://github.com/acme/app/issues/212).` A link whose
+text is the `owner/repo#number` reference and whose target is its GitHub
+address shows as a GitHub pill. The session also upserts a record keyed by
+the action's id in the `applied` collection, `{"status": "planned", "ref":
+"acme/app#212", "url": "https://github.com/acme/app/issues/212", "day":
+"2026-10-15"}`, with `status` `implemented` or `planned`. It is a separate
+collection because every run replaces `actions`, and a person's decision
+must survive that. `cards --applied` renders a marked action the same way,
+and `records --applied` deletes the marks of actions no longer kept.
+
+Card prose takes only http(s) links,
 so the link is a `button:` line, which Uberblick reads from the release
 after 0.4.3; `--no-button` leaves it out for older versions.
 
@@ -206,6 +222,7 @@ document; with `--doc UUID` it prints the full `update_data` arguments:
 | `days` | `2026-10-09` | day, every field above |
 | `incidents` | `2026-10-04/acme-app-189` | incident |
 | `actions` | `split-browser-e2e` | current action; `--actions` replaces the set |
+| `applied` | `split-browser-e2e` | action being applied, written by the session that discussed it |
 
 The schema lists every job field seen, so a batch that adds a job widens it;
 earlier records stay valid. A day takes about 400 bytes, so a year stays far
@@ -224,8 +241,9 @@ workspace of that repository's corpus. It reads top to bottom:
    median and P95), tests, and, once measured, the test-to-code ratio and
    coverage. Per-job times are in the data, not drawn.
 3. **Recommended Actions.** Below the charts, the current top three as
-   cards, each with a button to discuss it in Claude Code. `ci.py cards`
-   rewrites them on every run.
+   cards, each with a button to discuss it in Claude Code; one being
+   applied is struck through, with its pull request or issue below.
+   `ci.py cards` rewrites them on every run.
 4. **Incidents.** Below the actions, the latest five, newest first, one list
    item each: the day, the change linked, the direction with the medians
    before and after, and why. `ci.py changelog` rewrites this list.

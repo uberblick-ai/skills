@@ -19,7 +19,7 @@ compatibility: >-
   the `ub` command; without either the skill prints a table.
 metadata:
   author: uberblick-ai
-  version: "1.3"
+  version: "1.4"
 ---
 
 # CI health
@@ -59,7 +59,7 @@ the document layout are in [references/data.md](references/data.md).
    the actions are the result; say so in one line. With one, `search` for
    "CI health" in the workspace; when the document found is about this
    repository, call it `DOC` and read with `get_data` its `incidents`, its
-   `actions` and its latest `days` records. When no such document exists,
+   `actions`, its `applied` marks and its latest `days` records. When no such document exists,
    ask the maintainer once whether to create it, and carry on meanwhile.
 
 2. Collect:
@@ -192,7 +192,11 @@ the document layout are in [references/data.md](references/data.md).
    With `DOC`, start from its stored `actions`. Keep one while its evidence
    holds, with its `id` and `since` and today's numbers in `why`; drop one
    that a merged change addressed or the data no longer shows; replace one
-   only when a candidate saves clearly more. Without `DOC`, nothing keeps
+   only when a candidate saves clearly more. An action with an `applied`
+   mark is being handled: someone discussed it and opened the pull request
+   or issue the mark names. Keep it, struck through, in its place while that
+   pull request or issue is open, and drop it once it is merged or closed;
+   the days after show what it changed. Without `DOC`, nothing keeps
    actions between runs, so choose them afresh. Fewer than three is fine,
    and no action goes without data behind it. Write `DIR/actions.json` in
    rank order, in the shape `references/data.md` gives: `area`, `title`
@@ -217,8 +221,11 @@ the document layout are in [references/data.md](references/data.md).
    untagged. Then, for a new document or an existing one:
 
    ```sh
-   python3 scripts/ci.py records DIR/data.json [DIR/incidents.json] --actions DIR/actions.json --doc DOC > DIR/update.json
+   python3 scripts/ci.py records DIR/data.json [DIR/incidents.json] --actions DIR/actions.json [--applied DIR/applied.json] --doc DOC > DIR/update.json
    ```
+
+   `DIR/applied.json` is the `applied` collection as `get_data` returned
+   it; the marks of dropped actions are deleted with them.
 
    Pass it as the arguments of `update_data`, then read the area summary
    back with `get_data` and confirm `days`, `incidents` and `actions` are
@@ -233,11 +240,14 @@ the document layout are in [references/data.md](references/data.md).
     changelog DIR/all-incidents.json`, and replace the list items under the
     "Incidents" heading, below the charts, with its blocks. On every run,
     since their numbers move, run `ci.py cards DIR/data.json DIR/actions.json
-    --doc DOC` and replace the cards under the "Recommended Actions" heading,
+    --doc DOC [--applied DIR/applied.json]` and replace the cards under the "Recommended Actions" heading,
     or its "No action proposed yet." paragraph, with its blocks; a document
     without that heading gets it after the last chart, with the paragraph
     `create` writes below it. Each card's button opens a new Claude Code
-    session with a prompt to discuss the action before changing anything; if
+    session with a prompt to discuss the action before changing anything.
+    When that discussion settles on applying it, the prompt has the session
+    strike the card through, with the pull request or issue as a GitHub
+    pill below, and store an `applied` mark, so `cards` keeps it that way. If
     Uberblick refuses a card with `invalid_card` (0.4.3 has no card buttons),
     run `cards` or `create` again with `--no-button`. Leave every
     other block as it is, since people may have edited it. The document has no

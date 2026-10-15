@@ -8,11 +8,11 @@
     ci.py measure data.json --checkout PATH [--path SPEC]... [--every-day]  # optional: test ratio and coverage, added in place
     ci.py summary data.json                            # the days as a Markdown table, for a reply
     ci.py signals data.json [--days 7] > signals.json  # what the last days show, to choose the top actions
-    ci.py records data.json [incidents.json] [--actions actions.json] [--doc UUID] > update.json  # update_data batch
+    ci.py records data.json [incidents.json] [--actions actions.json] [--applied FILE] [--doc UUID] > update.json  # update_data
     ci.py create data.json [--incidents F] [--actions F] [--tag ID]... [--no-button] > create.json  # create_doc args
     ci.py charts data.json > charts.json               # the chart blocks, to compare with an existing document's
     ci.py changelog incidents.json > changelog.json    # the document's Incidents list, latest five
-    ci.py cards data.json actions.json [--doc UUID] [--no-button]  # the Recommended Actions cards
+    ci.py cards data.json actions.json [--doc UUID] [--applied FILE] [--no-button]  # Recommended Actions cards
     ci.py ub TOOL [ARGS] | --calls calls.json [--checkout PATH]  # Uberblick tools through one `ub mcp serve`
 
 Days are UTC calendar days; the default is yesterday. A commit counts on the day its first push run was
@@ -588,6 +588,11 @@ ACTIONS = {"version": 1, "schema": {"type": "object", "required": ["repo", "rank
                           "title": TEXT, "why": TEXT, "check": TEXT, "impact_min_per_day": NUM, "since": DAY,
                           "updated": DAY}}}
 TOP = 3  # actions on the document at a time
+# Applying an action is a person's decision, so it lives apart from `actions`, which every run replaces: one record
+# per action id, written by the session that discussed it.
+APPLIED = {"version": 1, "schema": {"type": "object", "required": ["status", "ref", "url"],
+           "properties": {"status": {"type": "string", "enum": ["implemented", "planned"]}, "ref": TEXT, "url": TEXT,
+                          "day": DAY}}}
 
 
 def schema(data):
@@ -648,9 +653,10 @@ def action_rows(data, actions):
     return rows
 
 
-def records(data, incidents=(), actions=None):
+def records(data, incidents=(), actions=None, applied=()):
     """One update_data batch: the repository's days, keyed by day so a refresh replaces them, any incidents, and
-    with `actions` the current top actions, which replace the ones before."""
+    with `actions` the current top actions, which replace the ones before. `applied` marks of actions no longer
+    kept are deleted."""
     if any(i.get("repo") not in (None, data["repo"]) for i in incidents):
         sys.exit(f"incidents: every incident must be for {data['repo']}, the repository of this document")
     batch = [{"collection": "days", "schema": schema(data),
@@ -658,7 +664,11 @@ def records(data, incidents=(), actions=None):
     if incidents:
         batch.append({"collection": "incidents", "schema": INCIDENTS, "upsert": incident_rows(incidents)})
     if actions is not None:
-        batch.append({"collection": "actions", "schema": ACTIONS, "replaceRecords": action_rows(data, actions)})
+        rows = action_rows(data, actions)
+        batch.append({"collection": "actions", "schema": ACTIONS, "replaceRecords": rows})
+        gone = sorted(set(applied_marks(applied)) - {r["id"] for r in rows})
+        if gone:
+            batch.append({"collection": "applied", "schema": APPLIED, "deleteRecords": gone})
     return batch
 
 
@@ -711,30 +721,69 @@ CLAUDE_CODE = "claude://code/new?q="
 CHECK = "Check it against the repository: is it sound, what would it change, what are the risks, and is there a simpler way?"
 
 
+def one_line(text):
+    return " ".join(text.split())
+
+
+def card_label(a):
+    return f"{one_line(a['area'])} · since {dt.date.fromisoformat(a['since']).strftime('%-d %b %Y')}"
+
+
+def applied_card(a, status, ref, url):
+    """An action being applied: the title and why struck through, the button gone, and a footer, not struck, naming
+    the pull request or issue. A link whose text is the reference and whose target its GitHub URL shows as a pill."""
+    return (f"label: {card_label(a)}\ntitle: ~~{one_line(a['title'])}~~\n"
+            f"footer: {status} in [{ref}]({url}).\n\n~~{a['why'].strip()}~~")
+
+
 def discuss_link(data, action, doc=None):
     """A link that opens Claude Code with a prompt to discuss the action before changing anything: the repository,
-    the recommendation, its evidence, what to check, then a plan. The prompt is filled in, not sent."""
+    the recommendation, its evidence, what to check, then a plan. If the outcome is to apply it, the prompt says how
+    to mark the card. The prompt is filled in, not sent."""
     source = f"the CI Health Report for {data['repo']}" + (f" (Uberblick document {doc})" if doc else "")
+    where = f"Uberblick document {doc}" if doc else f'the "CI Health Report" document for {data["repo"]} in Uberblick'
+    card = applied_card(action, "STATUS", "REF", "URL")
+    record = {"id": action.get("id") or slug(action["title"]).replace("_", "-"),
+              "value": {"status": "implemented or planned", "ref": "REF", "url": "URL", "day": "YYYY-MM-DD"}}
     prompt = (f"From {source}, data as of {action.get('updated') or data['last']}:\n\n"
               f"Recommendation: {action['title'].rstrip('.')}.\nEvidence: {action['why']}\n\n"
               f"Let's discuss this before changing anything. {action.get('check') or CHECK} "
-              "Then propose a plan and wait for my go-ahead.")
+              "Then propose a plan and wait for my go-ahead.\n\n"
+              "If we decide to apply it, mark the card once a pull request implements it or an issue plans it, so the "
+              f"report shows it is being handled. In {where}, replace the card titled \"{one_line(action['title'])}\" "
+              "under Recommended Actions with this one (delete_block, then insert_block in the same place, since "
+              "edit_block cannot change formatting). STATUS is Implemented or Planned, REF is owner/repo#number and "
+              "URL its GitHub address; keeping the reference as the link text makes it show as a GitHub pill:\n\n"
+              f"{card}\n\n"
+              "Then record it with update_data, so later refreshes keep the card struck through: collection "
+              f"\"applied\", schema {json.dumps(APPLIED)}, upsert {json.dumps(record)}.")
     return CLAUDE_CODE + quote(prompt, safe="")
 
 
-def cards(data, actions, doc=None, button=True):
+def applied_marks(applied):
+    """Action id to its applied record, from the stored `applied` collection (get_data) or a list of records."""
+    rows = applied.get("records", []) if isinstance(applied, dict) else applied or []
+    return {r["id"]: r["value"] for r in rows if "value" in r}
+
+
+def cards(data, actions, doc=None, button=True, applied=()):
     """The actions as cards in rank order: the area and since when, the action, why with its numbers, and a button
-    to discuss it in Claude Code. Takes the agent's actions or the stored records."""
+    to discuss it in Claude Code. An action being applied is struck through, with its pull request or issue below.
+    Takes the agent's actions or the stored records."""
     rows = actions.get("records", actions) if isinstance(actions, dict) else actions
-    stored = [r["value"] for r in rows if "value" in r]
-    values = sorted(stored, key=lambda a: a["rank"]) if stored else [r["value"] for r in action_rows(data, rows)]
-    one_line = lambda text: " ".join(text.split())
+    stored = {r["id"]: r["value"] for r in rows if "value" in r}
+    pairs = (sorted(stored.items(), key=lambda kv: kv[1]["rank"]) if stored
+             else [(r["id"], r["value"]) for r in action_rows(data, rows)])
+    marks = applied_marks(applied)
     blocks = []
-    for a in values:
-        since = dt.date.fromisoformat(a["since"]).strftime("%-d %b %Y")
-        blocks.append({"type": "card", "text": f"label: {one_line(a['area'])} · since {since}\n"
+    for key, a in pairs:
+        if key in marks:
+            m = marks[key]
+            blocks.append({"type": "card", "text": applied_card(a, m["status"].capitalize(), m["ref"], m["url"])})
+            continue
+        blocks.append({"type": "card", "text": f"label: {card_label(a)}\n"
                                                f"title: {one_line(a['title'])}\n"
-                                               + (f"button: [Discuss in Claude Code]({discuss_link(data, a, doc)})\n"
+                                               + (f"button: [Discuss in Claude Code]({discuss_link(data, a | {'id': key}, doc)})\n"
                                                   if button else "")
                                                + f"\n{a['why']}"})
     return blocks or [{"type": "paragraph", "text": "No action proposed yet."}]
@@ -881,6 +930,7 @@ def main():
     r.add_argument("data")
     r.add_argument("incidents", nargs="?")
     r.add_argument("--actions", help="the current top actions, which replace the stored ones")
+    r.add_argument("--applied", help="the stored applied collection from get_data; marks of dropped actions go")
     r.add_argument("--doc", help="the document's uuid: print update_data arguments instead of the operations alone")
     n = commands.add_parser("create")
     n.add_argument("data")
@@ -894,6 +944,7 @@ def main():
     k.add_argument("data")
     k.add_argument("actions", help="the agent's actions, or the stored ones from get_data")
     k.add_argument("--doc", help="the document's uuid, named in each card's prompt")
+    k.add_argument("--applied", help="the stored applied collection from get_data: those actions are struck through")
     k.add_argument("--no-button", action="store_true", help="cards without the Claude Code button, for Uberblick 0.4.3")
     u = commands.add_parser("ub", help="call Uberblick MCP tools through one `ub mcp serve`")
     u.add_argument("tool", nargs="?", help="one tool; or pass --calls")
@@ -932,7 +983,7 @@ def main():
         return
     elif args.command == "records":
         out = records(load(args.data), load(args.incidents) if args.incidents else (),
-                      load(args.actions) if args.actions else None)
+                      load(args.actions) if args.actions else None, load(args.applied) if args.applied else ())
         if args.doc:
             out = {"uuid": args.doc, "operations": out}
     elif args.command == "create":
@@ -943,7 +994,8 @@ def main():
     elif args.command == "charts":
         out = charts(load(args.data))
     elif args.command == "cards":
-        out = cards(load(args.data), load(args.actions), args.doc, not args.no_button)
+        out = cards(load(args.data), load(args.actions), args.doc, not args.no_button,
+                    load(args.applied) if args.applied else ())
     elif args.command == "ub":
         if bool(args.calls) == bool(args.tool):
             sys.exit("ub: pass one TOOL or --calls FILE")

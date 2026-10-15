@@ -298,6 +298,24 @@ for line in sys.stdin:
         self.assertEqual(plain, "label: Wall time · since 20 Sep 2026\ntitle: Shard e2e\n\nIt ends 8 min after the rest.",
                          "without buttons, for Uberblick 0.4.3")
 
+        for part in ('In Uberblick document d0c, replace the card titled "Shard e2e"', "title: ~~Shard e2e~~",
+                     "footer: STATUS in [REF](URL).", "~~It ends 8 min after the rest.~~", 'collection "applied"',
+                     '"id": "shard-e2e"'):
+            self.assertIn(part, prompt, "applying it strikes the card through and records it")
+
+        applied = {"records": [{"id": "shard-e2e", "value": {"status": "planned", "ref": "o/r#12",
+                                                             "url": "https://github.com/o/r/issues/12"}}]}
+        marked = ci.cards(data, records, doc="d0c", applied=applied)
+        self.assertEqual(marked[0]["text"], "label: Wall time · since 20 Sep 2026\ntitle: ~~Shard e2e~~\n"
+                         "footer: Planned in [o/r#12](https://github.com/o/r/issues/12).\n\n"
+                         "~~It ends 8 min after the rest.~~", "struck through, no button, the issue as a pill below")
+        self.assertEqual(marked[1]["text"], blocks[1]["text"], "the others stay as they are")
+        kept = ci.records(data, (), actions[:1], applied)
+        self.assertNotIn("applied", [b["collection"] for b in kept], "a kept action keeps its mark")
+        dropped = ci.records(data, (), actions[1:], applied)[-1]
+        self.assertEqual((dropped["collection"], dropped["deleteRecords"]), ("applied", ["shard-e2e"]),
+                         "a dropped action's mark goes with it")
+
         doc = ci.create_document(data | {"days": [dict(data["days"][0], wall_min_7d=5.0)]}, (), actions)
         headings = [b["text"] for b in doc["blocks"] if b["type"] == "heading"]
         self.assertEqual(headings, ["Recommended Actions", "Incidents"], "actions above the incidents")
