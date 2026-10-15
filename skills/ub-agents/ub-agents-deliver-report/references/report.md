@@ -3,7 +3,8 @@
 One page per repository per day, and one record of it. It answers, in this
 order: how autonomous the day was, what to change, where the extra runs went,
 how each item fared, what the roles said about themselves.
-`scripts/review.py render` lays the page out from `data.json` and
+`scripts/review.py digest` prints the day from `data.json` for the agent to
+read; `scripts/review.py render` lays the page out from `data.json` and
 `notes.json`; `scripts/review.py records` turns the result into dataset
 records. This file says what each holds.
 
@@ -34,14 +35,21 @@ session, is shown but not counted.
 
 ## KPIs
 
-| KPI | Goal | Definition | Fields |
-| --- | --- | --- | --- |
-| Autonomous deliveries | up | Loop deliveries the integrator merged with no wasted run, no stop and no action-needed notice. A send-back from the issue reviewer or the reviewer still counts; one from the implementer or integrator does not. | `autonomous`, `autonomous_pct` |
-| Wasted runs | down | Runs started on the day that were wasted. | `wasted_runs`, `wasted_pct` |
-| Human stops | down | Action-needed notices on loop deliveries, and the hours from each to the next run on the item. | `human_stops`, `human_stops_per_delivery`, `human_wait_h` |
-| Cycle | down | First run to delivery, without the human wait. | `loop_cycle_h_median` (`cycle_h_median` with the wait) |
-| Run time | down | Run minutes summed per delivery, the touch time. | `run_h_median` (`run_h` for all runs on the day) |
-| Runs with denials | down | Claude runs on the day with a permission denial. ub-agents records denials from Claude output only, at most ten a run, and records before about 5 October 2026 carry none, so `denial_pct` is null for those days rather than zero. | `denial_pct`, `runs_with_denials`, `claude_runs` |
+| KPI | Goal | Target | Definition | Fields |
+| --- | --- | --- | --- | --- |
+| Autonomous deliveries | up | 75% or more | Loop deliveries the integrator merged with no wasted run, no stop and no action-needed notice. A send-back from the issue reviewer or the reviewer still counts; one from the implementer or integrator does not. | `autonomous`, `autonomous_pct` |
+| Wasted runs | down | under 10% | Runs started on the day that were wasted. | `wasted_runs`, `wasted_pct` |
+| Human stops | down | | Action-needed notices on loop deliveries, and the hours from each to the next run on the item. | `human_stops`, `human_stops_per_delivery`, `human_wait_h` |
+| Cycle | down | | First run to delivery, without the human wait. | `loop_cycle_h_median` (`cycle_h_median` with the wait) |
+| Run time | down | | Run minutes summed per delivery, the touch time. | `run_h_median` (`run_h` for all runs on the day) |
+| Runs with denials | down | under 10% | Claude runs on the day with a permission denial. ub-agents records denials from Claude output only, at most ten a run, and records before about 5 October 2026 carry none, so `denial_pct` is null for those days rather than zero. | `denial_pct`, `runs_with_denials`, `claude_runs` |
+
+A target is guidance for reading a day, not a gate: the page colors a share
+green when it meets its target and red when it misses. A day with few
+deliveries swings widely, so judge a target over a week. A denial the role
+needed points to its permissions or instructions; one that kept it out of
+something it should not touch is the sandbox working, which is why the
+denial target is not zero.
 
 Shares are percentages, 0 to 100, so a chart plots them as stored. For
 context only: `review_rounds_per_delivery`, `lead_h_median` (filed to
@@ -197,7 +205,8 @@ rather than runs has `runs: 0` and says so in `cost`.
              "sequence": "P Q< P I R< I R G", "attempts": 8, "wasted_runs": 0, "review_rounds": 2,
              "human_stops": 0, "human_wait_h": 0, "lead_h": 55.05, "cycle_h": 1.85, "loop_cycle_h": 1.85,
              "run_h": 1.55, "denials": 4, "runs_with_denials": 3, "lines": 889, "note": "...",
-             "prs": [], "runs": [], "retrospectives": []}],
+             "prs": [], "runs": [], "retrospectives": [],
+             "evidence": {"commits": [], "events": [], "ci": [], "errors": []}}],
  "findings": [], "lessons": [], "actions": [], "changes": [], "retrospective_groups": [],
  "retrospectives": {"errors": [], "in_window": []}}
 ```
@@ -205,8 +214,18 @@ rather than runs has `runs: 0` and says so in `cost`.
 `sequence` writes the runs as role letters, marking `<` sent back, `x` wasted,
 `!` stopped and `?` pending. Durations are hours.
 
+An item that needs a cause (a send-back, a stop or a wasted run, or a loop
+delivery that was not autonomous) carries `evidence`, which its run summaries
+leave out: `commits` pushed while none of its runs was going, `events` (label
+and state changes, merges) by anyone but the accounts that post run records,
+and `ci`, the workflow runs on its PRs with their result, attempt and minutes.
+Empty lists are left out. `digest` prints every run of such an item with its
+summary, denials and evidence, and one line for every other item.
+
 `records` turns `report.json` into one `update_data` batch for the dataset
-document, each collection with its schema:
+document. A document keeps each collection's schema and checks every record
+against it, so the batch leaves schemas out; `records --schemas` adds them,
+for a new document, a missing collection or a record a stored schema refuses:
 
 | Collection | Key | One record per |
 | --- | --- | --- |
@@ -258,8 +277,11 @@ bottom:
     "columns": [{"field": "day", "label": "Day", "format": "date"},
                 {"field": "autonomous", "label": "Autonomous", "format": "number"},
                 {"field": "wasted_pct", "label": "Wasted share", "format": "number", "unit": "%", "decimals": 0}],
-    "sort": {"field": "day", "direction": "desc"}}
+    "sort": {"field": "day", "direction": "desc"}, "limit": 7}
    ```
+
+   `limit` keeps the newest seven days in the table. `pageSize`, which older
+   documents carry, never affected the display.
 
 4. **Recommended Actions.** The day's `actions`: up to five proposed
    lessons, each a card with the lever as its label, the title, the change as
@@ -268,8 +290,8 @@ bottom:
    card has a "Discuss in Claude Code" button to
    `claude://code/new?q=PROMPT`, which opens a new session in the Claude
    desktop app with the prompt filled in, not sent. The prompt names the
-   repository, the document and the day of the data, the change, where it
-   lives and its evidence, and asks for a plan before any change; the link
+   repository, the document and the day the lesson was last proposed, the
+   change, where it lives and its evidence, and asks for a plan before any change; the link
    cannot select a repository by name, only a local folder, so the prompt
    names it. Card prose takes only http(s) links, so the link is a `button:`
    line, which Uberblick reads from the release after 0.4.3; `--no-button`
@@ -278,8 +300,13 @@ bottom:
    the day, the change linked to its issue, PR or commit in ub-agents or the
    project, and why it was made.
 
-The skill rewrites the "Recommended Actions" and "Changelog" sections, from
-`document`'s output, after each stored day. Everything else is written once, by `create`
-or by a person, and may be edited by hand; the charts and tables follow the
-data by themselves. A chart plots and a table lists every stored day: neither
-mapping has a window yet, so a year of days shows as one long table.
+After each stored day the skill brings the "Recommended Actions" and
+"Changelog" sections up to date from `document`'s output, one block at a time:
+it deletes a card whose lesson left the list, edits a card in place when the
+day changed its lesson, so comments on it stay, inserts a new one, and adds
+the day's changes to the changelog. `document` marks each card `changed` and
+counts the new changelog items in `changelog_new`; a card is otherwise the
+same from day to day. Everything else is written once, by `create` or by a
+person, and may be edited by hand; the charts and tables follow the
+data by themselves. A chart plots every stored day; the Recent days table
+lists the newest seven.

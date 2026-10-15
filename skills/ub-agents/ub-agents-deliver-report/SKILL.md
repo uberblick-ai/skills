@@ -15,7 +15,7 @@ compatibility: >-
   uberblick MCP server; without it the skill still writes the page.
 metadata:
   author: uberblick-ai
-  version: "1.1"
+  version: "1.2"
 ---
 
 # Deliver report
@@ -30,20 +30,27 @@ on, `DIR` a scratch directory outside the repository. The KPIs, the cause
 classes, the page and the records are defined in
 [references/report.md](references/report.md).
 
-1. Collect:
+1. Collect, then read the digest:
 
    ```sh
    python3 scripts/review.py collect --repo REPO > DIR/data.json
+   python3 scripts/review.py digest DIR/data.json
    ```
 
    The day is a calendar day in local time, midnight to midnight; the default
    is yesterday, `--day 2026-10-07` picks another. Only runs that started
    before the day ended count, so a day reads the same whenever it is
-   collected.
+   collected. The digest gives every run of each item that needs a cause with
+   its summary and denials, the evidence the runs leave out (commits pushed
+   outside any run, label and state changes by a person, CI runs on its PRs),
+   one line per item that went through cleanly, and the day's
+   retrospectives. Work from it; open `data.json` only for a field it leaves
+   out.
 
 2. Decide where the day will be kept. Uberblick is available when the
    `uberblick` MCP tools (`search`, `get_doc`, `get_data`, `update_data`,
-   `create_doc`, `insert_block`, `delete_block`) are in your tool list.
+   `create_doc`, `insert_block`, `edit_block`, `delete_block`) are in your
+   tool list.
    Without them, the page is the whole result: steps 3 and 4 name causes and
    lessons from this day alone, since there is no registry to reuse; skip
    steps 6 and 7, say so in one line of the reply, and add that
@@ -52,13 +59,14 @@ classes, the page and the records are defined in
    an Uberblick document holding the `days`, `items`, `findings`, `causes`,
    `lessons` and `changes` collections (search for "Delivery report"); call it
    `DOC`, and read its `causes` and `lessons` with `get_data` before naming
-   anything. When no such document exists, ask the maintainer once whether to
+   anything. Step 7 reuses this read. When no such document exists, ask the maintainer once whether to
    create the delivery report document, and carry on with the page while
    waiting: a yes creates `DOC` in step 6, a no skips steps 6 and 7.
 
 3. For each loop delivery that is not autonomous, each wasted run and each
-   reviewer send-back, name the cause from run summaries, denied commands and
-   retrospectives. Reuse a cause id when the mechanism matches; create one only
+   reviewer send-back, name the cause from run summaries, the evidence, denied
+   commands and retrospectives; look further on GitHub only where the digest
+   leaves the cause open. Reuse a cause id when the mechanism matches; create one only
    when none fits, named for the mechanism, not the incident. Count the runs
    each cause cost on this day, and mark it fixed, naming the change, when
    `main` or ub-agents already fixed it; record each such change that landed on
@@ -109,29 +117,47 @@ classes, the page and the records are defined in
 
    Pass the file's array as `operations` to `update_data` on `DOC`, then read
    the area summary back with `get_data` and confirm every collection is valid.
+   The batch leaves the collection schemas out, since `DOC` keeps them and
+   checks every record against them. Run `records` with `--schemas` for a
+   document created in this step, when the area summary lacks a collection, or
+   when `update_data` refuses a record against a stored schema.
    Storing a day again overwrites its records; delete a finding that no
    longer applies with `deleteRecords`.
 
-7. With a `DOC` that existed before this run, refresh its Recommended Actions
-   and Changelog sections (a document created in step 6 already carries them).
-   Read `lessons` and `changes` with `get_data` and write them to
-   `DIR/dataset.json` as `{"lessons": [...], "changes": [...]}`, each a list
-   of `{id, value}`. Then:
+7. With a `DOC` that existed before this run, bring its Recommended Actions
+   and Changelog up to date (a document created in step 6 already carries
+   them). Write `DIR/dataset.json` as `{"lessons": [...]}`: the registry
+   lessons the day's `actions` name that `notes.json` leaves out, each as
+   `{id, value}` from the step 2 read. `document` stops if one is missing.
+   Then:
 
    ```sh
    python3 scripts/review.py document DIR/dataset.json DIR/report.json --doc DOC > DIR/sections.json
    ```
 
-   In `DOC`, replace the blocks under the "Recommended Actions" and
-   "Changelog" headings with the `actions` and `changelog` blocks: delete the
-   old ones, then insert the new ones in order after the heading; a document
-   whose heading still reads "Actions" gets it renamed. Each action is a card
-   whose "Discuss in Claude Code" button opens a new session with a prompt to
-   discuss the change before making it. If Uberblick refuses a card with
-   `invalid_card` (0.4.3 has no card buttons), run `document` again with
-   `--no-button`. Leave every other block as it is; the charts and the Recent
-   days table follow the data by themselves.
+   Read `DOC` with `get_doc` and change only the blocks that differ, one
+   block at a time; never rewrite a whole section. Under "Recommended
+   Actions", `cards` lists the cards in order, each with its title and
+   whether this day changed its lesson, and `actions` holds their blocks
+   after the intro paragraph:
 
-8. Reply with the headline, the KPIs, one line per change, and where the day
-   was stored or why it was not. The page and the records may be shared: keep
-   credentials, local paths and hostnames out of the notes.
+   - Delete a card whose title is not in `cards`.
+   - Edit a card marked `changed` in place with `edit_block`, passing its
+     text and `rev` from `get_doc`, so comments on it stay.
+   - Insert a card that is not in `DOC` yet after the card before it in
+     `cards`, or after the intro paragraph.
+   - Leave every other card as it is; move one only when it is out of order.
+
+   Under "Changelog", insert the first `changelog_new` items of `changelog`
+   after the heading and delete the items past the fifth; when
+   `changelog_new` is 0, leave it as it is. A document whose heading still
+   reads "Actions" gets it renamed. Each action is a card whose "Discuss in
+   Claude Code" button opens a new session with a prompt to discuss the
+   change before making it. If Uberblick refuses a card with `invalid_card`
+   (0.4.3 has no card buttons), run `document` again with `--no-button`. The
+   charts and the Recent days table follow the data by themselves.
+
+8. Reply with the headline, the KPIs against their targets, one line per
+   change, and where the day was stored or why it was not. The page and the
+   records may be shared: keep credentials, local paths and hostnames out of
+   the notes.
