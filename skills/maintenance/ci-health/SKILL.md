@@ -2,8 +2,8 @@
 name: ci-health
 description: >-
   Track CI health on a repository's main branch from GitHub Actions: the
-  median wall time a push waits for CI and its slow tail, the number of
-  tests, optionally coverage and the test-to-code ratio, the changes that
+  median wall time a push waits for CI and its slow tail, the share of runs
+  that fail, the number of tests, optionally coverage and the test-to-code ratio, the changes that
   made CI slower or faster, and the top three actions that would cut the
   wait. Use when a maintainer asks how long CI takes, whether it got slower
   or what would make it faster, or to record CI figures daily. Works for
@@ -19,15 +19,16 @@ compatibility: >-
   the `ub` command; without either the skill prints a table.
 metadata:
   author: uberblick-ai
-  version: "1.4"
+  version: "1.5"
 ---
 
 # CI health
 
 CI should stay fast as a project grows: the wait that counts is wall time,
 from the first job starting to the last one finishing, not the minutes the
-jobs add up to. The charts show that total only; each job's time stays in
-the data to show which job moved when the total steps. This skill records
+jobs add up to. The wall time chart shows that total only; each job's time
+stays in the data to show which job moved when the total steps. A second
+chart shows how many run attempts on main end red, re-runs included. This skill records
 one day for one repository, keeps the steps that moved the total, with
 their cause, and keeps the three actions that would most cut the wait,
 judged again on every run.
@@ -78,7 +79,9 @@ the document layout are in [references/data.md](references/data.md).
    re-enabled after a gap, or moved to another system. A rework of the
    workflow is not a reason; it is an incident, and the step should show.
    Once a document holds days, reuse their `workflows` and `start` fields on
-   every run, or the history shifts.
+   every run, or the history shifts. It also counts every run attempt,
+   re-runs included, for the share that failed. A document whose days lack
+   `failure_pct` gets it by collecting those days again with `--since`.
 
 3. Count the tests. Test runners differ by language and setup, so you read
    the summary off the logs rather than the script guessing:
@@ -257,7 +260,7 @@ the document layout are in [references/data.md](references/data.md).
     order, end up in order, so the file needs only ids read before.
 
 11. Reply with the total wall time (the 7-day median with its ± and the
-    P95), the tests, the test ratio and any coverage, any new incident with
-    the job that moved, the actions with which are new or dropped, and
+    P95), the share of failed runs, the tests, the test ratio and any
+    coverage, any new incident with the job that moved, the actions with which are new or dropped, and
     where the day was stored. When the skill runs on a schedule with
     nothing new, a single line is enough.

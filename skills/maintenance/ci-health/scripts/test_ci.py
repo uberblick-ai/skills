@@ -66,6 +66,38 @@ class Tests(unittest.TestCase):
             ci.gh = real
         self.assertEqual(calls, [(), ("--allow-escape-sequences",)])
 
+    def test_failure_rate_counts_every_attempt(self):
+        def run(i, sha, conclusion, attempt=1, name="CI", hour=9):
+            return {"id": i, "head_sha": sha, "head_branch": "main", "path": f".github/workflows/{name}.yml",
+                    "name": name, "status": "completed", "conclusion": conclusion, "run_attempt": attempt,
+                    "created_at": f"2026-10-14T{hour:02d}:00:00Z", "head_commit": {"message": sha}}
+        runs = [run(1, "a", "success", attempt=2), run(2, "b", "failure", hour=10), run(3, "c", "cancelled", hour=11),
+                run(4, "c", "success", name="Release", hour=11)]
+        job = {"id": 9, "name": "tests", "started_at": "2026-10-14T09:00:00Z", "completed_at": "2026-10-14T09:05:00Z",
+               "conclusion": "success"}
+
+        def fake(path, raw=False, *flags):
+            if path == "repos/o/r":
+                return {"default_branch": "main"}
+            if "/attempts/1" in path:
+                return {"conclusion": "failure"}
+            if "/jobs" in path:
+                return {"jobs": [job]}
+            return {"workflow_runs": runs}
+        real, ci.gh = ci.gh, fake
+        try:
+            day = ci.dt.date(2026, 10, 14)
+            data = ci.collect("o/r", day, day, required=["CI"])
+        finally:
+            ci.gh = real
+        self.assertEqual([c["runs"] for c in data["commits"]], [["failure", "success"], ["failure"], ["cancelled"]],
+                         "a re-run's earlier attempt counts; only the named workflows do")
+        d = data["days"][0]
+        self.assertEqual((d["runs"], d["failure_pct"], d["failure_pct_7d"]), (4, 66.7, 66.7),
+                         "2 red of 3 attempts that ended green or red; cancelled ones are neither")
+        titles = [json.loads(b["text"])["title"] for b in ci.charts(data)]
+        self.assertEqual(titles[:2], ["Wall time on main", "Failed runs on main"])
+
     def test_tests_per_day_count_a_matrix_once(self):
         c = commit(1, 5.0)
         c["jobs"] = [{"id": i, "workflow": "CI", "name": f"test (py{v})", "min": 5.0} for i, v in ((1, "3.11"), (2, "3.14"))]

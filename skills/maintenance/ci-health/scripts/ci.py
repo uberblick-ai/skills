@@ -146,6 +146,27 @@ def window(args):
     return first, last
 
 
+GREEN, RED = ("success", "neutral"), ("failure", "timed_out", "startup_failure")  # cancelled and skipped runs neither
+
+
+def attempts(repo, run):
+    """The conclusion of every attempt of a run: a re-run keeps its id and bumps `run_attempt`, and the runs list
+    shows only the latest, so earlier attempts are read one by one."""
+    earlier = []
+    for n in range(1, run.get("run_attempt", 1)):
+        try:
+            earlier.append(gh(f"repos/{repo}/actions/runs/{run['id']}/attempts/{n}").get("conclusion"))
+        except RuntimeError as e:
+            print(f"collect: attempt {n} of run {run['id']}: {e}", file=sys.stderr)
+    return [*earlier, run["conclusion"]]
+
+
+def failure_rate(commits):
+    """Failed run attempts of these commits, in percent of the attempts that finished green or red."""
+    done = [c for commit in commits for c in commit.get("runs", []) if c in GREEN + RED]
+    return round(100 * sum(c in RED for c in done) / len(done), 1) if done else None
+
+
 def collect(repo, first, last, required=(), floor=None):
     """Every push run on the default branch from LOOKBACK days before `first` to the end of `last`, grouped by
     commit, and one record per day from `first` to `last`. With `required` workflows, a commit counts only when it
@@ -169,6 +190,8 @@ def collect(repo, first, last, required=(), floor=None):
             "title": (run.get("head_commit") or {}).get("message", "").split("\n")[0][:200],
             "workflows": {}, "jobs": []})
         c["workflows"][run["name"]] = run["conclusion"]
+        if not required or run["name"] in required:
+            c.setdefault("runs", []).extend(attempts(repo, run))
         c["jobs"] += [{"id": j["id"], "workflow": run["name"], "name": j["name"], "started": j["started_at"],
                        "completed": j["completed_at"], "conclusion": j["conclusion"],
                        "min": minutes(j["started_at"], j["completed_at"])} for j in jobs]
@@ -201,7 +224,10 @@ def collect(repo, first, last, required=(), floor=None):
                   "wall_p95_7d": p95(c["wall_min"] for c in recent),
                   "execution_min": median(c["execution_min"] for c in green),
                   "wait_min": median(c["wait_min"] for c in green),
-                  "late_start_min": median(c.get("late_start_min") for c in green)}
+                  "late_start_min": median(c.get("late_start_min") for c in green),
+                  "runs": sum(len(c.get("runs", [])) for c in today) or None,
+                  "failure_pct": failure_rate(today),
+                  "failure_pct_7d": failure_rate(c for c in rows if since <= c["day"] <= key)}
         per_job = {}
         for c in green:
             for j in c["jobs"]:
@@ -559,7 +585,8 @@ def signals(data, days=WINDOW):
 
 
 def summary(data):
-    cols = [("commits", "Commits"), ("failed", "Failed"), ("wall_min_7d", "Wall (7d)"), ("wall_p95_7d", "P95 (7d)"),
+    cols = [("commits", "Commits"), ("failed", "Failed"), ("runs", "Runs"), ("failure_pct", "Failed runs %"),
+            ("wall_min_7d", "Wall (7d)"), ("wall_p95_7d", "P95 (7d)"),
             ("wall_min", "Wall"), ("late_start_min", "Late start"), ("tests", "Tests"), ("test_ratio", "Test ratio"),
             ("coverage_pct", "Coverage %")]
     cols = [(k, t) for k, t in cols if any(k in d for d in data["days"])]
@@ -598,7 +625,9 @@ APPLIED = {"version": 1, "schema": {"type": "object", "required": ["status", "re
 def schema(data):
     fields = {"day": DAY, "repo": TEXT, "workflows": TEXT, "start": DAY, "measured_sha": TEXT, "tests_pattern": TEXT,
               "loc_tool": TEXT, "loc_paths": TEXT,
-              **dict.fromkeys(["commits", "failed", "tests", "code_lines", "test_lines"], COUNT),
+              **dict.fromkeys(["commits", "failed", "runs", "tests", "code_lines", "test_lines"], COUNT),
+              **dict.fromkeys(["failure_pct", "failure_pct_7d"], {"type": ["number", "null"], "minimum": 0,
+                                                                  "maximum": 100}),
               "coverage_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
               **dict.fromkeys(["wall_min", "wall_min_7d", "wall_spread_7d", "wall_p95_7d", "execution_min", "late_start_min", "wait_min", "test_ratio", *data["jobs"]], NUM)}
     return {"version": 1, "schema": {"type": "object", "required": ["day", "repo", "commits"], "properties": fields}}
@@ -677,15 +706,20 @@ def chart(mapping):
 
 
 def charts(data):
-    """The charts, bound to the document's days: total wall time (the 7-day median and P95), tests, and, once
+    """The charts, bound to the document's days: total wall time (the 7-day median and P95), the share of run
+    attempts that failed (per day and over 7 days), tests, and, once
     measured, the test-to-code ratio and coverage. Per-job times stay in the data, to explain steps, not drawn."""
     x = {"field": "day", "type": "date", "label": "Day"}
     line = lambda title, y: chart({"version": 1, "type": "line", "collection": "days", "title": title, "x": x,
                                    "missing": "connect", "y": y})
     blocks = [line(f"Wall time on {data['branch']}",
                    [{"field": "wall_min_7d", "label": "7-day median", "unit": "min"},
-                    {"field": "wall_p95_7d", "label": "7-day P95", "unit": "min"}]),
-              line("Tests", [{"field": "tests", "label": "Tests"}])]
+                    {"field": "wall_p95_7d", "label": "7-day P95", "unit": "min"}])]
+    if any("failure_pct" in d for d in data["days"]):
+        blocks.append(line(f"Failed runs on {data['branch']}",
+                           [{"field": "failure_pct", "label": "Per day", "unit": "%"},
+                            {"field": "failure_pct_7d", "label": "7 days", "unit": "%"}]))
+    blocks.append(line("Tests", [{"field": "tests", "label": "Tests"}]))
     if any("test_ratio" in d for d in data["days"]):
         blocks.append(line("Test to code ratio", [{"field": "test_ratio", "label": "Test lines per code line"}]))
     if any("coverage_pct" in d for d in data["days"]):
@@ -800,7 +834,8 @@ def create_document(data, incidents=(), actions=(), button=True):
         {"type": "paragraph", "inline": [
             {"text": "Reading the charts: ", "marks": {"bold": True}},
             {"text": "one point per day, over green commits, in minutes. Wall time is the total over the last 7 days: the "
-             "median, and the P95 that shows the slow tail. Lower is better. "
+             "median, and the P95 that shows the slow tail. Lower is better. Failed runs is the share of run attempts, "
+             "re-runs included, that ended red; cancelled runs are left out. "
              "Runner queueing before the first job is left out. Data from GitHub Actions, refreshed by the ",
              "marks": {}},
             {"text": "ci-health skill", "marks": {"link": SKILL_URL}},

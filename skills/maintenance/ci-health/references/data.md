@@ -21,6 +21,9 @@ attempt's jobs, skipping jobs that were skipped.
 | `wait_min` | push to the first job starting: concurrency and runner queueing | median, context only |
 | `late_start_min` | how long after the first job the last job of a minute or more started: runner waits (macOS, a busy pool) or `needs` | median, context only |
 | `commits`, `failed` | | commits whose runs all finished, and how many of them were not green |
+| `runs` | every attempt of its runs, re-runs included | run attempts of the day's commits |
+| `failure_pct` | | attempts that ended red (`failure`, `timed_out`, `startup_failure`), in percent of those that ended green or red |
+| `failure_pct_7d` | | the same over the 7 days ending that day, pooled, so a quiet day weighs less |
 | `tests`, `tests_pattern` | tests the jobs report, and the patterns that read them | from the day's last green commit |
 | `code_lines`, `test_lines`, `test_ratio` | | at the day's last green commit, by `measure` |
 | `loc_tool`, `loc_paths` | | the line counter and the pathspecs it counted, joined by ` \|\| ` |
@@ -32,7 +35,13 @@ attempt's jobs, skipping jobs that were skipped.
   `neutral`. Failed and cancelled commits count in `failed` only, since a run
   that stopped early would read as fast.
 - With `--workflow`, a commit counts only when it ran one of the named
-  workflows; the day's `workflows` field records them. With `--start`, runs
+  workflows; the day's `workflows` field records them, and `runs` and the
+  failure rate count only those workflows' runs.
+- A re-run keeps its run and adds an attempt; the runs list shows the
+  latest, so `collect` reads each earlier attempt's conclusion, one call
+  per re-run attempt. Every attempt counts toward the failure rate, so one
+  red run re-run green reads as 1 of 2. Cancelled and skipped attempts,
+  such as runs a newer push superseded, count in neither part of it. With `--start`, runs
   before that day are ignored, also by the 7-day median; `start` records it.
 - A job's field is its workflow and job name in lowercase, joined by
   underscores, plus `_min`, for example `ci_browser_e2e_min`; `jobs` in
@@ -238,7 +247,8 @@ workspace of that repository's corpus. It reads top to bottom:
    execution time. One more on how to read the charts and where the data
    comes from.
 2. **Charts.** Line charts bound to `days`: total wall time (the 7-day
-   median and P95), tests, and, once measured, the test-to-code ratio and
+   median and P95), the share of failed run attempts (per day and over 7
+   days, re-runs included), tests, and, once measured, the test-to-code ratio and
    coverage. Per-job times are in the data, not drawn.
 3. **Recommended Actions.** Below the charts, the current top three as
    cards, each with a button to discuss it in Claude Code; one being
