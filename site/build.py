@@ -26,6 +26,7 @@ REPO = 'https://github.com/uberblick-ai/skills'
 RAW = 'https://raw.githubusercontent.com/uberblick-ai/skills/main'
 AGENTS = 'https://agents.uberblick.ai'
 INSTALL = 'npx skills@latest add uberblick-ai/skills'
+UPDATE = 'npx skills@latest update'
 TAGLINE = 'Agent skills for Uberblick and the ub-agents loop. One command, any agent.'
 
 # ---------- Reading the repository ----------
@@ -210,13 +211,13 @@ def sidebar(pre, groups, current=None, filt=True):
   </details>'''
 
 
-def tabs(cmds, idp):
+def tabs(cmds, idp, aria='Install with'):
     btns, panels = [], []
     for i, (tid, label, cmd, sh) in enumerate(cmds):
         sel = 'true' if i == 0 else 'false'
         btns.append(f'<button role="tab" id="t-{idp}-{tid}" aria-selected="{sel}" aria-controls="p-{idp}-{tid}" type="button">{label}</button>')
         panels.append(f'<div class="panel{" sh" if sh else ""}" role="tabpanel" id="p-{idp}-{tid}" aria-labelledby="t-{idp}-{tid}"{"" if i == 0 else " hidden"}><code>{e(cmd)}</code><button class="copy" type="button">Copy</button></div>')
-    return f'<div class="tabs"><div class="tablist" role="tablist" aria-label="Install with">{"".join(btns)}</div>{"".join(panels)}</div>'
+    return f'<div class="tabs"><div class="tablist" role="tablist" aria-label="{aria}">{"".join(btns)}</div>{"".join(panels)}</div>'
 
 
 def install_cmds(groups, s=None):
@@ -227,6 +228,12 @@ def install_cmds(groups, s=None):
             ('cc', 'Claude Code plugin', f'/plugin install {s["plugin"]} --marketplace uberblick-ai/skills', False),
             ('glob', 'Every project', f'{INSTALL} --skill {s["slug"]} -g', True),
             ('all', 'All skills', INSTALL, True)]
+
+
+def update_cmds(s):
+    # A skill installed with the skills CLI is a copy: it keeps its version until updated in the scope it went into.
+    return [('proj', 'This project', f'{UPDATE} {s["slug"]} -p', True),
+            ('glob', 'Every project', f'{UPDATE} {s["slug"]} -g', True)]
 
 
 def shot(image, caption, pre, eager=False):
@@ -342,7 +349,10 @@ def skill_page(s, groups, skills):
     <section class="sk-sec" id="install">
       <h2>Install</h2>
       {tabs(install_cmds(groups, s), "sk")}
-      <p class="note">Works in Claude Code, Codex, Cursor, OpenCode and the other agents the skills CLI supports. <code>npx skills update</code> keeps it current.</p>
+      <p class="note">Works in Claude Code, Codex, Cursor, OpenCode and the other agents the skills CLI supports.</p>
+      <h3 class="sk-sub" id="update">Update</h3>
+      {tabs(update_cmds(s), "up", "Update with")}
+      <p class="note">An installed skill keeps its version until you update it. Use the scope you installed it in.</p>
     </section>
     {"".join(secs)}
     <nav class="pager">{pager}</nav>
@@ -376,7 +386,8 @@ def skills_md(groups):
         for s in g['skills']:
             out += [f'### {s["slug"]}', '', s['description'], '',
                     f'- Page: {SITE}/skills/{s["slug"]}', f'- SKILL.md: {RAW}/{s["path"]}/SKILL.md',
-                    f'- Install: `{INSTALL} --skill {s["slug"]}`', '']
+                    f'- Install: `{INSTALL} --skill {s["slug"]}`',
+                    f'- Update: `{UPDATE} {s["slug"]} -p`, or `-g` for every project', '']
     return '\n'.join(out)
 
 
