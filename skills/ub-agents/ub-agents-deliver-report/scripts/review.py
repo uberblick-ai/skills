@@ -3,8 +3,9 @@
 standard library and `gh`.
 
     review.py collect --repo OWNER/NAME [--day YYYY-MM-DD] > data.json
+    review.py digest data.json                                  # the day in a few lines per item, to read first
     review.py render data.json notes.json OUT_DIR [--no-open]   # writes report.html and report.json
-    review.py records report.json > operations.json             # update_data operations for the day
+    review.py records report.json [--schemas] > operations.json # update_data operations for the day
     review.py document dataset.json report.json [--doc UUID] [--no-button] > sections.json  # Actions, Changelog
     review.py create report.json [--no-button] > create.json    # create_doc arguments for a new dataset document
     review.py queue --repo OWNER/NAME [--day YYYY-MM-DD]         # only the open-queue figures for a day
@@ -300,13 +301,77 @@ def board_posts(repo, agents):
     return posts, errors
 
 
+# What a day is read against: guidance, not a gate. A day with few deliveries swings widely; read a week.
+TARGETS = {"autonomous_pct": (75, "75% or more"), "wasted_pct": (-10, "under 10%"), "denial_pct": (-10, "under 10%")}
+
+
+def on_target(field, value):
+    """True or False against the field's target; None without a target or a value. A negative limit is a ceiling."""
+    if field not in TARGETS or value is None:
+        return None
+    limit = TARGETS[field][0]
+    return value >= limit if limit >= 0 else value < -limit
+
+
+NEEDS_CAUSE = {"back", "stop", "waste"}
+EVENTS = {"labeled", "unlabeled", "merged", "closed", "reopened", "head_ref_force_pushed", "ready_for_review",
+          "convert_to_draft"}
+SLACK = dt.timedelta(minutes=5)  # the launcher swaps labels just before a run starts and just after it reports
+
+
+def needs_cause(d):
+    """An item whose runs the notes must explain: a send-back, a stop or a wasted run, or a loop delivery that was
+    not autonomous."""
+    return any(r["class"] in NEEDS_CAUSE for r in d["runs"]) or (d["loop"] and not d["autonomous"])
+
+
+def evidence(repo, d, until, loop_accounts=frozenset()):
+    """What the run summaries leave out, for an item that needs a cause: label and state changes by anyone but the
+    accounts that post run records, commits pushed while none of its runs was going (a person, an attended session,
+    another tool), and the CI runs on its PRs. Without known loop accounts, events also go by run times."""
+    windows = [(when(r["started"]) - SLACK, when(r["started"]) + dt.timedelta(minutes=r["minutes"]) + SLACK
+                if r["minutes"] is not None else until) for r in d["runs"] if r["started"]]
+    outside = lambda text: bool(text) and when(text) < until and not any(a <= when(text) <= b for a, b in windows)
+    found = {"commits": [], "events": [], "ci": [], "errors": []}
+    for n in [d["number"]] + [p["number"] for p in d["prs"] if p["number"] != d["number"]]:
+        try:
+            for e in pages(f"repos/{repo}/issues/{n}/timeline"):
+                if e.get("event") == "committed" and outside((e.get("committer") or {}).get("date")):
+                    found["commits"].append({"pr": n, "sha": e["sha"][:7], "at": e["committer"]["date"],
+                                             "author": (e.get("author") or {}).get("name"),
+                                             "message": public((e.get("message") or "").splitlines()[0], 120)})
+                elif e.get("event") in EVENTS and when(e.get("created_at")) < until and (
+                        (e.get("actor") or {}).get("login") not in loop_accounts if loop_accounts
+                        else outside(e.get("created_at"))):
+                    label = (e.get("label") or {}).get("name")
+                    found["events"].append({"item": n, "at": e["created_at"], "by": (e.get("actor") or {}).get("login"),
+                                            "event": ("+" if e["event"] == "labeled" else "-") + label if label
+                                            else e["event"]})
+        except RuntimeError as exc:
+            found["errors"].append(f"#{n} timeline: {str(exc)[:160]}")
+    for p in d["prs"]:
+        try:
+            branch = gh(f"repos/{repo}/pulls/{p['number']}")["head"]["ref"]
+            ci = gh("-XGET", f"repos/{repo}/actions/runs", f"-fbranch={branch}", "-fper_page=100")["workflow_runs"]
+        except (RuntimeError, KeyError) as exc:
+            found["errors"].append(f"#{p['number']} CI: {str(exc)[:160]}")
+            continue
+        found["ci"] += [{"pr": p["number"], "run": w["id"], "workflow": w.get("name"), "sha": w["head_sha"][:7],
+                         "attempt": w.get("run_attempt", 1), "result": w.get("conclusion") or w.get("status"),
+                         "started": w.get("run_started_at") or w["created_at"],
+                         "minutes": minutes(w.get("run_started_at") or w["created_at"], w.get("updated_at"))}
+                        for w in ci if when(w["created_at"]) < until]
+    found["ci"].sort(key=lambda w: w["started"])
+    return {k: v for k, v in found.items() if v}
+
+
 def collect(repo, day, zone, since, until):
     inside = lambda text: bool(text) and since <= when(text) < until
     before = lambda text: bool(text) and when(text) < until
     agents, stop = config_of(base64.b64decode(gh(f"repos/{repo}/contents/ub-agents.yaml")["content"]).decode())
     kind = classifier(agents, stop)
 
-    items = {}
+    items, loop_accounts = {}, set()
     for row in pages(f"repos/{repo}/issues", state="all", since=stamp(since)):
         records, notices = [], []
         # An item opened after the day holds none of its runs, and one without comments holds no records.
@@ -316,6 +381,7 @@ def collect(repo, day, zone, since, until):
                 continue
             if found := RECORD.search(c["body"] or ""):
                 records.append(json.loads(found.group(1)) | {"url": c["html_url"]})
+                loop_accounts.add((c.get("user") or {}).get("login"))
             if NOTICE.match(c["body"] or ""):
                 notices.append(c["created_at"])
         items[row["number"]] = {"row": row, "records": records, "notices": notices}
@@ -381,6 +447,8 @@ def collect(repo, day, zone, since, until):
             "denials": sum(len(r["denied"]) for r in runs), "runs_with_denials": sum(bool(r["denied"]) for r in runs),
             "lines": sum(p["additions"] + p["deletions"] for p in pulls if inside(p["merged"])),
             "retrospectives": [p | {"items": sorted(p["items"])} for p in posts if p["items"] & set(members)]})
+        if needs_cause(issues[-1]):
+            issues[-1]["evidence"] = evidence(repo, issues[-1], until, frozenset(loop_accounts - {None}))
 
     window = [r for d in issues for r in d["runs"] if inside(r["started"])]
     # Older records carry no denials at all: count only runs that recorded them, so a gap is not a zero.
@@ -423,6 +491,85 @@ def collect(repo, day, zone, since, until):
         "issues": issues}
 
 
+def offset(data):
+    """The day's UTC offset, from the collected time zone such as 'CEST +0200'."""
+    found = re.search(r"([+-])(\d\d)(\d\d)$", data.get("timezone") or "")
+    if not found:
+        return dt.timezone.utc
+    span_ = dt.timedelta(hours=int(found.group(2)), minutes=int(found.group(3)))
+    return dt.timezone(span_ if found.group(1) == "+" else -span_)
+
+
+def digest(data):
+    """The day for the agent to read before data.json: every run of an item that needs a cause, with its summary,
+    denials and evidence; one line for each item that went through cleanly or came from outside the loop."""
+    zone, day, s = offset(data), data["day"], data["summary"]
+
+    def at(text):
+        if not text:
+            return "?"
+        moment = when(text).astimezone(zone)
+        return moment.strftime("%H:%M") if moment.date().isoformat() == day else moment.strftime("%-d %b %H:%M")
+
+    def num(value, unit=""):
+        return "n/a" if value is None else f"{value:g}{unit}"
+
+    def prs(d):
+        return ", ".join(f'PR #{p["number"]} ' + (f'merged {at(p["merged"])}' + ("" if p["by_loop"] else " outside the loop")
+                                                  if p["merged"] else "open") for p in d["prs"] if p["number"] != d["number"])
+
+    def head(d):
+        state = ("loop delivery" if d["loop"] else "delivered") if d["delivered"] else "not delivered"
+        parts = [state + (", autonomous" if d["autonomous"] else ""), d["sequence"] or "no runs",
+                 f'stops {d["human_stops"]} ({num(d["human_wait_h"], " h")} waited)' if d["human_stops"] else "",
+                 f'cycle {num(d["loop_cycle_h"], " h")}' if d["loop_cycle_h"] is not None else "",
+                 f'run {num(d["run_h"], " h")}' if d["runs"] else "", prs(d)]
+        return f'#{d["number"]} {d["title"]}: ' + "; ".join(p for p in parts if p)
+
+    out = [f'{data["repo"]}, {day} ({data["timezone"]}). Times are local; times on other days carry their date.',
+           f'Loop deliveries {s["deliveries"]}, autonomous {s["autonomous"]} ({num(s["autonomous_pct"], "%")}, target '
+           f'{TARGETS["autonomous_pct"][1]}). Runs {s["runs"]}, wasted {s["wasted_runs"]} ({num(s["wasted_pct"], "%")}, '
+           f'target {TARGETS["wasted_pct"][1]}). Human stops {s["human_stops"]}, {num(s["human_wait_h"], " h")} waited. '
+           f'Claude runs with denials {s["runs_with_denials"]} of {s["claude_runs"]} ({num(s["denial_pct"], "%")}, '
+           f'target {TARGETS["denial_pct"][1]}). '
+           f'PRs merged {s["prs_merged"]} ({s["prs_merged_by_loop"]} by the loop). '
+           f'Issues closed {s["issues_closed"]}, opened {s["issues_opened"]}. Retrospectives {s["retrospectives"]}.']
+    explain = [d for d in data["issues"] if d["runs"] and needs_cause(d)]
+    clean = [d for d in data["issues"] if d["runs"] and not needs_cause(d)]
+    outside = [d for d in data["issues"] if not d["runs"]]
+    out += ["", f"## Needs a cause ({len(explain)})"]
+    for d in explain:
+        out += ["", head(d)]
+        for r in d["runs"]:
+            # Runs that moved the item forward need only their gist; the others are what the notes explain.
+            full = r["class"] != "forward"
+            out.append(f'  {ROLES.get(r["agent"], "?")} {at(r["started"])} {num(r["minutes"], " min")} '
+                       f'{r["class"]} {r["result"]} {r["url"] or ""}')
+            out.append(f'    {r["summary"] if full else r["summary"][:160]}')
+            out += [f'    denied: {"; ".join(r["denied"])}'] if r["denied"] else []
+        ev = d.get("evidence", {})
+        out += [f'  commit outside runs: {at(c["at"])} {c["sha"]} by {c["author"]} on #{c["pr"]}: {c["message"]}'
+                for c in ev.get("commits", [])]
+        out += [f'  by a person: {at(e["at"])} {e["by"]} {e["event"]} on #{e["item"]}' for e in ev.get("events", [])]
+        out += [f'  CI #{w["pr"]}: {at(w["started"])} {w["workflow"]} {w["sha"]} {w["result"]} '
+                f'{num(w["minutes"], " min")}' + (f' attempt {w["attempt"]}' if w["attempt"] > 1 else "")
+                for w in ev.get("ci", [])]
+        out += [f'  evidence error: {e}' for e in ev.get("errors", [])]
+        out += [f'  retrospective: {p["agent"]} {at(p["created"])} {p["url"]}' for p in d["retrospectives"]]
+    out += ["", f"## Went through cleanly ({len(clean)})", ""]
+    for d in clean:
+        denied = [x for r in d["runs"] for x in r["denied"]]
+        out.append(head(d) + (f'; denied: {"; ".join(denied)}' if denied else ""))
+    out += ["", f"## Outside the loop ({len(outside)})", ""] + [head(d) for d in outside]
+    retro = data["retrospectives"]
+    out += ["", f'## Retrospectives on the day ({len(retro["in_window"])})']
+    for p in retro["in_window"]:
+        out += ["", f'{p["agent"]} {at(p["created"])} on {", ".join(f"#{n}" for n in p["items"]) or "no item"} {p["url"]}',
+                f'  {p["body"]}']
+    out += [f"Board not read: {e}" for e in retro["errors"]]
+    return "\n".join(out) + "\n"
+
+
 CSS = """<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600&family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono&display=swap">
 <style>
 :root { --bg: #f6f7f8; --panel: #fff; --fg: #1d2329; --muted: #5d6874; --line: #dde2e7; --accent: #2f6f8f;
@@ -442,7 +589,8 @@ a { color: var(--accent); } h1, h2, h3 { font-family: var(--head); margin: 0; te
 .ok { background: var(--ok); } .back { background: var(--back); } .fail { background: var(--fail); } .wait { background: var(--muted); }
 .wrap { max-width: 1080px; margin: 0 auto; padding-inline: 20px; padding-block: 32px 56px; display: grid; gap: 36px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-.grid .num { font-size: 26px; } section { display: grid; gap: 12px; min-width: 0; }
+.grid .num { font-size: 26px; } .num.hit { color: var(--ok); } .num.miss { color: var(--fail); }
+section { display: grid; gap: 12px; min-width: 0; }
 .scroll { overflow-x: auto; } table { border-collapse: collapse; width: 100%; font-size: 14px; }
 th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 td.r { text-align: right; white-space: nowrap; }
@@ -476,17 +624,23 @@ def refs(repo, numbers):
 
 
 def figures(t):
-    return [(f'{t["autonomous"]}/{t["deliveries"]}', "autonomous", f'{pct(t["autonomous_pct"])} of loop deliveries'),
-            (t["wasted_runs"], "wasted runs", f'{pct(t["wasted_pct"])} of {t["runs"]} runs'),
-            (t["human_stops"], "human stops", f'{spanh(t["human_wait_h"])} waited'),
-            (spanh(t["loop_cycle_h_median"]), "cycle", f'median without human wait · {spanh(t["cycle_h_median"])} with'),
-            (spanh(t["run_h_median"]), "run time", f'median per delivery · {spanh(t["run_h"])} all runs'),
-            (pct(t["denial_pct"]), "runs with denials", f'{t["runs_with_denials"]} of {t["claude_runs"]} Claude runs'),
-            (t["prs_merged"], "PRs merged", f'+{t["additions"]:,} −{t["deletions"]:,} · {t["files"]} files'),
-            (t["issues_closed"], "issues closed", f'{t["issues_opened"]} opened'),
+    """The tiles as (value, label, detail, the field read against a target or None)."""
+    goal = lambda field: f' · target {TARGETS[field][1]}'
+    return [(f'{t["autonomous"]}/{t["deliveries"]}', "autonomous",
+             f'{pct(t["autonomous_pct"])} of loop deliveries' + goal("autonomous_pct"), "autonomous_pct"),
+            (t["wasted_runs"], "wasted runs", f'{pct(t["wasted_pct"])} of {t["runs"]} runs' + goal("wasted_pct"),
+             "wasted_pct"),
+            (t["human_stops"], "human stops", f'{spanh(t["human_wait_h"])} waited', None),
+            (spanh(t["loop_cycle_h_median"]), "cycle", f'median without human wait · {spanh(t["cycle_h_median"])} with', None),
+            (spanh(t["run_h_median"]), "run time", f'median per delivery · {spanh(t["run_h"])} all runs', None),
+            (pct(t["denial_pct"]), "runs with denials",
+             f'{t["runs_with_denials"]} of {t["claude_runs"]} Claude runs' + goal("denial_pct"), "denial_pct"),
+            (t["prs_merged"], "PRs merged", f'+{t["additions"]:,} −{t["deletions"]:,} · {t["files"]} files', None),
+            (t["issues_closed"], "issues closed", f'{t["issues_opened"]} opened', None),
             (t.get("backlog", "–"), "open queue", f'{t.get("backlog_unprepared", "–")} to prepare · '
-             f'{t.get("backlog_prepared", "–")} prepared · {t.get("waiting_to_start", "–")} not started'),
-            (t.get("machines", "–"), "machines", f'{t.get("loops", "–")} loops · peak {t.get("peak_runs", "–")} parallel runs')]
+             f'{t.get("backlog_prepared", "–")} prepared · {t.get("waiting_to_start", "–")} not started', None),
+            (t.get("machines", "–"), "machines", f'{t.get("loops", "–")} loops · peak {t.get("peak_runs", "–")} parallel runs',
+             None)]
 
 
 def report(data):
@@ -496,8 +650,9 @@ def report(data):
     out = [f'<title>Delivery report {data["day"]}</title>', CSS, "</style><main class=\"wrap\">",
            f'<header><div class="label">{esc(repo)} · {esc(data["day"])} · {esc(data["timezone"])}</div>'
            f'<h1>Delivery report</h1><p>{esc(summary["headline"])}</p></header><section class="grid">']
-    out += [f'<div class="box"><div class="label">{l}</div><div class="num">{esc(v)}</div><div class="label">{esc(s)}</div></div>'
-            for v, l, s in figures(summary)]
+    tone = {True: " hit", False: " miss", None: ""}
+    out += [f'<div class="box"><div class="label">{l}</div><div class="num{tone[on_target(f, summary.get(f))]}">{esc(v)}</div>'
+            f'<div class="label">{esc(s)}</div></div>' for v, l, s, f in figures(summary)]
     out.append("</section><section><h2>What to change</h2>")
     out += [f'<div class="box"><div class="label">{esc(LEVERS[l["lever"]])}</div><h3>{esc(l["title"])}</h3>'
             f'<p>{esc(l["change"])}</p><div class="label">{esc(l.get("where", ""))} · {esc(l.get("cost", ""))} · '
@@ -594,6 +749,7 @@ def merge(data, notes):
 
 ITEM_REQUIRED = ["number", "title", "autonomous", "sequence"]
 ITEM_DAYS = 14  # item detail is a recent snapshot; days, findings and causes stay for trends
+RECENT_DAYS = 7  # the Recent days table shows the newest week; the charts plot every stored day
 
 
 def collection(required, **fields):
@@ -647,9 +803,11 @@ def item(d):
     return value | ({"prs": prs} if prs else {})
 
 
-def records(data):
+def records(data, schemas=False):
     """One update_data batch for the day: upserts keyed so that storing a day again replaces it. Items are one
-    record per day and only the last ITEM_DAYS days are kept; the batch deletes older ones."""
+    record per day and only the last ITEM_DAYS days are kept; the batch deletes older ones. A document keeps each
+    collection's schema and checks every upsert against it, so schemas go out only when asked: for a new document,
+    a missing collection, or a record the stored schema refuses."""
     day = data["day"]
     first = dt.date.fromisoformat(day)
     rows = {
@@ -667,7 +825,7 @@ def records(data):
             {"url": c.get("url") or link(c["ref"])} if c.get("url") or link(c["ref"]) else {})}
                     for c in data.get("changes", [])]}
     expired = [(first - dt.timedelta(days=n)).isoformat() for n in range(ITEM_DAYS, ITEM_DAYS + 60)]
-    return [{"collection": name, "schema": SCHEMAS[name], "upsert": rows[name]} |
+    return [{"collection": name} | ({"schema": SCHEMAS[name]} if schemas else {}) | {"upsert": rows[name]} |
             ({"deleteRecords": expired} if name == "items" else {}) for name in SCHEMAS if rows[name]]
 
 
@@ -717,7 +875,8 @@ def discuss_link(data, lesson, doc=None):
                                        "causes: " + ", ".join(lesson["causes"]) if lesson.get("causes") else None,
                                        "items: " + ", ".join(f"#{n}" for n in lesson["evidence"])
                                        if lesson.get("evidence") else None]))
-    prompt = (f"From {source}, data as of {data['day']}:\n\n"
+    # The lesson's own day, so a card stays the same until a day proposes the lesson again.
+    prompt = (f"From {source}, evidence as of {lesson.get('day') or data['day']}:\n\n"
               f"Recommendation: {lesson['title'].rstrip('.')}.\nChange: {lesson['change']}\n"
               + (f"Where: {lesson['where']}\n" if lesson.get("where") else "")
               + (f"Evidence: {evidence}\n" if evidence else "")
@@ -741,11 +900,17 @@ def action_card(data, lesson, doc=None, button=True):
 
 def document(dataset, data, doc=None, button=True):
     """The dataset document's generated sections as insert_block arguments: the Recommended Actions (up to five
-    proposed lessons, as cards) and the Changelog (the latest changes). Recent days is a table block bound to the
-    data. See references/report.md."""
-    lessons = {l["id"]: l for l in data["lessons"]} | values(dataset.get("lessons"))
+    proposed lessons, as cards) and the Changelog (the latest changes). `cards` names each card's lesson and whether
+    this day changed it, and `changelog_new` counts the changelog items this day added, so the document changes
+    block by block. Recent days is a table block bound to the data. See references/report.md."""
+    today = {l["id"] for l in data["lessons"]}
+    # The day's notes are newer than any registry read, before or after the day was stored.
+    lessons = values(dataset.get("lessons")) | {l["id"]: l | {"day": data["day"]} for l in data["lessons"]}
     ranked = data.get("actions") or sorted((i for i, l in lessons.items() if l.get("state") == "proposed"),
                                            key=lambda i: lessons[i].get("day", ""), reverse=True)
+    missing = [k for k in ranked if k not in lessons]
+    if missing:
+        sys.exit("dataset.json lacks the registry lessons the actions name: " + ", ".join(missing))
     actions = [{"type": "paragraph", "text": "Up to five changes not yet taken up, most runs saved first. An action "
                 "leaves this list once an issue or PR addresses it."}]
     # Actions look back ITEM_DAYS: a lesson nobody proposed again in that window drops off.
@@ -754,17 +919,21 @@ def document(dataset, data, doc=None, button=True):
                and lessons[k].get("day", data["day"]) >= since]
     actions += [action_card(data, lessons[key], doc, button) for key in current[:5]]
     changes = values(dataset.get("changes")) | {c["ref"]: c for c in data.get("changes", [])}
-    return {"actions": actions, "changelog": changelog(changes)}
+    latest = sorted(changes, key=lambda ref: (changes[ref]["day"], ref), reverse=True)[:5]
+    return {"actions": actions, "changelog": changelog(changes),
+            "cards": [{"lesson": key, "title": inline(lessons[key]["title"]), "changed": key in today}
+                      for key in current[:5]],
+            "changelog_new": sum(ref in {c["ref"] for c in data.get("changes", [])} for ref in latest)}
 
 
-KPIS = [("Autonomous deliveries", "up", "Loop deliveries the integrator merged with no wasted run, no stop and no "
-         "action-needed notice; a reviewer send-back still counts."),
-        ("Wasted runs", "down", "Runs started on the day that ended without an accepted outcome."),
-        ("Human stops", "down", "Action-needed notices on loop deliveries, and the hours from each to the next run on "
+KPIS = [("Autonomous deliveries", "up", "autonomous_pct", "Loop deliveries the integrator merged with no wasted run, "
+         "no stop and no action-needed notice; a reviewer send-back still counts."),
+        ("Wasted runs", "down", "wasted_pct", "Runs started on the day that ended without an accepted outcome."),
+        ("Human stops", "down", None, "Action-needed notices on loop deliveries, and the hours from each to the next run on "
          "the item."),
-        ("Cycle", "down", "First run to delivery, without the human wait."),
-        ("Run time", "down", "Run minutes summed per delivery, the touch time."),
-        ("Runs with denials", "down", "Claude runs on the day with a permission denial.")]
+        ("Cycle", "down", None, "First run to delivery, without the human wait."),
+        ("Run time", "down", None, "Run minutes summed per delivery, the touch time."),
+        ("Runs with denials", "down", "denial_pct", "Claude runs on the day with a permission denial.")]
 
 
 def chart(mapping):
@@ -791,8 +960,9 @@ def create_document(data, button=True):
          "stores one record per day in this document's data. The charts and tables below follow that data; the "
          "Recommended Actions are rewritten after each stored day."},
         {"type": "heading", "level": 2, "text": "KPIs"},
-        {"type": "table", "text": "| KPI | Goal | Definition |\n| --- | --- | --- |\n" + "\n".join(
-            f"| {kpi} | {goal} | {definition} |" for kpi, goal, definition in KPIS)},
+        {"type": "table", "text": "| KPI | Goal | Target | Definition |\n| --- | --- | --- | --- |\n" + "\n".join(
+            f"| {kpi} | {goal} | {TARGETS[field][1] if field else ''} | {definition} |"
+            for kpi, goal, field, definition in KPIS)},
         {"type": "heading", "level": 2, "text": "Data"},
         chart({"version": 1, "type": "line", "collection": "days", "title": "Autonomy and waste",
                "x": {"field": "day", "type": "date", "label": "Day"},
@@ -827,7 +997,7 @@ def create_document(data, button=True):
                            column("run_h_median", "Run time", **hours), column("denial_pct", "Denials", **percent),
                            column("backlog", "Actionable queue"), column("waiting_to_start", "Waiting to start"),
                            column("open_issues", "Open issues"), column("machines", "Machines")],
-               "sort": {"field": "day", "direction": "desc"}}),
+               "sort": {"field": "day", "direction": "desc"}, "limit": RECENT_DAYS}),
         {"type": "heading", "level": 2, "text": "Recommended Actions"},
         *sections["actions"],
         {"type": "heading", "level": 2, "text": "Changelog"},
@@ -851,10 +1021,14 @@ def main():
     q = commands.add_parser("queue", help="only the open-queue figures for a day: issue lists and events, no run records")
     q.add_argument("--repo", required=True)
     q.add_argument("--day", help="calendar day, YYYY-MM-DD, local time (default yesterday)")
+    g = commands.add_parser("digest", help="the day in a few lines per item, to read before data.json")
+    g.add_argument("data", help="data.json written by collect, or report.json")
     s = commands.add_parser("records")
     s.add_argument("report", help="report.json written by render")
+    s.add_argument("--schemas", action="store_true",
+                   help="send each collection's schema: for a new document, a missing collection or a refused record")
     d = commands.add_parser("document")
-    d.add_argument("dataset", help="lessons and changes as read with get_data")
+    d.add_argument("dataset", help="the registry lessons the actions name that the notes leave out, as read with get_data")
     d.add_argument("report", help="report.json written by render")
     d.add_argument("--doc", help="the dataset document's uuid, named in each action card's prompt")
     d.add_argument("--no-button", action="store_true", help="cards without the Claude Code button, for Uberblick 0.4.3")
@@ -869,14 +1043,18 @@ def main():
         agents, _ = config_of(base64.b64decode(gh(f"repos/{args.repo}/contents/ub-agents.yaml")["content"]).decode())
         rows = list(pages(f"repos/{args.repo}/issues", state="all", since=stamp(since)))
         print(json.dumps({"day": day.isoformat()} | queue(args.repo, until, rows, agents)))
+    elif args.command == "digest":
+        sys.stdout.write(digest(json.loads(Path(args.data).read_text())))
     elif args.command == "records":
-        print(json.dumps(records(json.loads(Path(args.report).read_text())), indent=1))
+        # Compact: the agent passes this batch on verbatim, so every byte is read and written again.
+        print(json.dumps(records(json.loads(Path(args.report).read_text()), args.schemas), separators=(",", ":"),
+                         ensure_ascii=False))
     elif args.command == "create":
         print(json.dumps(create_document(json.loads(Path(args.report).read_text()), not args.no_button), indent=1,
                          ensure_ascii=False))
     elif args.command == "document":
         print(json.dumps(document(json.loads(Path(args.dataset).read_text()), json.loads(Path(args.report).read_text()),
-                                  args.doc, not args.no_button), indent=1, ensure_ascii=False))
+                                  args.doc, not args.no_button), separators=(",", ":"), ensure_ascii=False))
     else:
         data = merge(json.loads(Path(args.data).read_text()), json.loads(Path(args.notes).read_text()))
         out = Path(args.out)
