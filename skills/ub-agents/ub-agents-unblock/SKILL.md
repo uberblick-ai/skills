@@ -16,7 +16,7 @@ compatibility: >-
   otherwise with gh alone. Its own GitHub calls use the REST API only.
 metadata:
   author: uberblick-ai
-  version: "0.4"
+  version: "0.5"
 ---
 
 # Unblock the loop
@@ -90,17 +90,19 @@ How the launcher works; the project decides the labels, roles and policy.
 
 4. For each item, read what the decision needs: the notice's evidence, the
    discussion since, linked items and, for a PR, its head SHA against the
-   notice's and its checks. Summarize in two or three sentences of plain,
-   technical English what the item is for, where it stands and what the
-   decision unblocks, without details the decision does not need. Say briefly
+   notice's and its checks. Start with the item's full GitHub URL. Summarize
+   in two or three sentences of plain, technical English what the item is
+   for, where it stands and what the decision unblocks, without details the decision does not need. Say briefly
    what the agent asked, then give your own recommendation from what you read
    and what step 1 found, and why it differs if it does.
 
 5. Ask with your interactive question tool (AskUserQuestion in Claude Code;
-   otherwise a numbered question in chat). Give the item's ask in a sentence
-   or two, then at most four options, yours first and marked recommended,
-   drawn from the notice's options, merge (a PR left for a maintainer merge),
-   retry, close and skip. The maintainer may answer in their own words instead.
+   otherwise a numbered question in chat). The prompt must stand on its own:
+   the item's full GitHub URL, so it is clickable, one plain sentence on what
+   the item is and what it changes for users, then the ask in a sentence or
+   two. Give at most four options, yours first and marked recommended, drawn
+   from the notice's options, merge (a PR left for a maintainer merge), retry,
+   close and skip. The maintainer may answer in their own words instead.
 
 6. Apply the answer once chosen, saying exactly what you change:
    - **Answer:** comment the decision on the item the notice names, quoting
