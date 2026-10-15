@@ -49,7 +49,8 @@ How the launcher works; the project decides the labels, roles and policy.
    From it note every agent with its `kind`, triggers, outcomes and the labels
    each adds, plus `stop-labels`, `approvals` and any other routing keys. Then
    read `AGENTS.md`, the `shared-instructions` file and each agent's
-   `instructions` file the same way: who answers which decisions, when a role
+   `instructions` file the same way, with the policy files they point to
+   (comments in the config name some): who answers which decisions, when a role
    stops, which PRs a maintainer merges, and how work moves back to an
    earlier role. Where these differ from the defaults above, the repository
    wins.
