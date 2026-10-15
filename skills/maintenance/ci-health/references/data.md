@@ -40,9 +40,14 @@ attempt's jobs, skipping jobs that were skipped.
 - A re-run keeps its run and adds an attempt; the runs list shows the
   latest, so `collect` reads each earlier attempt's conclusion, one call
   per re-run attempt. Every attempt counts toward the failure rate, so one
-  red run re-run green reads as 1 of 2. Cancelled and skipped attempts,
-  such as runs a newer push superseded, count in neither part of it. With `--start`, runs
-  before that day are ignored, also by the 7-day median; `start` records it.
+  red run re-run green reads as 1 of 2, while GitHub's commit list, which
+  shows the latest attempt, has it green. Cancelled and skipped attempts,
+  such as runs a newer push superseded, count in neither part of it.
+- With `--start`, commits before that day are left out of wall time, jobs
+  and steps, also by the 7-day median; `start` records it. Their runs still
+  count toward the failure rate, read from the runs list without their
+  jobs: a day before `start` holds `commits`, `failed`, `runs` and the two
+  failure rates alone, and backfilling them takes seconds.
 - A job's field is its workflow and job name in lowercase, joined by
   underscores, plus `_min`, for example `ci_browser_e2e_min`; `jobs` in
   `data.json` maps each field to its display name. A renamed job starts a
@@ -56,7 +61,8 @@ attempt's jobs, skipping jobs that were skipped.
   except a group named `skipped`, which is subtracted. Timestamps and
   terminal colors are stripped first. Count tests run or passed, not
   skipped. Jobs that differ only in their matrix values in parentheses run
-  one suite, so they count once, at the largest. Logs are kept 90 days;
+  one suite, so they count once, at the largest; shards such as `(1/2)`
+  split one suite, so they add up. Logs are kept 90 days;
   older days have no `tests`.
 
 ## Code and coverage
@@ -234,7 +240,11 @@ document; with `--doc UUID` it prints the full `update_data` arguments:
 | `applied` | `split-browser-e2e` | action being applied, written by the session that discussed it |
 
 The schema lists every job field seen, so a batch that adds a job widens it;
-earlier records stay valid. A day takes about 400 bytes, so a year stays far
+earlier records stay valid. Storing a day replaces it, so `records --stored`,
+given the stored `days`, keeps a day's `tests`, line counts and coverage
+when the new collection lacks them: job logs expire after 90 days and
+coverage is measured on the last day only, so collecting the day again
+cannot bring them back. A day takes about 400 bytes, so a year stays far
 below a document's 4 MiB. `records` refuses an incident for another
 repository.
 

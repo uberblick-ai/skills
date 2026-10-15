@@ -19,7 +19,7 @@ compatibility: >-
   the `ub` command; without either the skill prints a table.
 metadata:
   author: uberblick-ai
-  version: "1.5"
+  version: "1.6"
 ---
 
 # CI health
@@ -80,8 +80,12 @@ the document layout are in [references/data.md](references/data.md).
    workflow is not a reason; it is an incident, and the step should show.
    Once a document holds days, reuse their `workflows` and `start` fields on
    every run, or the history shifts. It also counts every run attempt,
-   re-runs included, for the share that failed. A document whose days lack
-   `failure_pct` gets it by collecting those days again with `--since`.
+   re-runs included, for the share that failed. Runs before `start` count
+   there too, read without their jobs, so the days before `start` get the
+   failure rate alone, in seconds. A document whose days lack `failure_pct`
+   gets it by collecting again with `--since` back to the first run on
+   main, keeping `start`; pass the stored days to `records --stored` in
+   step 9 so their tests, lines and coverage stay.
 
 3. Count the tests. Test runners differ by language and setup, so you read
    the summary off the logs rather than the script guessing:
@@ -104,7 +108,8 @@ the document layout are in [references/data.md](references/data.md).
    ```
 
    Every integer the groups capture, on every matching line, is summed per
-   job; jobs that differ only in a parenthesised matrix value count once.
+   job; jobs that differ only in a parenthesised matrix value count once,
+   while shards, `(1/2)`, add up.
    Check the day's `tests` against the logs before going on. A stored day's
    `tests_pattern` holds the patterns joined by ` || `; reuse them while they
    still match. When no job prints a count, leave `tests` out and say so.
@@ -224,11 +229,13 @@ the document layout are in [references/data.md](references/data.md).
    untagged. Then, for a new document or an existing one:
 
    ```sh
-   python3 scripts/ci.py records DIR/data.json [DIR/incidents.json] --actions DIR/actions.json [--applied DIR/applied.json] --doc DOC > DIR/update.json
+   python3 scripts/ci.py records DIR/data.json [DIR/incidents.json] --actions DIR/actions.json [--applied DIR/applied.json] [--stored DIR/days.json] --doc DOC > DIR/update.json
    ```
 
    `DIR/applied.json` is the `applied` collection as `get_data` returned
-   it; the marks of dropped actions are deleted with them.
+   it; the marks of dropped actions are deleted with them. `DIR/days.json`
+   is the `days` collection the same way: a stored day collected again
+   keeps its tests, lines and coverage when this run has none.
 
    Pass it as the arguments of `update_data`, then read the area summary
    back with `get_data` and confirm `days`, `incidents` and `actions` are

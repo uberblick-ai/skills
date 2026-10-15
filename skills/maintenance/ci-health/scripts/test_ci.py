@@ -98,18 +98,60 @@ class Tests(unittest.TestCase):
         titles = [json.loads(b["text"])["title"] for b in ci.charts(data)]
         self.assertEqual(titles[:2], ["Wall time on main", "Failed runs on main"])
 
+    def test_failure_rate_reaches_before_the_floor(self):
+        def run(i, day, conclusion):
+            return {"id": i, "head_sha": f"s{i}", "head_branch": "main", "path": ".github/workflows/ci.yml",
+                    "name": "CI", "status": "completed", "conclusion": conclusion, "run_attempt": 1,
+                    "created_at": f"{day}T09:00:00Z", "head_commit": {"message": f"s{i}"}}
+        runs = [run(1, "2026-10-08", "failure"), run(2, "2026-10-09", "success"), run(3, "2026-10-10", "success")]
+        read = []
+
+        def fake(path, raw=False, *flags):
+            read.append(path)
+            if path == "repos/o/r":
+                return {"default_branch": "main"}
+            if "/jobs" in path:
+                return {"jobs": [{"id": 9, "name": "tests", "started_at": "2026-10-10T09:00:00Z",
+                                  "completed_at": "2026-10-10T09:05:00Z", "conclusion": "success"}]}
+            return {"workflow_runs": runs}
+        real, ci.gh = ci.gh, fake
+        try:
+            data = ci.collect("o/r", ci.dt.date(2026, 10, 8), ci.dt.date(2026, 10, 10), floor=ci.dt.date(2026, 10, 10))
+        finally:
+            ci.gh = real
+        self.assertEqual([p for p in read if "/jobs" in p], ["repos/o/r/actions/runs/3/jobs?filter=latest&per_page=100&page=1"],
+                         "runs before the floor are read without their jobs")
+        self.assertEqual([c["sha"] for c in data["commits"]], ["s3"], "only commits from the floor on have wall time")
+        early, late = data["days"][0], data["days"][-1]
+        self.assertEqual(early, {"day": "2026-10-08", "repo": "o/r", "start": "2026-10-10", "commits": 1, "failed": 1,
+                                 "runs": 1, "failure_pct": 100.0, "failure_pct_7d": 100.0})
+        self.assertEqual((late["wall_min"], late["failure_pct"], late["failure_pct_7d"]), (5.0, 0.0, 33.3),
+                         "the 7-day failure rate pools across the floor")
+
+    def test_records_keep_what_a_new_collection_lacks(self):
+        data = {"repo": "o/r", "jobs": {}, "days": [{"day": "2026-10-01", "repo": "o/r", "commits": 3, "failure_pct": 0.0,
+                                                    "tests": 12}]}
+        stored = {"records": [{"id": "2026-10-01", "value": {"day": "2026-10-01", "repo": "o/r", "commits": 2,
+                                                             "tests": 10, "coverage_pct": 80.0, "ci_old_min": 4.0}}]}
+        value = ci.records(data, stored=stored)[0]["upsert"][0]["value"]
+        self.assertEqual(value, {"day": "2026-10-01", "repo": "o/r", "commits": 3, "failure_pct": 0.0, "tests": 12,
+                                 "coverage_pct": 80.0}, "new figures win; coverage stays; old job times go")
+
     def test_tests_per_day_count_a_matrix_once(self):
         c = commit(1, 5.0)
         c["jobs"] = [{"id": i, "workflow": "CI", "name": f"test (py{v})", "min": 5.0} for i, v in ((1, "3.11"), (2, "3.14"))]
-        c["jobs"].append({"id": 3, "workflow": "CI", "name": "lint", "min": 1.0})
+        c["jobs"] += [{"id": 3, "workflow": "CI", "name": "lint", "min": 1.0},
+                      {"id": 4, "workflow": "CI", "name": "e2e (1/2)", "min": 1.0},
+                      {"id": 5, "workflow": "CI", "name": "e2e (2/2)", "min": 1.0}]
         data = {"repo": "o/r", "days": [{"day": "2026-10-01"}, {"day": "2026-10-02"}], "commits": [c]}
-        logs = {1: "Ran 10 tests in 1s", 2: "Ran 12 tests in 1s", 3: "All checks passed"}
+        logs = {1: "Ran 10 tests in 1s", 2: "Ran 12 tests in 1s", 3: "All checks passed", 4: "Ran 5 tests in 1s",
+                5: "Ran 4 tests in 1s"}
         real, ci.job_log = ci.job_log, lambda repo, job: logs[job]
         try:
             ci.add_tests(data, [r"Ran (\d+) tests"])
         finally:
             ci.job_log = real
-        self.assertEqual(data["days"][0]["tests"], 12)
+        self.assertEqual(data["days"][0]["tests"], 21, "the matrix counts once, at its largest; each shard counts")
         self.assertEqual(data["days"][0]["tests_pattern"], r"Ran (\d+) tests")
         self.assertNotIn("tests", data["days"][1], "a day without a green commit has no count")
         with self.assertRaises(SystemExit):

@@ -8,7 +8,7 @@
     ci.py measure data.json --checkout PATH [--path SPEC]... [--every-day]  # optional: test ratio and coverage, added in place
     ci.py summary data.json                            # the days as a Markdown table, for a reply
     ci.py signals data.json [--days 7] > signals.json  # what the last days show, to choose the top actions
-    ci.py records data.json [incidents.json] [--actions actions.json] [--applied FILE] [--doc UUID] > update.json  # update_data
+    ci.py records data.json [incidents.json] [--actions F] [--applied F] [--stored F] [--doc UUID] > update.json  # update_data
     ci.py create data.json [--incidents F] [--actions F] [--tag ID]... [--no-button] > create.json  # create_doc args
     ci.py charts data.json > charts.json               # the chart blocks, to compare with an existing document's
     ci.py changelog incidents.json > changelog.json    # the document's Incidents list, latest five
@@ -170,11 +170,13 @@ def failure_rate(commits):
 def collect(repo, first, last, required=(), floor=None):
     """Every push run on the default branch from LOOKBACK days before `first` to the end of `last`, grouped by
     commit, and one record per day from `first` to `last`. With `required` workflows, a commit counts only when it
-    ran one of them; the other workflows on that commit still count toward its wall time. Runs before `floor` are
-    ignored, so a reworked or re-enabled CI does not mix with what came before."""
+    ran one of them; the other workflows on that commit still count toward its wall time. Commits before `floor`
+    are left out of wall time and jobs, so a reworked or re-enabled CI does not mix with what came before; their
+    runs still count toward the failure rate, read without their jobs, and a day before `floor` has that alone."""
     info = gh(f"repos/{repo}")
     branch = info["default_branch"]
-    start = max(first - dt.timedelta(days=LOOKBACK), floor or dt.date.min)
+    start = first - dt.timedelta(days=LOOKBACK)
+    floor_ = floor.isoformat() if floor else ""
     runs = [r for r in pages(f"repos/{repo}/actions/runs", "workflow_runs", branch=branch, event="push",
                              created=f"{start.isoformat()}..{last.isoformat()}")
             if r["head_branch"] == branch and not r["path"].startswith("dynamic/")]
@@ -183,8 +185,6 @@ def collect(repo, first, last, required=(), floor=None):
         if run["status"] != "completed":
             pending.add(run["head_sha"])
             continue
-        jobs = [j for j in pages(f"repos/{repo}/actions/runs/{run['id']}/jobs", "jobs", filter="latest")
-                if j.get("started_at") and j.get("completed_at") and j["conclusion"] not in ("skipped", None)]
         c = commits.setdefault(run["head_sha"], {
             "sha": run["head_sha"], "created": run["created_at"],
             "title": (run.get("head_commit") or {}).get("message", "").split("\n")[0][:200],
@@ -192,49 +192,59 @@ def collect(repo, first, last, required=(), floor=None):
         c["workflows"][run["name"]] = run["conclusion"]
         if not required or run["name"] in required:
             c.setdefault("runs", []).extend(attempts(repo, run))
+        if c["created"][:10] < floor_:
+            continue  # before the floor only the failure rate counts, and it needs no jobs
+        jobs = [j for j in pages(f"repos/{repo}/actions/runs/{run['id']}/jobs", "jobs", filter="latest")
+                if j.get("started_at") and j.get("completed_at") and j["conclusion"] not in ("skipped", None)]
         c["jobs"] += [{"id": j["id"], "workflow": run["name"], "name": j["name"], "started": j["started_at"],
                        "completed": j["completed_at"], "conclusion": j["conclusion"],
                        "min": minutes(j["started_at"], j["completed_at"])} for j in jobs]
-    rows = []
+    rows, before = [], []
     for sha, c in commits.items():
-        if sha in pending or not c["jobs"] or (required and not set(required) & set(c["workflows"])):
+        early = c["created"][:10] < floor_
+        if sha in pending or not (c["jobs"] or early) or (required and not set(required) & set(c["workflows"])):
             continue  # a commit counts once all its runs finished, and only when it ran CI
         c["day"] = c["created"][:10]
         c["ok"] = all(v in ("success", "skipped", "neutral") for v in c["workflows"].values())
+        if early:
+            before.append(c)
+            continue
         c["wall_min"] = minutes(min(j["started"] for j in c["jobs"]), max(j["completed"] for j in c["jobs"]))
         c["wait_min"] = max(0, minutes(c["created"], min(j["started"] for j in c["jobs"])))
         c["late_start_min"] = late_start(c["jobs"])
         c["execution_min"] = round(sum(j["min"] for j in c["jobs"]), 2)
         rows.append(c)
     rows.sort(key=lambda c: c["created"])
+    counted = before + rows
     names = {}
     days = []
     d = first
     while d <= last:
         key = d.isoformat()
         since = (d - dt.timedelta(days=WINDOW - 1)).isoformat()
-        today = [c for c in rows if c["day"] == key]
+        today = [c for c in counted if c["day"] == key]
         green = [c for c in today if c["ok"]]
         recent = [c for c in rows if since <= c["day"] <= key and c["ok"]]
-        record = {"day": key, "repo": repo, "workflows": ", ".join(required) or None,
-                  "start": floor.isoformat() if floor else None, "commits": len(today), "failed": len(today) - len(green),
-                  "wall_min": median(c["wall_min"] for c in green),
-                  "wall_min_7d": median(c["wall_min"] for c in recent),
-                  "wall_spread_7d": spread(c["wall_min"] for c in recent),
-                  "wall_p95_7d": p95(c["wall_min"] for c in recent),
-                  "execution_min": median(c["execution_min"] for c in green),
-                  "wait_min": median(c["wait_min"] for c in green),
-                  "late_start_min": median(c.get("late_start_min") for c in green),
+        record = {"day": key, "repo": repo, "workflows": ", ".join(required) or None, "start": floor_ or None,
+                  "commits": len(today), "failed": len(today) - len(green),
                   "runs": sum(len(c.get("runs", [])) for c in today) or None,
                   "failure_pct": failure_rate(today),
-                  "failure_pct_7d": failure_rate(c for c in rows if since <= c["day"] <= key)}
-        per_job = {}
-        for c in green:
-            for j in c["jobs"]:
-                key_ = field(j["workflow"], j["name"])
-                names[key_] = f"{j['workflow']} / {j['name']}"
-                per_job.setdefault(key_, []).append(j["min"])
-        record |= {k: median(v) for k, v in sorted(per_job.items())}
+                  "failure_pct_7d": failure_rate(c for c in counted if since <= c["day"] <= key)}
+        if key >= floor_:  # a day before the floor has the failure rate alone
+            record |= {"wall_min": median(c["wall_min"] for c in green),
+                       "wall_min_7d": median(c["wall_min"] for c in recent),
+                       "wall_spread_7d": spread(c["wall_min"] for c in recent),
+                       "wall_p95_7d": p95(c["wall_min"] for c in recent),
+                       "execution_min": median(c["execution_min"] for c in green),
+                       "wait_min": median(c["wait_min"] for c in green),
+                       "late_start_min": median(c.get("late_start_min") for c in green)}
+            per_job = {}
+            for c in green:
+                for j in c["jobs"]:
+                    key_ = field(j["workflow"], j["name"])
+                    names[key_] = f"{j['workflow']} / {j['name']}"
+                    per_job.setdefault(key_, []).append(j["min"])
+            record |= {k: median(v) for k, v in sorted(per_job.items())}
         days.append({k: v for k, v in record.items() if v is not None})
         d += dt.timedelta(days=1)
     for c in rows:
@@ -255,7 +265,8 @@ def late_start(jobs, short=0.5):
 
 def count_tests(repo, commit, patterns):
     """Tests on a green commit, summed over its jobs; a matrix runs one suite several times, so jobs that differ
-    only in their parenthesised matrix values count once, at their largest."""
+    only in their parenthesised matrix values count once, at their largest. Shards, `(1/2)`, split one suite, so
+    each counts."""
     groups = {}
     for j in commit["jobs"]:
         try:
@@ -264,7 +275,7 @@ def count_tests(repo, commit, patterns):
             print(f"tests: no log for {j['workflow']} / {j['name']}: {e}", file=sys.stderr)
             continue
         if n is not None:
-            base = (j["workflow"], re.sub(r"\s*\(.*\)$", "", j["name"]))
+            base = (j["workflow"], re.sub(r"\s*\((?!\d+/\d+\)).*\)$", "", j["name"]))
             groups[base] = max(groups.get(base, 0), n)
     return sum(groups.values()) if groups else None
 
@@ -421,7 +432,8 @@ def measure(data, checkout, timeout=1800, every_day=False, paths=()):
     `mise run codecov` and `mise run loc` are used when the checkout defines them; lines fall back to count_lines
     over `paths`, with the first line counter installed. Adds the figures to the last day, or with `every_day` the
     lines to every day and coverage to the last, since coverage runs the suite."""
-    days = data["days"] if every_day else data["days"][-1:]
+    # A day before the floor has no green commit collected: nothing to check out.
+    days = [d for d in data["days"] if d["day"] >= d.get("start", "")] if every_day else data["days"][-1:]
     counter, told = line_counter(), False
     git = lambda *a, **k: subprocess.run(["git", "-C", checkout, *a], capture_output=True, text=True, **k)
     for day in days:
@@ -682,14 +694,23 @@ def action_rows(data, actions):
     return rows
 
 
-def records(data, incidents=(), actions=None, applied=()):
+# Fields later steps add to a day that collecting it again does not bring back: job logs expire after 90 days, and
+# coverage is measured on the last day only.
+KEPT = ("tests", "tests_pattern", "code_lines", "test_lines", "test_ratio", "loc_tool", "loc_paths", "coverage_pct",
+        "measured_sha")
+
+
+def records(data, incidents=(), actions=None, applied=(), stored=()):
     """One update_data batch: the repository's days, keyed by day so a refresh replaces them, any incidents, and
     with `actions` the current top actions, which replace the ones before. `applied` marks of actions no longer
-    kept are deleted."""
+    kept are deleted. A day in `stored`, the days as get_data returns them, keeps its KEPT fields when this
+    collection lacks them, so collecting days again, as a backfill does, loses nothing."""
+    before = by_id(stored)
+    days = [d | {k: v for k, v in before.get(d["day"], {}).items() if k in KEPT and k not in d} for d in data["days"]]
     if any(i.get("repo") not in (None, data["repo"]) for i in incidents):
         sys.exit(f"incidents: every incident must be for {data['repo']}, the repository of this document")
     batch = [{"collection": "days", "schema": schema(data),
-              "upsert": [{"id": d["day"], "value": d} for d in data["days"]]}]
+              "upsert": [{"id": d["day"], "value": d} for d in days]}]
     if incidents:
         batch.append({"collection": "incidents", "schema": INCIDENTS, "upsert": incident_rows(incidents)})
     if actions is not None:
@@ -794,10 +815,15 @@ def discuss_link(data, action, doc=None):
     return CLAUDE_CODE + quote(prompt, safe="")
 
 
-def applied_marks(applied):
-    """Action id to its applied record, from the stored `applied` collection (get_data) or a list of records."""
-    rows = applied.get("records", []) if isinstance(applied, dict) else applied or []
+def by_id(stored):
+    """Record id to value, from a stored collection as get_data returns it or a list of records."""
+    rows = stored.get("records", []) if isinstance(stored, dict) else stored or []
     return {r["id"]: r["value"] for r in rows if "value" in r}
+
+
+def applied_marks(applied):
+    """Action id to its applied record, from the stored `applied` collection."""
+    return by_id(applied)
 
 
 def cards(data, actions, doc=None, button=True, applied=()):
@@ -835,7 +861,8 @@ def create_document(data, incidents=(), actions=(), button=True):
             {"text": "Reading the charts: ", "marks": {"bold": True}},
             {"text": "one point per day, over green commits, in minutes. Wall time is the total over the last 7 days: the "
              "median, and the P95 that shows the slow tail. Lower is better. Failed runs is the share of run attempts, "
-             "re-runs included, that ended red; cancelled runs are left out. "
+             "re-runs included, that ended red, so it reads higher than GitHub's commit list, which shows each "
+             "commit's last attempt; cancelled runs are left out. "
              "Runner queueing before the first job is left out. Data from GitHub Actions, refreshed by the ",
              "marks": {}},
             {"text": "ci-health skill", "marks": {"link": SKILL_URL}},
@@ -938,7 +965,8 @@ def main():
     c.add_argument("--workflow", action="append", default=[],
                    help="count only commits that ran this workflow (repeatable); default every push workflow")
     c.add_argument("--start", type=dt.date.fromisoformat,
-                   help="ignore runs before this UTC day, when they cannot be compared, such as CI re-enabled after a gap")
+                   help="leave runs before this UTC day out of wall time and jobs, when they cannot be compared, such as "
+                        "CI re-enabled after a gap; they still count toward the failure rate")
     s = commands.add_parser("shifts")
     s.add_argument("data")
     s.add_argument("--limit", type=int, default=5)
@@ -966,6 +994,8 @@ def main():
     r.add_argument("incidents", nargs="?")
     r.add_argument("--actions", help="the current top actions, which replace the stored ones")
     r.add_argument("--applied", help="the stored applied collection from get_data; marks of dropped actions go")
+    r.add_argument("--stored", help="the stored days collection from get_data; a day collected again keeps its tests, "
+                                    "lines and coverage when this run has none")
     r.add_argument("--doc", help="the document's uuid: print update_data arguments instead of the operations alone")
     n = commands.add_parser("create")
     n.add_argument("data")
@@ -1018,7 +1048,8 @@ def main():
         return
     elif args.command == "records":
         out = records(load(args.data), load(args.incidents) if args.incidents else (),
-                      load(args.actions) if args.actions else None, load(args.applied) if args.applied else ())
+                      load(args.actions) if args.actions else None, load(args.applied) if args.applied else (),
+                      load(args.stored) if args.stored else ())
         if args.doc:
             out = {"uuid": args.doc, "operations": out}
     elif args.command == "create":
