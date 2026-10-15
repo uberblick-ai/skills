@@ -2,8 +2,8 @@
 name: ci-health
 description: >-
   Track CI health on a repository's main branch from GitHub Actions: the
-  median wall time a push waits for CI and its slow tail, the number of
-  tests, optionally coverage and the test-to-code ratio, the changes that
+  median wall time a push waits for CI and its slow tail, the share of runs
+  that fail, the number of tests, optionally coverage and the test-to-code ratio, the changes that
   made CI slower or faster, and the top three actions that would cut the
   wait. Use when a maintainer asks how long CI takes, whether it got slower
   or what would make it faster, or to record CI figures daily. Works for
@@ -19,15 +19,16 @@ compatibility: >-
   the `ub` command; without either the skill prints a table.
 metadata:
   author: uberblick-ai
-  version: "1.3"
+  version: "1.5"
 ---
 
 # CI health
 
 CI should stay fast as a project grows: the wait that counts is wall time,
 from the first job starting to the last one finishing, not the minutes the
-jobs add up to. The charts show that total only; each job's time stays in
-the data to show which job moved when the total steps. This skill records
+jobs add up to. The wall time chart shows that total only; each job's time
+stays in the data to show which job moved when the total steps. A second
+chart shows how many run attempts on main end red, re-runs included. This skill records
 one day for one repository, keeps the steps that moved the total, with
 their cause, and keeps the three actions that would most cut the wait,
 judged again on every run.
@@ -59,7 +60,7 @@ the document layout are in [references/data.md](references/data.md).
    the actions are the result; say so in one line. With one, `search` for
    "CI health" in the workspace; when the document found is about this
    repository, call it `DOC` and read with `get_data` its `incidents`, its
-   `actions` and its latest `days` records. When no such document exists,
+   `actions`, its `applied` marks and its latest `days` records. When no such document exists,
    ask the maintainer once whether to create it, and carry on meanwhile.
 
 2. Collect:
@@ -78,7 +79,9 @@ the document layout are in [references/data.md](references/data.md).
    re-enabled after a gap, or moved to another system. A rework of the
    workflow is not a reason; it is an incident, and the step should show.
    Once a document holds days, reuse their `workflows` and `start` fields on
-   every run, or the history shifts.
+   every run, or the history shifts. It also counts every run attempt,
+   re-runs included, for the share that failed. A document whose days lack
+   `failure_pct` gets it by collecting those days again with `--since`.
 
 3. Count the tests. Test runners differ by language and setup, so you read
    the summary off the logs rather than the script guessing:
@@ -192,7 +195,11 @@ the document layout are in [references/data.md](references/data.md).
    With `DOC`, start from its stored `actions`. Keep one while its evidence
    holds, with its `id` and `since` and today's numbers in `why`; drop one
    that a merged change addressed or the data no longer shows; replace one
-   only when a candidate saves clearly more. Without `DOC`, nothing keeps
+   only when a candidate saves clearly more. An action with an `applied`
+   mark is being handled: someone discussed it and opened the pull request
+   or issue the mark names. Keep it, struck through, in its place while that
+   pull request or issue is open, and drop it once it is merged or closed;
+   the days after show what it changed. Without `DOC`, nothing keeps
    actions between runs, so choose them afresh. Fewer than three is fine,
    and no action goes without data behind it. Write `DIR/actions.json` in
    rank order, in the shape `references/data.md` gives: `area`, `title`
@@ -217,8 +224,11 @@ the document layout are in [references/data.md](references/data.md).
    untagged. Then, for a new document or an existing one:
 
    ```sh
-   python3 scripts/ci.py records DIR/data.json [DIR/incidents.json] --actions DIR/actions.json --doc DOC > DIR/update.json
+   python3 scripts/ci.py records DIR/data.json [DIR/incidents.json] --actions DIR/actions.json [--applied DIR/applied.json] --doc DOC > DIR/update.json
    ```
+
+   `DIR/applied.json` is the `applied` collection as `get_data` returned
+   it; the marks of dropped actions are deleted with them.
 
    Pass it as the arguments of `update_data`, then read the area summary
    back with `get_data` and confirm `days`, `incidents` and `actions` are
@@ -233,11 +243,14 @@ the document layout are in [references/data.md](references/data.md).
     changelog DIR/all-incidents.json`, and replace the list items under the
     "Incidents" heading, below the charts, with its blocks. On every run,
     since their numbers move, run `ci.py cards DIR/data.json DIR/actions.json
-    --doc DOC` and replace the cards under the "Recommended Actions" heading,
+    --doc DOC [--applied DIR/applied.json]` and replace the cards under the "Recommended Actions" heading,
     or its "No action proposed yet." paragraph, with its blocks; a document
     without that heading gets it after the last chart, with the paragraph
     `create` writes below it. Each card's button opens a new Claude Code
-    session with a prompt to discuss the action before changing anything; if
+    session with a prompt to discuss the action before changing anything.
+    When that discussion settles on applying it, the prompt has the session
+    strike the card through, with the pull request or issue as a GitHub
+    pill below, and store an `applied` mark, so `cards` keeps it that way. If
     Uberblick refuses a card with `invalid_card` (0.4.3 has no card buttons),
     run `cards` or `create` again with `--no-button`. Leave every
     other block as it is, since people may have edited it. The document has no
@@ -247,7 +260,7 @@ the document layout are in [references/data.md](references/data.md).
     order, end up in order, so the file needs only ids read before.
 
 11. Reply with the total wall time (the 7-day median with its ± and the
-    P95), the tests, the test ratio and any coverage, any new incident with
-    the job that moved, the actions with which are new or dropped, and
+    P95), the share of failed runs, the tests, the test ratio and any
+    coverage, any new incident with the job that moved, the actions with which are new or dropped, and
     where the day was stored. When the skill runs on a schedule with
     nothing new, a single line is enough.

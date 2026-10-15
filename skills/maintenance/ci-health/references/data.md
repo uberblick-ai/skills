@@ -21,6 +21,9 @@ attempt's jobs, skipping jobs that were skipped.
 | `wait_min` | push to the first job starting: concurrency and runner queueing | median, context only |
 | `late_start_min` | how long after the first job the last job of a minute or more started: runner waits (macOS, a busy pool) or `needs` | median, context only |
 | `commits`, `failed` | | commits whose runs all finished, and how many of them were not green |
+| `runs` | every attempt of its runs, re-runs included | run attempts of the day's commits |
+| `failure_pct` | | attempts that ended red (`failure`, `timed_out`, `startup_failure`), in percent of those that ended green or red |
+| `failure_pct_7d` | | the same over the 7 days ending that day, pooled, so a quiet day weighs less |
 | `tests`, `tests_pattern` | tests the jobs report, and the patterns that read them | from the day's last green commit |
 | `code_lines`, `test_lines`, `test_ratio` | | at the day's last green commit, by `measure` |
 | `loc_tool`, `loc_paths` | | the line counter and the pathspecs it counted, joined by ` \|\| ` |
@@ -32,7 +35,13 @@ attempt's jobs, skipping jobs that were skipped.
   `neutral`. Failed and cancelled commits count in `failed` only, since a run
   that stopped early would read as fast.
 - With `--workflow`, a commit counts only when it ran one of the named
-  workflows; the day's `workflows` field records them. With `--start`, runs
+  workflows; the day's `workflows` field records them, and `runs` and the
+  failure rate count only those workflows' runs.
+- A re-run keeps its run and adds an attempt; the runs list shows the
+  latest, so `collect` reads each earlier attempt's conclusion, one call
+  per re-run attempt. Every attempt counts toward the failure rate, so one
+  red run re-run green reads as 1 of 2. Cancelled and skipped attempts,
+  such as runs a newer push superseded, count in neither part of it. With `--start`, runs
   before that day are ignored, also by the 7-day median; `start` records it.
 - A job's field is its workflow and job name in lowercase, joined by
   underscores, plus `_min`, for example `ci_browser_e2e_min`; `jobs` in
@@ -192,7 +201,23 @@ which opens a new session in the Claude desktop app with the prompt filled
 in, not sent. The prompt names the repository and the document, the day of
 the data, the recommendation, its evidence and `check`, and asks for a plan
 before any change; the link cannot select a repository by name, only a
-local folder, so the prompt names it. Card prose takes only http(s) links,
+local folder, so the prompt names it.
+
+When the discussion settles on applying the action, the prompt asks that
+session to mark it once a pull request implements it or an issue plans
+it. The card's title and why are struck through, the button goes, and a
+footer that is not struck through names the change, for example `Planned
+in [acme/app#212](https://github.com/acme/app/issues/212).` A link whose
+text is the `owner/repo#number` reference and whose target is its GitHub
+address shows as a GitHub pill. The session also upserts a record keyed by
+the action's id in the `applied` collection, `{"status": "planned", "ref":
+"acme/app#212", "url": "https://github.com/acme/app/issues/212", "day":
+"2026-10-15"}`, with `status` `implemented` or `planned`. It is a separate
+collection because every run replaces `actions`, and a person's decision
+must survive that. `cards --applied` renders a marked action the same way,
+and `records --applied` deletes the marks of actions no longer kept.
+
+Card prose takes only http(s) links,
 so the link is a `button:` line, which Uberblick reads from the release
 after 0.4.3; `--no-button` leaves it out for older versions.
 
@@ -206,6 +231,7 @@ document; with `--doc UUID` it prints the full `update_data` arguments:
 | `days` | `2026-10-09` | day, every field above |
 | `incidents` | `2026-10-04/acme-app-189` | incident |
 | `actions` | `split-browser-e2e` | current action; `--actions` replaces the set |
+| `applied` | `split-browser-e2e` | action being applied, written by the session that discussed it |
 
 The schema lists every job field seen, so a batch that adds a job widens it;
 earlier records stay valid. A day takes about 400 bytes, so a year stays far
@@ -221,11 +247,13 @@ workspace of that repository's corpus. It reads top to bottom:
    execution time. One more on how to read the charts and where the data
    comes from.
 2. **Charts.** Line charts bound to `days`: total wall time (the 7-day
-   median and P95), tests, and, once measured, the test-to-code ratio and
+   median and P95), the share of failed run attempts (per day and over 7
+   days, re-runs included), tests, and, once measured, the test-to-code ratio and
    coverage. Per-job times are in the data, not drawn.
 3. **Recommended Actions.** Below the charts, the current top three as
-   cards, each with a button to discuss it in Claude Code. `ci.py cards`
-   rewrites them on every run.
+   cards, each with a button to discuss it in Claude Code; one being
+   applied is struck through, with its pull request or issue below.
+   `ci.py cards` rewrites them on every run.
 4. **Incidents.** Below the actions, the latest five, newest first, one list
    item each: the day, the change linked, the direction with the medians
    before and after, and why. `ci.py changelog` rewrites this list.

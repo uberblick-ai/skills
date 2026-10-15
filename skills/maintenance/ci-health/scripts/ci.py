@@ -8,11 +8,11 @@
     ci.py measure data.json --checkout PATH [--path SPEC]... [--every-day]  # optional: test ratio and coverage, added in place
     ci.py summary data.json                            # the days as a Markdown table, for a reply
     ci.py signals data.json [--days 7] > signals.json  # what the last days show, to choose the top actions
-    ci.py records data.json [incidents.json] [--actions actions.json] [--doc UUID] > update.json  # update_data batch
+    ci.py records data.json [incidents.json] [--actions actions.json] [--applied FILE] [--doc UUID] > update.json  # update_data
     ci.py create data.json [--incidents F] [--actions F] [--tag ID]... [--no-button] > create.json  # create_doc args
     ci.py charts data.json > charts.json               # the chart blocks, to compare with an existing document's
     ci.py changelog incidents.json > changelog.json    # the document's Incidents list, latest five
-    ci.py cards data.json actions.json [--doc UUID] [--no-button]  # the Recommended Actions cards
+    ci.py cards data.json actions.json [--doc UUID] [--applied FILE] [--no-button]  # Recommended Actions cards
     ci.py ub TOOL [ARGS] | --calls calls.json [--checkout PATH]  # Uberblick tools through one `ub mcp serve`
 
 Days are UTC calendar days; the default is yesterday. A commit counts on the day its first push run was
@@ -146,6 +146,27 @@ def window(args):
     return first, last
 
 
+GREEN, RED = ("success", "neutral"), ("failure", "timed_out", "startup_failure")  # cancelled and skipped runs neither
+
+
+def attempts(repo, run):
+    """The conclusion of every attempt of a run: a re-run keeps its id and bumps `run_attempt`, and the runs list
+    shows only the latest, so earlier attempts are read one by one."""
+    earlier = []
+    for n in range(1, run.get("run_attempt", 1)):
+        try:
+            earlier.append(gh(f"repos/{repo}/actions/runs/{run['id']}/attempts/{n}").get("conclusion"))
+        except RuntimeError as e:
+            print(f"collect: attempt {n} of run {run['id']}: {e}", file=sys.stderr)
+    return [*earlier, run["conclusion"]]
+
+
+def failure_rate(commits):
+    """Failed run attempts of these commits, in percent of the attempts that finished green or red."""
+    done = [c for commit in commits for c in commit.get("runs", []) if c in GREEN + RED]
+    return round(100 * sum(c in RED for c in done) / len(done), 1) if done else None
+
+
 def collect(repo, first, last, required=(), floor=None):
     """Every push run on the default branch from LOOKBACK days before `first` to the end of `last`, grouped by
     commit, and one record per day from `first` to `last`. With `required` workflows, a commit counts only when it
@@ -169,6 +190,8 @@ def collect(repo, first, last, required=(), floor=None):
             "title": (run.get("head_commit") or {}).get("message", "").split("\n")[0][:200],
             "workflows": {}, "jobs": []})
         c["workflows"][run["name"]] = run["conclusion"]
+        if not required or run["name"] in required:
+            c.setdefault("runs", []).extend(attempts(repo, run))
         c["jobs"] += [{"id": j["id"], "workflow": run["name"], "name": j["name"], "started": j["started_at"],
                        "completed": j["completed_at"], "conclusion": j["conclusion"],
                        "min": minutes(j["started_at"], j["completed_at"])} for j in jobs]
@@ -201,7 +224,10 @@ def collect(repo, first, last, required=(), floor=None):
                   "wall_p95_7d": p95(c["wall_min"] for c in recent),
                   "execution_min": median(c["execution_min"] for c in green),
                   "wait_min": median(c["wait_min"] for c in green),
-                  "late_start_min": median(c.get("late_start_min") for c in green)}
+                  "late_start_min": median(c.get("late_start_min") for c in green),
+                  "runs": sum(len(c.get("runs", [])) for c in today) or None,
+                  "failure_pct": failure_rate(today),
+                  "failure_pct_7d": failure_rate(c for c in rows if since <= c["day"] <= key)}
         per_job = {}
         for c in green:
             for j in c["jobs"]:
@@ -559,7 +585,8 @@ def signals(data, days=WINDOW):
 
 
 def summary(data):
-    cols = [("commits", "Commits"), ("failed", "Failed"), ("wall_min_7d", "Wall (7d)"), ("wall_p95_7d", "P95 (7d)"),
+    cols = [("commits", "Commits"), ("failed", "Failed"), ("runs", "Runs"), ("failure_pct", "Failed runs %"),
+            ("wall_min_7d", "Wall (7d)"), ("wall_p95_7d", "P95 (7d)"),
             ("wall_min", "Wall"), ("late_start_min", "Late start"), ("tests", "Tests"), ("test_ratio", "Test ratio"),
             ("coverage_pct", "Coverage %")]
     cols = [(k, t) for k, t in cols if any(k in d for d in data["days"])]
@@ -588,12 +615,19 @@ ACTIONS = {"version": 1, "schema": {"type": "object", "required": ["repo", "rank
                           "title": TEXT, "why": TEXT, "check": TEXT, "impact_min_per_day": NUM, "since": DAY,
                           "updated": DAY}}}
 TOP = 3  # actions on the document at a time
+# Applying an action is a person's decision, so it lives apart from `actions`, which every run replaces: one record
+# per action id, written by the session that discussed it.
+APPLIED = {"version": 1, "schema": {"type": "object", "required": ["status", "ref", "url"],
+           "properties": {"status": {"type": "string", "enum": ["implemented", "planned"]}, "ref": TEXT, "url": TEXT,
+                          "day": DAY}}}
 
 
 def schema(data):
     fields = {"day": DAY, "repo": TEXT, "workflows": TEXT, "start": DAY, "measured_sha": TEXT, "tests_pattern": TEXT,
               "loc_tool": TEXT, "loc_paths": TEXT,
-              **dict.fromkeys(["commits", "failed", "tests", "code_lines", "test_lines"], COUNT),
+              **dict.fromkeys(["commits", "failed", "runs", "tests", "code_lines", "test_lines"], COUNT),
+              **dict.fromkeys(["failure_pct", "failure_pct_7d"], {"type": ["number", "null"], "minimum": 0,
+                                                                  "maximum": 100}),
               "coverage_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
               **dict.fromkeys(["wall_min", "wall_min_7d", "wall_spread_7d", "wall_p95_7d", "execution_min", "late_start_min", "wait_min", "test_ratio", *data["jobs"]], NUM)}
     return {"version": 1, "schema": {"type": "object", "required": ["day", "repo", "commits"], "properties": fields}}
@@ -648,9 +682,10 @@ def action_rows(data, actions):
     return rows
 
 
-def records(data, incidents=(), actions=None):
+def records(data, incidents=(), actions=None, applied=()):
     """One update_data batch: the repository's days, keyed by day so a refresh replaces them, any incidents, and
-    with `actions` the current top actions, which replace the ones before."""
+    with `actions` the current top actions, which replace the ones before. `applied` marks of actions no longer
+    kept are deleted."""
     if any(i.get("repo") not in (None, data["repo"]) for i in incidents):
         sys.exit(f"incidents: every incident must be for {data['repo']}, the repository of this document")
     batch = [{"collection": "days", "schema": schema(data),
@@ -658,7 +693,11 @@ def records(data, incidents=(), actions=None):
     if incidents:
         batch.append({"collection": "incidents", "schema": INCIDENTS, "upsert": incident_rows(incidents)})
     if actions is not None:
-        batch.append({"collection": "actions", "schema": ACTIONS, "replaceRecords": action_rows(data, actions)})
+        rows = action_rows(data, actions)
+        batch.append({"collection": "actions", "schema": ACTIONS, "replaceRecords": rows})
+        gone = sorted(set(applied_marks(applied)) - {r["id"] for r in rows})
+        if gone:
+            batch.append({"collection": "applied", "schema": APPLIED, "deleteRecords": gone})
     return batch
 
 
@@ -667,15 +706,20 @@ def chart(mapping):
 
 
 def charts(data):
-    """The charts, bound to the document's days: total wall time (the 7-day median and P95), tests, and, once
+    """The charts, bound to the document's days: total wall time (the 7-day median and P95), the share of run
+    attempts that failed (per day and over 7 days), tests, and, once
     measured, the test-to-code ratio and coverage. Per-job times stay in the data, to explain steps, not drawn."""
     x = {"field": "day", "type": "date", "label": "Day"}
     line = lambda title, y: chart({"version": 1, "type": "line", "collection": "days", "title": title, "x": x,
                                    "missing": "connect", "y": y})
     blocks = [line(f"Wall time on {data['branch']}",
                    [{"field": "wall_min_7d", "label": "7-day median", "unit": "min"},
-                    {"field": "wall_p95_7d", "label": "7-day P95", "unit": "min"}]),
-              line("Tests", [{"field": "tests", "label": "Tests"}])]
+                    {"field": "wall_p95_7d", "label": "7-day P95", "unit": "min"}])]
+    if any("failure_pct" in d for d in data["days"]):
+        blocks.append(line(f"Failed runs on {data['branch']}",
+                           [{"field": "failure_pct", "label": "Per day", "unit": "%"},
+                            {"field": "failure_pct_7d", "label": "7 days", "unit": "%"}]))
+    blocks.append(line("Tests", [{"field": "tests", "label": "Tests"}]))
     if any("test_ratio" in d for d in data["days"]):
         blocks.append(line("Test to code ratio", [{"field": "test_ratio", "label": "Test lines per code line"}]))
     if any("coverage_pct" in d for d in data["days"]):
@@ -711,30 +755,69 @@ CLAUDE_CODE = "claude://code/new?q="
 CHECK = "Check it against the repository: is it sound, what would it change, what are the risks, and is there a simpler way?"
 
 
+def one_line(text):
+    return " ".join(text.split())
+
+
+def card_label(a):
+    return f"{one_line(a['area'])} · since {dt.date.fromisoformat(a['since']).strftime('%-d %b %Y')}"
+
+
+def applied_card(a, status, ref, url):
+    """An action being applied: the title and why struck through, the button gone, and a footer, not struck, naming
+    the pull request or issue. A link whose text is the reference and whose target its GitHub URL shows as a pill."""
+    return (f"label: {card_label(a)}\ntitle: ~~{one_line(a['title'])}~~\n"
+            f"footer: {status} in [{ref}]({url}).\n\n~~{a['why'].strip()}~~")
+
+
 def discuss_link(data, action, doc=None):
     """A link that opens Claude Code with a prompt to discuss the action before changing anything: the repository,
-    the recommendation, its evidence, what to check, then a plan. The prompt is filled in, not sent."""
+    the recommendation, its evidence, what to check, then a plan. If the outcome is to apply it, the prompt says how
+    to mark the card. The prompt is filled in, not sent."""
     source = f"the CI Health Report for {data['repo']}" + (f" (Uberblick document {doc})" if doc else "")
+    where = f"Uberblick document {doc}" if doc else f'the "CI Health Report" document for {data["repo"]} in Uberblick'
+    card = applied_card(action, "STATUS", "REF", "URL")
+    record = {"id": action.get("id") or slug(action["title"]).replace("_", "-"),
+              "value": {"status": "implemented or planned", "ref": "REF", "url": "URL", "day": "YYYY-MM-DD"}}
     prompt = (f"From {source}, data as of {action.get('updated') or data['last']}:\n\n"
               f"Recommendation: {action['title'].rstrip('.')}.\nEvidence: {action['why']}\n\n"
               f"Let's discuss this before changing anything. {action.get('check') or CHECK} "
-              "Then propose a plan and wait for my go-ahead.")
+              "Then propose a plan and wait for my go-ahead.\n\n"
+              "If we decide to apply it, mark the card once a pull request implements it or an issue plans it, so the "
+              f"report shows it is being handled. In {where}, replace the card titled \"{one_line(action['title'])}\" "
+              "under Recommended Actions with this one (delete_block, then insert_block in the same place, since "
+              "edit_block cannot change formatting). STATUS is Implemented or Planned, REF is owner/repo#number and "
+              "URL its GitHub address; keeping the reference as the link text makes it show as a GitHub pill:\n\n"
+              f"{card}\n\n"
+              "Then record it with update_data, so later refreshes keep the card struck through: collection "
+              f"\"applied\", schema {json.dumps(APPLIED)}, upsert {json.dumps(record)}.")
     return CLAUDE_CODE + quote(prompt, safe="")
 
 
-def cards(data, actions, doc=None, button=True):
+def applied_marks(applied):
+    """Action id to its applied record, from the stored `applied` collection (get_data) or a list of records."""
+    rows = applied.get("records", []) if isinstance(applied, dict) else applied or []
+    return {r["id"]: r["value"] for r in rows if "value" in r}
+
+
+def cards(data, actions, doc=None, button=True, applied=()):
     """The actions as cards in rank order: the area and since when, the action, why with its numbers, and a button
-    to discuss it in Claude Code. Takes the agent's actions or the stored records."""
+    to discuss it in Claude Code. An action being applied is struck through, with its pull request or issue below.
+    Takes the agent's actions or the stored records."""
     rows = actions.get("records", actions) if isinstance(actions, dict) else actions
-    stored = [r["value"] for r in rows if "value" in r]
-    values = sorted(stored, key=lambda a: a["rank"]) if stored else [r["value"] for r in action_rows(data, rows)]
-    one_line = lambda text: " ".join(text.split())
+    stored = {r["id"]: r["value"] for r in rows if "value" in r}
+    pairs = (sorted(stored.items(), key=lambda kv: kv[1]["rank"]) if stored
+             else [(r["id"], r["value"]) for r in action_rows(data, rows)])
+    marks = applied_marks(applied)
     blocks = []
-    for a in values:
-        since = dt.date.fromisoformat(a["since"]).strftime("%-d %b %Y")
-        blocks.append({"type": "card", "text": f"label: {one_line(a['area'])} · since {since}\n"
+    for key, a in pairs:
+        if key in marks:
+            m = marks[key]
+            blocks.append({"type": "card", "text": applied_card(a, m["status"].capitalize(), m["ref"], m["url"])})
+            continue
+        blocks.append({"type": "card", "text": f"label: {card_label(a)}\n"
                                                f"title: {one_line(a['title'])}\n"
-                                               + (f"button: [Discuss in Claude Code]({discuss_link(data, a, doc)})\n"
+                                               + (f"button: [Discuss in Claude Code]({discuss_link(data, a | {'id': key}, doc)})\n"
                                                   if button else "")
                                                + f"\n{a['why']}"})
     return blocks or [{"type": "paragraph", "text": "No action proposed yet."}]
@@ -751,7 +834,8 @@ def create_document(data, incidents=(), actions=(), button=True):
         {"type": "paragraph", "inline": [
             {"text": "Reading the charts: ", "marks": {"bold": True}},
             {"text": "one point per day, over green commits, in minutes. Wall time is the total over the last 7 days: the "
-             "median, and the P95 that shows the slow tail. Lower is better. "
+             "median, and the P95 that shows the slow tail. Lower is better. Failed runs is the share of run attempts, "
+             "re-runs included, that ended red; cancelled runs are left out. "
              "Runner queueing before the first job is left out. Data from GitHub Actions, refreshed by the ",
              "marks": {}},
             {"text": "ci-health skill", "marks": {"link": SKILL_URL}},
@@ -881,6 +965,7 @@ def main():
     r.add_argument("data")
     r.add_argument("incidents", nargs="?")
     r.add_argument("--actions", help="the current top actions, which replace the stored ones")
+    r.add_argument("--applied", help="the stored applied collection from get_data; marks of dropped actions go")
     r.add_argument("--doc", help="the document's uuid: print update_data arguments instead of the operations alone")
     n = commands.add_parser("create")
     n.add_argument("data")
@@ -894,6 +979,7 @@ def main():
     k.add_argument("data")
     k.add_argument("actions", help="the agent's actions, or the stored ones from get_data")
     k.add_argument("--doc", help="the document's uuid, named in each card's prompt")
+    k.add_argument("--applied", help="the stored applied collection from get_data: those actions are struck through")
     k.add_argument("--no-button", action="store_true", help="cards without the Claude Code button, for Uberblick 0.4.3")
     u = commands.add_parser("ub", help="call Uberblick MCP tools through one `ub mcp serve`")
     u.add_argument("tool", nargs="?", help="one tool; or pass --calls")
@@ -932,7 +1018,7 @@ def main():
         return
     elif args.command == "records":
         out = records(load(args.data), load(args.incidents) if args.incidents else (),
-                      load(args.actions) if args.actions else None)
+                      load(args.actions) if args.actions else None, load(args.applied) if args.applied else ())
         if args.doc:
             out = {"uuid": args.doc, "operations": out}
     elif args.command == "create":
@@ -943,7 +1029,8 @@ def main():
     elif args.command == "charts":
         out = charts(load(args.data))
     elif args.command == "cards":
-        out = cards(load(args.data), load(args.actions), args.doc, not args.no_button)
+        out = cards(load(args.data), load(args.actions), args.doc, not args.no_button,
+                    load(args.applied) if args.applied else ())
     elif args.command == "ub":
         if bool(args.calls) == bool(args.tool):
             sys.exit("ub: pass one TOOL or --calls FILE")

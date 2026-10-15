@@ -1,10 +1,12 @@
 """Checks for review.py that need no network: evidence, the digest, records and the document's cards."""
 
 import datetime as dt
+import re
 import sys
 import unittest
 from pathlib import Path
 from unittest import mock
+from urllib.parse import unquote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import review  # noqa: E402
@@ -68,6 +70,22 @@ class Tests(unittest.TestCase):
         self.assertEqual(sections["changelog_new"], 0)
         with self.assertRaises(SystemExit):
             review.document({}, data(actions=["old"]))
+
+    def test_a_lesson_being_applied_is_struck_through(self):
+        new = {"id": "new", "lever": "wording", "title": "New", "change": "C.", "state": "proposed"}
+        tracked = {"lever": "authority", "title": "Old", "change": "Do it.", "state": "tracked", "day": "2026-10-07",
+                   "addressed_by": "o/r#12", "addressed_as": "implemented"}
+        registry = {"lessons": [{"id": "old", "value": tracked}]}
+        sections = review.document(registry, data(lessons=[new], actions=["new"]), doc="d0c")
+        self.assertEqual([(c["lesson"], c["title"]) for c in sections["cards"]], [("new", "New"), ("old", "~~Old~~")])
+        self.assertEqual(sections["actions"][-1]["text"], "label: Clearer authority\ntitle: ~~Old~~\n"
+                         "footer: Implemented in [o/r#12](https://github.com/o/r/issues/12).\n\n~~Do it.~~",
+                         "struck through, no button, the pull request as a pill below")
+        prompt = unquote(re.search(r"q=(\S+)\)", sections["actions"][1]["text"]).group(1))
+        for part in ('In Uberblick document d0c, replace the card titled "New"', "title: ~~New~~",
+                     "footer: STATUS in [REF](URL).", "~~C.~~", 'read the record "new" of the collection "lessons"',
+                     'set "state" to "tracked"'):
+            self.assertIn(part, prompt)
 
 
 if __name__ == "__main__":

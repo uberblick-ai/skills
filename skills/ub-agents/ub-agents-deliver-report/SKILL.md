@@ -15,7 +15,7 @@ compatibility: >-
   uberblick MCP server; without it the skill still writes the page.
 metadata:
   author: uberblick-ai
-  version: "1.2"
+  version: "1.3"
 ---
 
 # Deliver report
@@ -81,7 +81,8 @@ classes, the page and the records are defined in
    the registry already has. Then search the repositories' issues and PRs for
    one that addresses each proposed lesson, new or registered: mark it
    `tracked` with `addressed_by` when an open one does, `applied` when a merged
-   one did. Rank up to five still-proposed lessons from the last 14 days,
+   one did. Keep `addressed_as` (`implemented` or `planned`) from the registry;
+   the session that discussed an action card writes it. Rank up to five still-proposed lessons from the last 14 days,
    most runs saved first, as the day's `actions`; re-propose an older lesson
    when the day shows it again.
 
@@ -127,8 +128,9 @@ classes, the page and the records are defined in
 7. With a `DOC` that existed before this run, bring its Recommended Actions
    and Changelog up to date (a document created in step 6 already carries
    them). Write `DIR/dataset.json` as `{"lessons": [...]}`: the registry
-   lessons the day's `actions` name that `notes.json` leaves out, each as
-   `{id, value}` from the step 2 read. `document` stops if one is missing.
+   lessons the day's `actions` name and the `tracked` ones from the last 14
+   days, those `notes.json` leaves out, each as `{id, value}` from the step 2
+   read. `document` stops if one is missing.
    Then:
 
    ```sh
@@ -143,7 +145,9 @@ classes, the page and the records are defined in
 
    - Delete a card whose title is not in `cards`.
    - Edit a card marked `changed` in place with `edit_block`, passing its
-     text and `rev` from `get_doc`, so comments on it stay.
+     text and `rev` from `get_doc`, so comments on it stay. A card marked
+     `struck` is struck through, which `edit_block` cannot change: delete
+     it and insert it again instead.
    - Insert a card that is not in `DOC` yet after the card before it in
      `cards`, or after the intro paragraph.
    - Leave every other card as it is; move one only when it is out of order.
@@ -153,7 +157,10 @@ classes, the page and the records are defined in
    `changelog_new` is 0, leave it as it is. A document whose heading still
    reads "Actions" gets it renamed. Each action is a card whose "Discuss in
    Claude Code" button opens a new session with a prompt to discuss the
-   change before making it. If Uberblick refuses a card with `invalid_card`
+   change before making it. When that discussion settles on applying it,
+   the prompt has the session strike the card through, with the pull
+   request or issue as a GitHub pill below, and mark the lesson `tracked`,
+   so `document` keeps it that way until the change is done. If Uberblick refuses a card with `invalid_card`
    (0.4.3 has no card buttons), run `document` again with `--no-button`. The
    charts and the Recent days table follow the data by themselves.
 

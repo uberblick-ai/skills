@@ -51,6 +51,7 @@ STATES = ["open", "fixed", "accepted"]
 LEVERS = {"authority": "Clearer authority", "wording": "Better wording",
           "fewer-instructions": "Fewer instructions", "autonomy": "More autonomy"}
 LESSON_STATES = ["proposed", "tracked", "applied", "rejected"]
+ADDRESSED_AS = {"implemented": "Implemented", "planned": "Planned"}  # a pull request that does it, an issue that plans it
 
 
 def public(text, limit):
@@ -786,7 +787,8 @@ SCHEMAS = {
         state={"type": "string", "enum": STATES}, **{"class": {"type": "string", "enum": CLASSES}}),
     "lessons": collection(
         ["day", "lever", "title", "change", "state"], day=DAY, title=TEXT, change=TEXT, where=TEXT, cost=TEXT,
-        causes=IDS, evidence=NUMBERS, addressed_by=TEXT, lever={"type": "string", "enum": list(LEVERS)},
+        causes=IDS, evidence=NUMBERS, addressed_by=TEXT, addressed_as={"type": "string", "enum": list(ADDRESSED_AS)},
+        lever={"type": "string", "enum": list(LEVERS)},
         state={"type": "string", "enum": LESSON_STATES}),
     "changes": collection(
         ["day", "title", "why"], day=DAY, title=TEXT, why=TEXT, url=TEXT, causes=IDS, lessons=IDS),
@@ -819,7 +821,8 @@ def records(data, schemas=False):
         "causes": [{"id": f["cause"], "value": {k: f[k] for k in ("class", "mechanism", "state", "fixed_by") if f.get(k)}}
                    for f in data["findings"]],
         "lessons": [{"id": l["id"], "value": {"day": day} | {
-            k: l[k] for k in ("lever", "title", "change", "where", "cost", "causes", "evidence", "state", "addressed_by")
+            k: l[k] for k in ("lever", "title", "change", "where", "cost", "causes", "evidence", "state", "addressed_by",
+                              "addressed_as")
             if k in l}} for l in data["lessons"]],
         "changes": [{"id": c["ref"], "value": {k: c[k] for k in ("day", "title", "why", "causes", "lessons") if k in c} | (
             {"url": c.get("url") or link(c["ref"])} if c.get("url") or link(c["ref"]) else {})}
@@ -867,9 +870,24 @@ def inline(text):
     return "".join(p if p.startswith("`") else re.sub(r"([\\*_\[\]])", r"\\\1", p) for p in parts)
 
 
+def applied_card(lesson, status, ref, url):
+    """A lesson being applied: the title and change struck through, the button gone, and a footer, not struck,
+    naming the pull request or issue. A link whose text is the reference and whose target its GitHub URL shows as a
+    pill."""
+    return (f"label: {LEVERS[lesson['lever']]}\ntitle: ~~{inline(lesson['title'])}~~\n"
+            f"footer: {status} in [{ref}]({url}).\n\n~~{inline(lesson['change'])}~~")
+
+
+def tracked_card(lesson):
+    ref = lesson["addressed_by"]
+    return {"type": "card", "text": applied_card(lesson, ADDRESSED_AS[lesson.get("addressed_as", "planned")], ref,
+                                                 link(ref) or f"https://github.com/{ref}")}
+
+
 def discuss_link(data, lesson, doc=None):
     """A link that opens Claude Code with a prompt to discuss the lesson before changing anything: the repository,
-    the change, its evidence, what to check, then a plan."""
+    the change, its evidence, what to check, then a plan. If the outcome is to apply it, the prompt says how to mark
+    the card and the lesson."""
     source = f"the delivery report for {data['repo']}" + (f" (Uberblick document {doc})" if doc else "")
     evidence = "; ".join(filter(None, [lesson.get("cost"),
                                        "causes: " + ", ".join(lesson["causes"]) if lesson.get("causes") else None,
@@ -881,6 +899,17 @@ def discuss_link(data, lesson, doc=None):
               + (f"Where: {lesson['where']}\n" if lesson.get("where") else "")
               + (f"Evidence: {evidence}\n" if evidence else "")
               + f"\nLet's discuss this before changing anything. {CHECK} Then propose a plan and wait for my go-ahead.")
+    where = f"Uberblick document {doc}" if doc else f"the delivery report document for {data['repo']} in Uberblick"
+    prompt += ("\n\nIf we decide to apply it, mark the card once a pull request implements it or an issue plans it, so "
+               f"the report shows it is being handled. In {where}, replace the card titled \"{inline(lesson['title'])}\" "
+               "under Recommended Actions with this one (delete_block, then insert_block in the same place, since "
+               "edit_block cannot change formatting). STATUS is Implemented or Planned, REF is owner/repo#number and "
+               "URL its GitHub address; keeping the reference as the link text makes it show as a GitHub pill:\n\n"
+               f"{applied_card(lesson, 'STATUS', 'REF', 'URL')}\n\n"
+               "Then record it, so later reports keep the card struck through: read the record "
+               f"\"{lesson['id']}\" of the collection \"lessons\" with get_data, set \"state\" to \"tracked\", "
+               "\"addressed_by\" to REF and \"addressed_as\" to \"implemented\" or \"planned\", and upsert the whole "
+               "value back with update_data.")
     return CLAUDE_CODE + quote(prompt, safe="")
 
 
@@ -911,18 +940,25 @@ def document(dataset, data, doc=None, button=True):
     missing = [k for k in ranked if k not in lessons]
     if missing:
         sys.exit("dataset.json lacks the registry lessons the actions name: " + ", ".join(missing))
-    actions = [{"type": "paragraph", "text": "Up to five changes not yet taken up, most runs saved first. An action "
-                "leaves this list once an issue or PR addresses it."}]
+    actions = [{"type": "paragraph", "text": "Up to five changes not yet taken up, most runs saved first, then the "
+                "ones being applied, struck through, until their pull request or issue is done."}]
     # Actions look back ITEM_DAYS: a lesson nobody proposed again in that window drops off.
     since = (dt.date.fromisoformat(data["day"]) - dt.timedelta(days=ITEM_DAYS - 1)).isoformat()
     current = [k for k in ranked if k in lessons and lessons[k].get("state", "proposed") == "proposed"
-               and lessons[k].get("day", data["day"]) >= since]
-    actions += [action_card(data, lessons[key], doc, button) for key in current[:5]]
+               and lessons[k].get("day", data["day"]) >= since][:5]
+    # An open issue or PR addresses these: struck through, newest first, until it merges or closes.
+    tracked = sorted((k for k, l in lessons.items() if l.get("state") == "tracked" and l.get("addressed_by")
+                      and l.get("day", data["day"]) >= since), key=lambda k: (lessons[k].get("day", ""), k),
+                     reverse=True)
+    actions += [action_card(data, lessons[key] | {"id": key}, doc, button) for key in current]
+    actions += [tracked_card(lessons[key]) for key in tracked]
     changes = values(dataset.get("changes")) | {c["ref"]: c for c in data.get("changes", [])}
     latest = sorted(changes, key=lambda ref: (changes[ref]["day"], ref), reverse=True)[:5]
     return {"actions": actions, "changelog": changelog(changes),
             "cards": [{"lesson": key, "title": inline(lessons[key]["title"]), "changed": key in today}
-                      for key in current[:5]],
+                      for key in current]
+                     + [{"lesson": key, "title": f"~~{inline(lessons[key]['title'])}~~", "changed": key in today,
+                         "struck": True} for key in tracked],
             "changelog_new": sum(ref in {c["ref"] for c in data.get("changes", [])} for ref in latest)}
 
 
