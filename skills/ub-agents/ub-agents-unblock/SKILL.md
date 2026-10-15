@@ -79,11 +79,13 @@ How the launcher works; the project decides the labels, roles and policy.
    discussion since, linked items and, for a PR, its head SHA against the
    notice's and its checks. Open with two or three sentences in plain,
    technical English: what the issue or PR sets out to accomplish, where it
-   stands now (what is done, what failed, what changed since the notice), and
-   what the decision unblocks. Stay at the level of outcomes ("most checks
-   pass, one unrelated WebKit test failed"); leave file names, line numbers,
-   SHAs and check names out unless asked. Then form your own recommendation from that and
-   what step 1 found; say in one line where and why it differs from the
+   stands now and what the decision unblocks. Stay at the level of outcomes
+   ("most checks pass, one unrelated WebKit test failed"); leave file names,
+   line numbers, SHAs and check names out unless asked. Form your own
+   recommendation from that and what step 1 found. When something changed
+   since the stop, name it and tie it to the recommendation in one sentence:
+   "Since then, #1749 addressed that failure, so I recommend merging main and
+   sending it back to the implementer." Say where yours differs from the
    agent's.
 
 5. Ask with your interactive question tool (AskUserQuestion in Claude Code;
