@@ -85,8 +85,9 @@ How the launcher works; the project decides the labels, roles and policy.
    recommendation from that and what step 1 found. When something changed
    since the stop, name it and tie it to the recommendation in one sentence:
    "Since then, #1749 addressed that failure, so I recommend merging main and
-   sending it back to the implementer." Say where yours differs from the
-   agent's.
+   sending it back to the implementer." Always say in a few words what the
+   agent asked, for reference ("The agent asked for a separate fix issue"),
+   and where yours differs.
 
 5. Ask with your interactive question tool (AskUserQuestion in Claude Code;
    otherwise a numbered question in chat). Give the item's ask in a sentence
