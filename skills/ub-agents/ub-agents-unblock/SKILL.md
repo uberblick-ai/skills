@@ -77,17 +77,11 @@ How the launcher works; the project decides the labels, roles and policy.
 
 4. For each item, read what the decision needs: the notice's evidence, the
    discussion since, linked items and, for a PR, its head SHA against the
-   notice's and its checks. Open with two or three sentences in plain,
-   technical English: what the issue or PR sets out to accomplish, where it
-   stands now and what the decision unblocks. Stay at the level of outcomes
-   ("most checks pass, one unrelated WebKit test failed"); leave file names,
-   line numbers, SHAs and check names out unless asked. Form your own
-   recommendation from that and what step 1 found. When something changed
-   since the stop, name it and tie it to the recommendation in one sentence:
-   "Since then, #1749 addressed that failure, so I recommend merging main and
-   sending it back to the implementer." Always say in a few words what the
-   agent asked, for reference ("The agent asked for a separate fix issue"),
-   and where yours differs.
+   notice's and its checks. Summarize in two or three sentences of plain,
+   technical English what the item is for, where it stands and what the
+   decision unblocks, without details the decision does not need. Say briefly
+   what the agent asked, then give your own recommendation from what you read
+   and what step 1 found, and why it differs if it does.
 
 5. Ask with your interactive question tool (AskUserQuestion in Claude Code;
    otherwise a numbered question in chat). Give the item's ask in a sentence
