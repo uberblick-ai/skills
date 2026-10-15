@@ -172,7 +172,9 @@ lesson without `addressed_by`, or more than five actions.
 
 A lesson is `proposed` until an issue or PR addresses it: `tracked` while that
 is open, `applied` once it merged, `rejected` when a person declines it.
-`addressed_by` names it as `owner/name#number`. `actions` ranks up to five
+`addressed_by` names it as `owner/name#number`, and `addressed_as` says
+whether it is a pull request that implements the lesson (`implemented`) or an
+issue that plans it (`planned`, the default). `actions` ranks up to five
 proposed lessons proposed or re-proposed in the last 14 days, most runs saved
 first; an older lesson drops off until a day proposes it again. A change is
 anything that landed on this day to fix a cause or apply a lesson; `ref` is
@@ -286,8 +288,13 @@ bottom:
 4. **Recommended Actions.** The day's `actions`: up to five proposed
    lessons, each a card with the lever as its label, the title, the change as
    its body, and a footer with where it lives, its cost, its causes and its
-   evidence. A lesson leaves the list once an issue or PR addresses it. Each
-   card has a "Discuss in Claude Code" button to
+   evidence. Below them, the `tracked` lessons of the last 14 days, struck
+   through: the title and change crossed out, no button, and a footer, not
+   struck through, that names the change, such as `Planned in
+   [acme/app#212](https://github.com/acme/app/issues/212).` A link whose text
+   is the `owner/name#number` reference and whose target is its GitHub address
+   shows as a GitHub pill. A lesson leaves the list once that change merges
+   or closes. Each proposed card has a "Discuss in Claude Code" button to
    `claude://code/new?q=PROMPT`, which opens a new session in the Claude
    desktop app with the prompt filled in, not sent. The prompt names the
    repository, the document and the day the lesson was last proposed, the
@@ -295,7 +302,12 @@ bottom:
    cannot select a repository by name, only a local folder, so the prompt
    names it. Card prose takes only http(s) links, so the link is a `button:`
    line, which Uberblick reads from the release after 0.4.3; `--no-button`
-   leaves it out for older versions.
+   leaves it out for older versions. When the discussion settles on applying
+   the lesson, the prompt asks that session to mark it once a pull request
+   implements it or an issue plans it: replace the card with the struck one,
+   then set the lesson's record in `lessons` to `tracked`, with
+   `addressed_by` and `addressed_as`, so later reports keep it struck
+   through.
 5. **Changelog.** A bullet list of the five latest `changes`, newest first:
    the day, the change linked to its issue, PR or commit in ub-agents or the
    project, and why it was made.
@@ -303,7 +315,8 @@ bottom:
 After each stored day the skill brings the "Recommended Actions" and
 "Changelog" sections up to date from `document`'s output, one block at a time:
 it deletes a card whose lesson left the list, edits a card in place when the
-day changed its lesson, so comments on it stay, inserts a new one, and adds
+day changed its lesson, so comments on it stay (a struck-through card is
+replaced instead, since `edit_block` cannot change formatting), inserts a new one, and adds
 the day's changes to the changelog. `document` marks each card `changed` and
 counts the new changelog items in `changelog_new`; a card is otherwise the
 same from day to day. Everything else is written once, by `create` or by a

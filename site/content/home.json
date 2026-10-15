@@ -18,7 +18,7 @@
     {"label": "Contribute", "question": "How do I write a skill for this repository?", "links": [["Guide", "AGENTS.md", "https://github.com/uberblick-ai/skills/blob/main/AGENTS.md"], ["Spec", "Agent Skills specification", "https://agentskills.io/specification"]]}
   ],
   "changes": [
-    ["2026-10-15", "Skill", "ci-health 1.4: an action being applied is struck through on its card, with the pull request or issue below as a GitHub pill."],
+    ["2026-10-15", "Skill", "ci-health 1.4 and ub-agents-deliver-report 1.3: an action being applied is struck through on its card, with the pull request or issue below as a GitHub pill."],
     ["2026-10-14", "Skill", "ub-agents-deliver-report 1.1 and ci-health 1.3: action cards with a Discuss in Claude Code button."],
     ["2026-10-12", "Skill", "ci-health 1.2: the top three actions that would cut the wait, each with a link to discuss it in Claude Code, and line counts with scc or cloc that leave comments out."],
     ["2026-10-10", "Skill", "Added ci-health 1.0 in the Maintenance group: CI wall time, jobs, tests and the changes that moved them."],
