@@ -1,0 +1,30 @@
+{
+  "question": "What is the loop waiting on me for?",
+  "short": "Go through the items the loop stopped on, one at a time: what each one is, where it stands, what the agent asks, and a recommendation you can accept with one choice.",
+  "lede": "The loop stops where a person must decide. This skill puts each decision in front of you in plain words, records your answer on GitHub and hands the item back to the right agent, so the loop keeps moving without you reading every thread.",
+  "asks": [
+    "Unblock the loop.",
+    "Go through the needs-human items in uberblick-ai/uberblick-2.",
+    "What are the agents waiting on me for?"
+  ],
+  "steps": [
+    "Reads how the repository runs its loop: <code>ub-agents.yaml</code>, <code>AGENTS.md</code> and each agent's instructions, so labels, roles and merge policy come from your setup, not the defaults.",
+    "Lists stopped items with <code>ub-agents status</code>, highest priority and longest waiting first: items with a stop label such as <code>needs-human</code>, and blocked or failed runs.",
+    "Takes one item at a time and asks with an interactive prompt that stands on its own (see below).",
+    "Says exactly what it will change, then posts your answer and swaps the stop label for the label of the role that acts next. It can also merge a PR at the reviewed commit, approve, retry or close."
+  ],
+  "facts_title": "What each question shows",
+  "facts": [
+    ["Link", "the issue or PR as a clickable GitHub URL"],
+    ["What it is", "one plain sentence on what the item changes for users"],
+    ["Where it stands", "what is done, what is blocking it and what the decision unblocks, without file names or check output"],
+    ["The agent's ask", "what the stopped agent asked, for reference"],
+    ["Recommendation", "the skill's own pick from the item and your repository's guidance, marked first, and why it differs from the agent's when it does"],
+    ["Options", "up to four, or your own answer in your words"]
+  ],
+  "needs": [
+    ["Needs", "an authenticated <code>gh</code> acting as a maintainer."],
+    ["Optional", "<code>ub-agents</code> in the repository's checkout, to list blocked and failed runs too."],
+    ["Changes", "only what you choose: a comment, labels, a milestone, a merge or a close."]
+  ]
+}
