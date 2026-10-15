@@ -39,8 +39,9 @@ How the launcher works; the project decides the labels, roles and policy.
 
 ## Steps
 
-1. Learn how REPO (`OWNER/NAME`) runs its loop before looking at any item. Read
-   from its default branch, since a local checkout can lag:
+1. Learn how REPO (`OWNER/NAME`) runs its loop before looking at any item.
+   Read `ub-agents.yaml` in the local checkout; without one, read it from
+   GitHub:
 
    ```sh
    gh api repos/REPO/contents/ub-agents.yaml -H "Accept: application/vnd.github.raw"
