@@ -2,6 +2,9 @@
 import copy
 import importlib.util
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -90,5 +93,15 @@ class ReportTests(unittest.TestCase):
         render.render(self.data)
         extra['id']='example/app#1'
         with self.assertRaises(ValueError):render.render(self.data)
+
+    def test_report_is_utf8_whatever_the_locale(self):
+        self.data['scope']['label']='Prüfung — schneller…'
+        env=os.environ|{'LC_ALL':'C','PYTHONUTF8':'0','PYTHONCOERCECLOCALE':'0'}
+        with tempfile.TemporaryDirectory() as tmp:
+            source=Path(tmp)/'in.json'; source.write_text(json.dumps(self.data), encoding='utf-8')
+            subprocess.run([sys.executable, str(HERE/'render.py'), str(source), tmp, '--no-open'], env=env, check=True, capture_output=True)
+            page=(Path(tmp)/'report.html').read_text(encoding='utf-8')
+        self.assertIn('Prüfung — schneller…', page)
+        self.assertLess(page.index('<meta charset="utf-8">'), page.index('<title>'))
 
 if __name__ == '__main__': unittest.main()

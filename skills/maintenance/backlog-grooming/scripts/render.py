@@ -158,7 +158,7 @@ def render(data):
     tail += f'<section><h2>Grounding &amp; limitations</h2><p>{esc(baselines)}</p><ul>{limitations}</ul></section>'
     if has_loop:
         tail += '<p class="note">Loop eligibility is a checked snapshot, not a guarantee of the next dispatch. Reasons and configuration sources are in the evidence.</p>'
-    template = (Path(__file__).resolve().parent.parent/'assets'/'report.html').read_text()
+    template = (Path(__file__).resolve().parent.parent/'assets'/'report.html').read_text(encoding='utf-8')
     values = {'SCOPE':esc(scope['label']), 'DATE':esc(data['reviewed_at']), 'GOAL':esc(scope['goal']), 'COUNT':str(len(items)), 'LOOP_HEADER':'Loop / blockers' if has_loop else 'Blocked by', 'ROWS':''.join(rows), 'TAIL':tail}
     # One pass: text in source data must never become another template directive.
     return re.sub(r'@@([A-Z_]+)@@', lambda m: values[m.group(1)], template)
@@ -170,12 +170,12 @@ def main(argv=None):
     p.add_argument('--no-open', action='store_true')
     args = p.parse_args(argv)
     try:
-        data = json.loads(args.input.read_text())
+        data = json.loads(args.input.read_text(encoding='utf-8'))
         page = render(data)
         args.output.mkdir(parents=True, exist_ok=True)
         target = args.output/'report.html'
-        target.write_text(page)
-        (args.output/'report.json').write_text(json.dumps(data, indent=2, ensure_ascii=False)+'\n')
+        target.write_text(page, encoding='utf-8')
+        (args.output/'report.json').write_text(json.dumps(data, indent=2, ensure_ascii=False)+'\n', encoding='utf-8')
         print(target.resolve())
         if not args.no_open:
             webbrowser.open(target.resolve().as_uri())

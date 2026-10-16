@@ -15,7 +15,7 @@ compatibility: >-
   uberblick MCP server; without it the skill still writes the page.
 metadata:
   author: uberblick-ai
-  version: "1.3"
+  version: "1.4"
 ---
 
 # Deliver report

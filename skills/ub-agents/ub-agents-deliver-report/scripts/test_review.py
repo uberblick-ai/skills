@@ -87,6 +87,16 @@ class Tests(unittest.TestCase):
                      'set "state" to "tracked"'):
             self.assertIn(part, prompt)
 
+    def test_page_declares_its_encoding_before_any_text(self):
+        day = data(lessons=[{"id": "x", "lever": "wording", "title": "Prüfung — schneller…", "change": "C.",
+                             "state": "proposed"}], actions=["x"])
+        day["summary"] |= dict.fromkeys(["loop_cycle_h_median", "cycle_h_median", "run_h_median", "run_h",
+                                         "additions", "deletions", "files"], 0) | {"headline": "Ein Tag."}
+        page = review.report(day | {"retrospective_groups": []})
+        self.assertTrue(page.startswith('<!doctype html><html lang="en"><meta charset="utf-8">'))
+        self.assertLess(page.index('name="viewport"'), page.index("<title>"))
+        self.assertIn("Prüfung — schneller…", page)
+
 
 if __name__ == "__main__":
     unittest.main()

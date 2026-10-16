@@ -648,7 +648,9 @@ def report(data):
     """The page follows references/report.md: header, figures, what to change, where extra runs went,
     each delivery, retrospectives."""
     repo, summary = data["repo"], data["summary"]
-    out = [f'<title>Delivery report {data["day"]}</title>', CSS, "</style><main class=\"wrap\">",
+    out = ['<!doctype html><html lang="en"><meta charset="utf-8">',
+           '<meta name="viewport" content="width=device-width, initial-scale=1">',
+           f'<title>Delivery report {data["day"]}</title>', CSS, "</style><main class=\"wrap\">",
            f'<header><div class="label">{esc(repo)} · {esc(data["day"])} · {esc(data["timezone"])}</div>'
            f'<h1>Delivery report</h1><p>{esc(summary["headline"])}</p></header><section class="grid">']
     tone = {True: " hit", False: " miss", None: ""}
@@ -1080,24 +1082,24 @@ def main():
         rows = list(pages(f"repos/{args.repo}/issues", state="all", since=stamp(since)))
         print(json.dumps({"day": day.isoformat()} | queue(args.repo, until, rows, agents)))
     elif args.command == "digest":
-        sys.stdout.write(digest(json.loads(Path(args.data).read_text())))
+        sys.stdout.write(digest(json.loads(Path(args.data).read_text(encoding="utf-8"))))
     elif args.command == "records":
         # Compact: the agent passes this batch on verbatim, so every byte is read and written again.
-        print(json.dumps(records(json.loads(Path(args.report).read_text()), args.schemas), separators=(",", ":"),
+        print(json.dumps(records(json.loads(Path(args.report).read_text(encoding="utf-8")), args.schemas), separators=(",", ":"),
                          ensure_ascii=False))
     elif args.command == "create":
-        print(json.dumps(create_document(json.loads(Path(args.report).read_text()), not args.no_button), indent=1,
+        print(json.dumps(create_document(json.loads(Path(args.report).read_text(encoding="utf-8")), not args.no_button), indent=1,
                          ensure_ascii=False))
     elif args.command == "document":
-        print(json.dumps(document(json.loads(Path(args.dataset).read_text()), json.loads(Path(args.report).read_text()),
+        print(json.dumps(document(json.loads(Path(args.dataset).read_text(encoding="utf-8")), json.loads(Path(args.report).read_text(encoding="utf-8")),
                                   args.doc, not args.no_button), separators=(",", ":"), ensure_ascii=False))
     else:
-        data = merge(json.loads(Path(args.data).read_text()), json.loads(Path(args.notes).read_text()))
+        data = merge(json.loads(Path(args.data).read_text(encoding="utf-8")), json.loads(Path(args.notes).read_text(encoding="utf-8")))
         out = Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
         page = out / "report.html"
-        page.write_text(report(data))
-        (out / "report.json").write_text(json.dumps(data, indent=1))
+        page.write_text(report(data), encoding="utf-8")
+        (out / "report.json").write_text(json.dumps(data, indent=1), encoding="utf-8")
         print(page.resolve())
         if not args.no_open:
             webbrowser.open(page.resolve().as_uri())
