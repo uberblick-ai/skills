@@ -278,7 +278,7 @@ def overview(home, groups, skills):
         f'<article class="qcard"><span class="lab">{e(q["label"])}</span><h3>{e(q["question"])}</h3><ul class="links">'
         + ''.join(f'<li><span class="tag">{e(t)}</span><a href="{e(h)}">{e(n)}</a></li>' for t, n, h in q['links'])
         + '</ul></article>' for q in home['questions'])
-    changes = ''.join(f'<li><time>{d}</time><span class="tag">{e(t)}</span><span>{e(x)}</span></li>' for d, t, x in home['changes'])
+    changes = ''.join(f'<li><time>{d}</time><span class="tag">{e(t)}</span><span>{e(x)}</span></li>' for d, t, x in home['changes'][:5])
     skill_links = ''.join(f'<li><a href="skills/{s["slug"]}">{s["slug"]}</a></li>' for s in skills)
     return head('uberblick skills', TAGLINE, f'{SITE}/', '') + header('', skills) + f'''
 <div class="layout">
