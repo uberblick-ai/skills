@@ -9,7 +9,7 @@ Standard library only:
 
 Every skill under skills/<group>/<name>/ gets a page from its SKILL.md. The
 optional site/content/skills/<name>.json adds the question it answers, example
-asks, steps, screenshots and requirements; without it the page still builds
+asks, steps, an example session, screenshots and requirements; without it the page still builds
 from the frontmatter. Group names and descriptions come from each group's
 README.md, plugins from .claude-plugin/marketplace.json, the overview's text
 from site/content/home.json. Files in site/static (favicons, the Pages _headers
@@ -243,6 +243,21 @@ def shot(image, caption, pre, eager=False):
             f'<img class="d" src="{pre}img/{image}-dark.webp" alt="" width="2400"{lazy}>'
             f'<figcaption>{e(caption)}</figcaption></figure>')
 
+def example(x):
+    """A trimmed agent session: commands, replies and one interactive question."""
+    out = []
+    for t in x['turns']:
+        if 'cmd' in t:
+            out.append(f'<div class="t-cmd">{e(t["cmd"])}</div>')
+        elif 'ask' in t:
+            opts = ''.join(f'<li{" class=on" if i == t.get("chosen") else ""}><b>{e(a)}</b>{f"<span>{e(b)}</span>" if b else ""}</li>'
+                           for i, (a, b) in enumerate(t['options']))
+            out.append(f'<div class="t-ask"><p>{t["ask"]}</p><ol>{opts}</ol></div>')
+        else:
+            out.append(f'<p class="t-say">{t["say"]}</p>')
+    return (f'<figure class="shot term"><div class="bar"><span>{e(x.get("title", "agent session"))}</span></div>'
+            f'<div class="t-body">{"".join(out)}</div><figcaption>{e(x["caption"])}</figcaption></figure>')
+
 # ---------- Pages ----------
 
 def overview(home, groups, skills):
@@ -326,6 +341,8 @@ def skill_page(s, groups, skills):
         steps = ''.join(f'<li>{t}</li>' for t in s.get('steps', []))
         secs.append(f'<section class="sk-sec"><h2>Use it</h2><p>Ask your agent in plain words. Any of these will do:</p>'
                     f'<ul class="asks">{asks}</ul><ol class="steps">{steps}</ol></section>')
+    if s.get('example'):
+        secs.append(f'<section class="sk-sec"><h2>Example</h2>{example(s["example"])}</section>')
     if s.get('facts'):
         facts = ''.join(f'<div><dt>{e(a)}</dt><dd>{e(b)}</dd></div>' for a, b in s['facts'])
         secs.append(f'<section class="sk-sec"><h2>{e(s.get("facts_title", "Details"))}</h2><dl class="facts">{facts}</dl></section>')
