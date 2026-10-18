@@ -10,9 +10,29 @@
   "steps": [
     "Reads how the repository runs its loop: <code>ub-agents.yaml</code>, <code>AGENTS.md</code> and each agent's instructions, so labels, roles and merge policy come from your setup, not the defaults.",
     "Lists stopped items with <code>ub-agents status</code>, highest priority and longest waiting first: items with a stop label such as <code>needs-human</code>, and blocked or failed runs.",
-    "Takes one item at a time and asks with an interactive prompt that stands on its own (see below).",
+    "Takes one item at a time and asks with an interactive prompt that stands on its own (see the example below).",
     "Says exactly what it will change, then posts your answer and swaps the stop label for the label of the role that acts next. It can also merge a PR at the reviewed commit, approve, retry or close."
   ],
+  "example": {
+    "title": "claude · uberblick-2",
+    "caption": "A run in uberblick-ai/uberblick-2, trimmed to the first item.",
+    "turns": [
+      {"cmd": "/ub-agents-unblock"},
+      {"say": "Four issues wait on a decision (#1887, #1871, #1847, #1850). Four more are blocked and need nothing from you. Starting with #1887, the highest priority."},
+      {"say": "The agent asks whether to leave the hub-to-local case out of #1887. I agree: it is rare and would bloat a focused security fix. It can be filed separately."},
+      {
+        "ask": "<a href=\"https://github.com/uberblick-ai/uberblick-2/issues/1887\">https://github.com/uberblick-ai/uberblick-2/issues/1887</a> stops a repo's <code>.uberblick.json</code> from silently syncing your replica with a different hub. When the record says hub but the binding says local, how should the refusal handle it?",
+        "options": [
+          ["1A (Recommended)", "Leave hub-to-local out. The refusal points back to the recorded selection."],
+          ["1B", "Add a hub-to-local command to #1887. Makes the issue bigger."],
+          ["Skip", "Change nothing on #1887 for now."],
+          ["Type something.", ""]
+        ],
+        "chosen": 0
+      },
+      {"say": "Commented 1A on #1887, removed <code>needs-human</code> and added <code>needs-preparation</code>. The issue preparer picks it up next. On to #1871."}
+    ]
+  },
   "facts_title": "What each question shows",
   "facts": [
     ["Link", "the issue or PR as a clickable GitHub URL"],

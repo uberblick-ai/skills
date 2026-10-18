@@ -68,6 +68,20 @@ img { max-width: 100%; display: block }
 .shot .d { display: none }
 .shot img { width: 100%; height: auto }
 .shot figcaption { font-size: 12.5px; color: var(--muted); padding: 8px 12px; border-top: 1px solid var(--line) }
+.term .t-body { padding: 14px 16px; display: grid; gap: 12px; font: 13px/1.55 var(--mono) }
+.term p { margin: 0 }
+.t-cmd { background: var(--code); border-radius: 4px; padding: 3px 8px }
+.t-cmd::before { content: "\276F  "; color: var(--muted) }
+.t-say { padding-left: 16px; text-indent: -16px }
+.t-say::before { content: "\25CF  "; color: var(--accent) }
+.t-ask { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 10px 0 }
+.t-ask > p { border-left: 2px solid var(--accent); padding-left: 10px; font-weight: 600 }
+.t-ask ol { margin: 10px 0 0; padding-left: 40px; display: grid; gap: 4px }
+.t-ask li::marker { color: var(--muted) }
+.t-ask li.on, .t-ask li.on::marker { color: var(--accent) }
+.t-ask li span { display: block; color: var(--muted) }
+.t-ask li.on b::after { content: "  \2190  chosen"; font-weight: 400; color: var(--muted) }
+.term code { background: none; padding: 0; color: var(--accent); white-space: nowrap }
 
 .kicker { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px }
 h2.h { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 18px; text-wrap: balance }
