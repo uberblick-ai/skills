@@ -12,7 +12,7 @@
     "Names a cause for every delivery that needed a person, every wasted run and every reviewer send-back, from run summaries, denied commands and retrospectives.",
     "Proposes at most four changes, each giving clearer authority, better wording, fewer instructions or more autonomy. It never adds a role, label, gate or checklist.",
     "Renders the report, opens it in your browser and leaves a JSON record of the day next to it.",
-    "With the Uberblick MCP server, stores the day in a <em>Delivery report</em> document, so KPIs and recurring causes show up over time, with the open actions as cards that each have a button to discuss them in Claude Code."
+    "With the Uberblick MCP server, stores the day in a <em>Delivery report</em> document, so KPIs and recurring causes show up over time, with the open actions as cards that each have a button to discuss them in Claude Code. When the document stops short of yesterday, it reports every missing day, oldest first; without a document it reports yesterday alone."
   ],
   "facts_title": "What it measures",
   "facts": [

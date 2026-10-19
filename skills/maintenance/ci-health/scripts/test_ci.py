@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from urllib.parse import unquote
 import sys
 
@@ -352,6 +353,17 @@ for line in sys.stdin:
         headings = [b["text"] for b in doc["blocks"] if b["type"] == "heading"]
         self.assertEqual(headings, ["Recommended Actions", "Incidents"], "actions above the incidents")
         self.assertEqual(len([b for b in doc["blocks"] if b["type"] == "card"]), 2)
+
+    def test_after_fills_every_day_since_the_newest_stored_one(self):
+        yesterday = ci.dt.date(2026, 10, 18)
+        stored = {"records": [{"id": "2026-10-14", "value": {"day": "2026-10-14"}},
+                              {"id": "2026-10-12", "value": {"day": "2026-10-12"}}, {"id": "notes", "value": {}}]}
+        self.assertEqual(ci.after(ci.stored_days(stored), yesterday), ci.dt.date(2026, 10, 15), "three days missing")
+        self.assertEqual(ci.after([], yesterday), yesterday, "no corpus: the last day alone")
+        self.assertEqual(ci.after([yesterday], yesterday), yesterday, "nothing missing: the last day again")
+        with mock.patch("sys.stderr"):
+            self.assertEqual(ci.after([ci.dt.date(2026, 1, 1)], yesterday), ci.dt.date(2026, 7, 21),
+                             "no further back than GitHub keeps job logs")
 
 
 if __name__ == "__main__":

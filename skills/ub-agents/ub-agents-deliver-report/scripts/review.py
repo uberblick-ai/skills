@@ -2,11 +2,12 @@
 """Facts, the page and the dataset records for the ub-agents-deliver-report skill. Reads GitHub only;
 standard library and `gh`.
 
+    review.py missing days.json                                 # the days to report: the gap since the newest stored day
     review.py collect --repo OWNER/NAME [--day YYYY-MM-DD] > data.json
     review.py digest data.json                                  # the day in a few lines per item, to read first
     review.py render data.json notes.json OUT_DIR [--no-open]   # writes report.html and report.json
     review.py records report.json [--schemas] > operations.json # update_data operations for the day
-    review.py document dataset.json report.json [--doc UUID] [--no-button] > sections.json  # Actions, Changelog
+    review.py document dataset.json report.json [--doc UUID] [--since DAY] [--no-button] > sections.json  # Actions, Changelog
     review.py create report.json [--no-button] > create.json    # create_doc arguments for a new dataset document
     review.py queue --repo OWNER/NAME [--day YYYY-MM-DD]         # only the open-queue figures for a day
 
@@ -128,6 +129,20 @@ def day_window(text):
     day = dt.date.fromisoformat(text) if text else dt.datetime.now(zone).date() - dt.timedelta(days=1)
     since = dt.datetime.combine(day, dt.time.min, zone)
     return day, zone, since, since + dt.timedelta(days=1)
+
+
+def missing(stored, yesterday):
+    """The days to report, oldest first: every day after the newest stored one up to yesterday, so a run fills the
+    days nobody reported. With no day stored, or none missing, yesterday alone."""
+    days = []
+    for key, value in values(stored).items():
+        try:
+            days.append(dt.date.fromisoformat((value or {}).get("day") or key))
+        except (TypeError, ValueError):
+            continue
+    first = max(days) + dt.timedelta(days=1) if days else yesterday
+    return [(first + dt.timedelta(days=n)).isoformat() for n in range((yesterday - first).days + 1)] or \
+        [yesterday.isoformat()]
 
 
 def labels(text):
@@ -929,12 +944,14 @@ def action_card(data, lesson, doc=None, button=True):
                                     + f"\n{inline(lesson['change'])}"}
 
 
-def document(dataset, data, doc=None, button=True):
+def document(dataset, data, doc=None, button=True, first=None):
     """The dataset document's generated sections as insert_block arguments: the Recommended Actions (up to five
     proposed lessons, as cards) and the Changelog (the latest changes). `cards` names each card's lesson and whether
     this day changed it, and `changelog_new` counts the changelog items this day added, so the document changes
-    block by block. Recent days is a table block bound to the data. See references/report.md."""
-    today = {l["id"] for l in data["lessons"]}
+    block by block. After a backfill, `first` is its first day: what the days from then on changed counts as new.
+    Recent days is a table block bound to the data. See references/report.md."""
+    today = {l["id"] for l in data["lessons"]} | {
+        k for k, l in values(dataset.get("lessons")).items() if first and l.get("day", "") >= first}
     # The day's notes are newer than any registry read, before or after the day was stored.
     lessons = values(dataset.get("lessons")) | {l["id"]: l | {"day": data["day"]} for l in data["lessons"]}
     ranked = data.get("actions") or sorted((i for i, l in lessons.items() if l.get("state") == "proposed"),
@@ -961,7 +978,8 @@ def document(dataset, data, doc=None, button=True):
                       for key in current]
                      + [{"lesson": key, "title": f"~~{inline(lessons[key]['title'])}~~", "changed": key in today,
                          "struck": True} for key in tracked],
-            "changelog_new": sum(ref in {c["ref"] for c in data.get("changes", [])} for ref in latest)}
+            "changelog_new": sum(ref in {c["ref"] for c in data.get("changes", [])}
+                                 or bool(first and changes[ref]["day"] >= first) for ref in latest)}
 
 
 KPIS = [("Autonomous deliveries", "up", "autonomous_pct", "Loop deliveries the integrator merged with no wasted run, "
@@ -1050,6 +1068,8 @@ def create_document(data, button=True):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
+    m = commands.add_parser("missing", help="the days to report, one a line: every day after the newest stored one")
+    m.add_argument("days", help="the document's days collection as get_data returned it; a missing file means none")
     c = commands.add_parser("collect")
     c.add_argument("--repo", required=True)
     c.add_argument("--day", help="calendar day, YYYY-MM-DD, local time (default yesterday)")
@@ -1069,12 +1089,20 @@ def main():
     d.add_argument("dataset", help="the registry lessons the actions name that the notes leave out, as read with get_data")
     d.add_argument("report", help="report.json written by render")
     d.add_argument("--doc", help="the dataset document's uuid, named in each action card's prompt")
+    d.add_argument("--since", help="the first day of a backfill: changes and lessons from then on count as new")
     d.add_argument("--no-button", action="store_true", help="cards without the Claude Code button, for Uberblick 0.4.3")
     n = commands.add_parser("create")
     n.add_argument("report", help="report.json written by render")
     n.add_argument("--no-button", action="store_true", help="cards without the Claude Code button, for Uberblick 0.4.3")
     args = parser.parse_args()
-    if args.command == "collect":
+    if args.command == "missing":
+        path = Path(args.days)
+        try:
+            stored = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        except ValueError as e:
+            sys.exit(f"{path}: {e}")
+        print("\n".join(missing(stored, day_window(None)[0])))
+    elif args.command == "collect":
         print(json.dumps(collect(args.repo, *day_window(args.day)), indent=1))
     elif args.command == "queue":
         day, _, since, until = day_window(args.day)
@@ -1092,7 +1120,7 @@ def main():
                          ensure_ascii=False))
     elif args.command == "document":
         print(json.dumps(document(json.loads(Path(args.dataset).read_text(encoding="utf-8")), json.loads(Path(args.report).read_text(encoding="utf-8")),
-                                  args.doc, not args.no_button), separators=(",", ":"), ensure_ascii=False))
+                                  args.doc, not args.no_button, args.since), separators=(",", ":"), ensure_ascii=False))
     else:
         data = merge(json.loads(Path(args.data).read_text(encoding="utf-8")), json.loads(Path(args.notes).read_text(encoding="utf-8")))
         out = Path(args.out)

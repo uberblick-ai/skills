@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Facts and the dataset records for the ci-health skill. Reads GitHub Actions only; standard library and `gh`.
 
-    ci.py collect --repo OWNER/NAME [--day D | --since D [--until D]] [--workflow W] [--start D] > data.json
+    ci.py collect --repo OWNER/NAME [--day D | --since D [--until D] | --after days.json] [--workflow W] [--start D] > data.json
     ci.py shifts data.json [--limit 5]                 # candidate incidents: steps in wall time, and hangs
     ci.py logs data.json --out DIR [--day DAY]         # a day's job logs, cleaned, to find the test summary line
     ci.py tests data.json --pattern REGEX...           # each day's test count from that line, added in place
@@ -41,6 +41,7 @@ from urllib.parse import quote
 SCHEMA = "ci-health/1"
 WINDOW = 7  # rolling median over this many days, the headline
 LOOKBACK = 21  # days of commits read before the first day: the rolling median and step detection need them
+LOG_DAYS = 90  # GitHub keeps job logs this long, so a backfill reaches no further back
 LOG = re.compile(r"^﻿?\d{4}-\d\d-\d\dT[\d:.]+Z ?")
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
@@ -134,8 +135,35 @@ def job_log(repo, job_id):
     return data.decode(errors="replace")
 
 
+def stored_days(collection):
+    """The days a document holds, from its `days` collection as get_data returns it or a list of records."""
+    rows = collection.get("records", []) if isinstance(collection, dict) else collection or []
+    days = []
+    for r in rows:
+        try:
+            days.append(dt.date.fromisoformat((r.get("value") or {}).get("day") or r.get("id")))
+        except (TypeError, ValueError):
+            continue
+    return days
+
+
+def after(days, yesterday):
+    """The first day to collect after the stored ones: the day after the newest, so every day since is filled in,
+    but no earlier than GitHub's log retention. With no day stored, or none missing, yesterday alone."""
+    if not days:
+        return yesterday
+    first = max(max(days) + dt.timedelta(days=1), yesterday - dt.timedelta(days=LOG_DAYS - 1))
+    if first > max(days) + dt.timedelta(days=1):
+        print(f"collect: the newest stored day is {max(days)}; GitHub keeps job logs {LOG_DAYS} days, so the "
+              f"backfill starts {first}", file=sys.stderr)
+    return min(first, yesterday)
+
+
 def window(args):
     yesterday = dt.datetime.now(dt.timezone.utc).date() - dt.timedelta(days=1)
+    if args.after:
+        path = Path(args.after)
+        return after(stored_days(load(path)) if path.exists() else [], yesterday), yesterday
     if args.day:
         first = last = dt.date.fromisoformat(args.day)
     else:
@@ -935,6 +963,8 @@ def main():
     c.add_argument("--day", help="one UTC day, YYYY-MM-DD (default yesterday)")
     c.add_argument("--since", help="first UTC day of a backfill")
     c.add_argument("--until", help="last UTC day of a backfill (default yesterday)")
+    c.add_argument("--after", help="the document's days collection from get_data: collect every day after the newest "
+                                   "one up to yesterday, or yesterday alone when none is missing")
     c.add_argument("--workflow", action="append", default=[],
                    help="count only commits that ran this workflow (repeatable); default every push workflow")
     c.add_argument("--start", type=dt.date.fromisoformat,
@@ -988,8 +1018,8 @@ def main():
     u.add_argument("--checkout", default=".", help="a checkout bound to the workspace (default here)")
     args = parser.parse_args()
     if args.command == "collect":
-        if args.day and (args.since or args.until):
-            sys.exit("--day and --since/--until do not combine")
+        if sum(map(bool, (args.day, args.since or args.until, args.after))) > 1:
+            sys.exit("--day, --since/--until and --after do not combine")
         if not re.fullmatch(r"[\w.-]+/[\w.-]+", args.repo):
             sys.exit(f"--repo {args.repo}: expected OWNER/NAME")
         try:
