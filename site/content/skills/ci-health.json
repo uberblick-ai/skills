@@ -9,7 +9,7 @@
     "Record yesterday's CI figures in the CI Health Report."
   ],
   "steps": [
-    "Reads GitHub Actions runs on the default branch, grouped by commit, for a UTC day or a backfill of up to 90 days.",
+    "Reads GitHub Actions runs on the default branch, grouped by commit, for every UTC day since the last one in the CI Health Report, up to 90 days back, or yesterday alone when nothing is stored yet.",
     "Takes the median wall time of green pushes, a 7-day median as the headline with its spread and P95, and the share of run attempts that failed, re-runs included.",
     "Reads the test count off the job logs, with patterns the agent writes for whatever runners the repository uses.",
     "Optionally measures the test-to-code ratio over the main source directories, comments left out, and coverage when the repository defines <code>mise run codecov</code>.",

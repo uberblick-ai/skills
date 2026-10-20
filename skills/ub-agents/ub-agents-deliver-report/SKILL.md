@@ -1,13 +1,14 @@
 ---
 name: ub-agents-deliver-report
 description: >-
-  Report one calendar day of ub-agents loop deliveries in a GitHub repository
+  Report a calendar day of ub-agents loop deliveries in a GitHub repository
   when a maintainer asks: how many items the loop delivered on its own, which
   runs were wasted, where a person had to step in, the causes behind them and
   the few changes that would have saved runs. Writes an HTML report, opens it
   in the browser, leaves a JSON record of the day and can store the day in an
-  Uberblick document's data to track KPIs over time. Do not use for a loop
-  role, a PR review or a merge gate.
+  Uberblick document's data to track KPIs over time, filling in every day
+  missing since the last one stored. Do not use for a loop role, a PR review
+  or a merge gate.
 license: MIT
 compatibility: >-
   Requires python3 and an authenticated GitHub CLI (gh); reads GitHub only.
@@ -15,7 +16,7 @@ compatibility: >-
   uberblick MCP server; without it the skill still writes the page.
 metadata:
   author: uberblick-ai
-  version: "1.4"
+  version: "1.5"
 ---
 
 # Deliver report
@@ -23,6 +24,8 @@ metadata:
 The loop should move work forward alone and ask a person only for a real
 decision. This report measures how close one day came, names the causes, and
 keeps both over time so a fix that holds and a cause that returns are visible.
+When the stored days stop short of yesterday, it reports each missing day, so
+the history has no gaps.
 
 `scripts/review.py` lives next to this file; call it by its path inside this
 skill's directory. `REPO` is the `OWNER/NAME` of the repository the loop runs
@@ -30,27 +33,10 @@ on, `DIR` a scratch directory outside the repository. The KPIs, the cause
 classes, the page and the records are defined in
 [references/report.md](references/report.md).
 
-1. Collect, then read the digest:
-
-   ```sh
-   python3 scripts/review.py collect --repo REPO > DIR/data.json
-   python3 scripts/review.py digest DIR/data.json
-   ```
-
-   The day is a calendar day in local time, midnight to midnight; the default
-   is yesterday, `--day 2026-10-07` picks another. Only runs that started
-   before the day ended count, so a day reads the same whenever it is
-   collected. The digest gives every run of each item that needs a cause with
-   its summary and denials, the evidence the runs leave out (commits pushed
-   outside any run, label and state changes by a person, CI runs on its PRs),
-   one line per item that went through cleanly, and the day's
-   retrospectives. Work from it; open `data.json` only for a field it leaves
-   out.
-
-2. Decide where the day will be kept. Uberblick is available when the
-   `uberblick` MCP tools (`search`, `get_doc`, `get_data`, `update_data`,
-   `create_doc`, `insert_block`, `edit_block`, `delete_block`) are in your
-   tool list.
+1. Decide where the days will be kept and which days to report. Uberblick
+   is available when the `uberblick` MCP tools (`search`, `get_doc`,
+   `get_data`, `update_data`, `create_doc`, `insert_block`, `edit_block`,
+   `delete_block`) are in your tool list.
    Without them, the page is the whole result: steps 3 and 4 name causes and
    lessons from this day alone, since there is no registry to reuse; skip
    steps 6 and 7, say so in one line of the reply, and add that
@@ -62,6 +48,44 @@ classes, the page and the records are defined in
    anything. Step 7 reuses this read. When no such document exists, ask the maintainer once whether to
    create the delivery report document, and carry on with the page while
    waiting: a yes creates `DOC` in step 6, a no skips steps 6 and 7.
+
+   With `DOC`, read its `days` with `get_data` too, save the result as
+   `DIR/days.json` and list the days to report:
+
+   ```sh
+   python3 scripts/review.py missing DIR/days.json
+   ```
+
+   It prints every day after the newest stored one up to yesterday, oldest
+   first, so a run fills in each day nobody reported: three days missing
+   means three days reported. With nothing missing it prints yesterday, which
+   is reported again. Without `DOC`, for a document created in step 6, when
+   the maintainer names a day, or when they ask for the page only, report
+   one day: the one named, or yesterday.
+
+2. Collect each day, then read its digest:
+
+   ```sh
+   mkdir -p DIR/DAY
+   python3 scripts/review.py collect --repo REPO --day DAY > DIR/DAY/data.json
+   python3 scripts/review.py digest DIR/DAY/data.json
+   ```
+
+   The day is a calendar day in local time, midnight to midnight; without
+   `--day` it is yesterday. Only runs that started
+   before the day ended count, so a day reads the same whenever it is
+   collected, and a missed day can be filled in later. The digest gives every run of each item that needs a cause with
+   its summary and denials, the evidence the runs leave out (commits pushed
+   outside any run, label and state changes by a person, CI runs on its PRs),
+   one line per item that went through cleanly, and the day's
+   retrospectives. Work from it; open `data.json` only for a field it leaves
+   out.
+
+   Steps 2 to 6 run once per day, oldest first, each day in its own
+   `DIR/DAY`, so a day reuses the causes and lessons the days before it
+   registered. Keep the step 1 read current with what each stored day adds
+   rather than reading the registry again. Step 7 runs once, after the
+   newest day.
 
 3. For each loop delivery that is not autonomous, each wasted run and each
    reviewer send-back, name the cause from run summaries, the evidence, denied
@@ -86,16 +110,17 @@ classes, the page and the records are defined in
    most runs saved first, as the day's `actions`; re-propose an older lesson
    when the day shows it again.
 
-5. Write `DIR/notes.json` in the shape `references/report.md` gives (headline,
+5. Write `DIR/DAY/notes.json` in the shape `references/report.md` gives (headline,
    one note per item, findings, lessons, actions, changes, retrospective
    groups) and render:
 
    ```sh
-   python3 scripts/review.py render DIR/data.json DIR/notes.json DIR
+   python3 scripts/review.py render DIR/DAY/data.json DIR/DAY/notes.json DIR/DAY
    ```
 
-   This checks the notes, writes `DIR/report.html` and `DIR/report.json` and
-   opens the page in the default browser. Pass `--no-open` where there is no
+   This checks the notes, writes `DIR/DAY/report.html` and `DIR/DAY/report.json` and
+   opens the page in the default browser. Pass `--no-open` for every day but
+   the newest, and where there is no
    browser, such as a remote session, and give the path or publish the page
    instead.
 
@@ -103,7 +128,7 @@ classes, the page and the records are defined in
    maintainer said yes to a new document:
 
    ```sh
-   python3 scripts/review.py create DIR/report.json > DIR/create.json
+   python3 scripts/review.py create DIR/DAY/report.json > DIR/create.json
    ```
 
    Pass the file's `title`, `description` and `blocks` to `create_doc`; the
@@ -113,7 +138,7 @@ classes, the page and the records are defined in
    with `--no-button`. Then, with `DOC`:
 
    ```sh
-   python3 scripts/review.py records DIR/report.json > DIR/operations.json
+   python3 scripts/review.py records DIR/DAY/report.json > DIR/DAY/operations.json
    ```
 
    Pass the file's array as `operations` to `update_data` on `DOC`, then read
@@ -128,19 +153,22 @@ classes, the page and the records are defined in
 7. With a `DOC` that existed before this run, bring its Recommended Actions
    and Changelog up to date (a document created in step 6 already carries
    them). Write `DIR/dataset.json` as `{"lessons": [...]}`: the registry
-   lessons the day's `actions` name and the `tracked` ones from the last 14
-   days, those `notes.json` leaves out, each as `{id, value}` from the step 2
-   read. `document` stops if one is missing.
+   lessons the newest day's `actions` name and the `tracked` ones from the last 14
+   days, those its `notes.json` leaves out, each as `{id, value}` from the step 1
+   read. `document` stops if one is missing. After more than one day, read
+   `lessons` and `changes` again with `get_data` instead and write both,
+   `{"lessons": ..., "changes": ...}`, as returned, so the earlier days'
+   lessons and changes show too, and pass the first day reported as `--since`.
    Then:
 
    ```sh
-   python3 scripts/review.py document DIR/dataset.json DIR/report.json --doc DOC > DIR/sections.json
+   python3 scripts/review.py document DIR/dataset.json DIR/DAY/report.json --doc DOC [--since FIRST] > DIR/sections.json
    ```
 
    Read `DOC` with `get_doc` and change only the blocks that differ, one
    block at a time; never rewrite a whole section. Under "Recommended
    Actions", `cards` lists the cards in order, each with its title and
-   whether this day changed its lesson, and `actions` holds their blocks
+   whether the days reported changed its lesson, and `actions` holds their blocks
    after the intro paragraph:
 
    - Delete a card whose title is not in `cards`.
@@ -164,7 +192,9 @@ classes, the page and the records are defined in
    (0.4.3 has no card buttons), run `document` again with `--no-button`. The
    charts and the Recent days table follow the data by themselves.
 
-8. Reply with the headline, the KPIs against their targets, one line per
-   change, and where the day was stored or why it was not. The page and the
+8. Reply with the newest day's headline, the KPIs against their targets, one
+   line per change, and where the days were stored or why they were not. For
+   each earlier day filled in, add one line: the day, its headline and its
+   autonomous and wasted share. The page and the
    records may be shared: keep credentials, local paths and hostnames out of
    the notes.
