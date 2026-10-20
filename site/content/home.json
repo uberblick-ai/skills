@@ -18,6 +18,7 @@
     {"label": "Contribute", "question": "How do I write a skill for this repository?", "links": [["Guide", "AGENTS.md", "https://github.com/uberblick-ai/skills/blob/main/AGENTS.md"], ["Spec", "Agent Skills specification", "https://agentskills.io/specification"]]}
   ],
   "changes": [
+    ["2026-10-20", "Skill", "ub-agents-flow 0.1: a one or two page report on how your loop runs, drawn with ablauf, with every gate numbered and traced to its source."],
     ["2026-10-19", "Skill", "ub-agents-deliver-report 1.5 and ci-health 1.6: a run fills in every day missing since the last one stored, not just yesterday."],
     ["2026-10-18", "Site", "The ub-agents-unblock page shows a short example run: the overview, one question with its recommendation, and what changed on GitHub."],
     ["2026-10-16", "Skill", "ub-agents-deliver-report 1.4 and backlog-grooming 1.2: report pages declare UTF-8, so umlauts and dashes show correctly when the page is opened from disk."],

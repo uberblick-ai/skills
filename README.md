@@ -44,6 +44,7 @@ the full list.
 Skills for repositories that run the [ub-agents](https://agents.uberblick.ai) loop. Plugin: `ub-agents`.
 
 - **[ub-agents-deliver-report](skills/ub-agents/ub-agents-deliver-report/SKILL.md)**: Report one calendar day of loop deliveries: how many the loop delivered on its own, which runs were wasted, where a person stepped in, the causes and the few changes that would have saved runs. Opens the report in your browser and leaves a JSON record of the day. Needs only `python3` and an authenticated `gh`; with the Uberblick MCP server it also stores each day in an Uberblick document to track KPIs over time.
+- **[ub-agents-flow](skills/ub-agents/ub-agents-flow/SKILL.md)**: Explain how the loop runs in your repository on one or two pages: the workflow from `ub-agents.yaml` drawn with [ablauf](https://ablauf.uberblick.ai), every gate that holds work back numbered and highlighted, with what passes and holds it and the line of the config or agent instructions it comes from, plus the roles, limits and policy. Reads only; needs `python3` and Node.js 22.18+.
 - **[ub-agents-unblock](skills/ub-agents/ub-agents-unblock/SKILL.md)**: Go through the issues and pull requests the loop stopped with `needs-human`, one at a time: the skill recommends a decision from the item and your repository's agent guidance, asks you with an interactive prompt, then posts your answer and resumes, merges or closes the item. Needs only an authenticated `gh`.
 
 ### [Maintenance](skills/maintenance/README.md)
