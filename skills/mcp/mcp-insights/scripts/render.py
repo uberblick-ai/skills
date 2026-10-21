@@ -1089,9 +1089,13 @@ def score_categories(results: dict) -> dict:
         raw = sum(row[2] * res["score"] for row, res in applicable) / total_w
         score = round(raw * 100)
         # A critical audit caps on any failed item, not only on a failing average:
-        # one silent truncation or one read tool that writes is enough.
-        capped = [row[0] for row, res in applicable if row[0] in CRITICAL
-                  and (res["score"] < 0.1 or any(it.get("score") == 0 for it in res.get("items") or []))]
+        # one silent truncation or one read tool that writes is enough. A critical
+        # metric caps at twice its poor mark (a 64k-token response fills a third of a 200k context).
+        def critical_fail(code, res):
+            if code in BUDGETS and res.get("effective", res.get("value")) is not None:
+                return res.get("effective", res.get("value")) >= 2 * BUDGETS[code][1]
+            return res["score"] < 0.1 or any(it.get("score") == 0 for it in res.get("items") or [])
+        capped = [row[0] for row, res in applicable if row[0] in CRITICAL and critical_fail(row[0], res)]
         if capped:
             score = min(score, 49)
         cats[key] = {"score": score, "name": name, "question": question, "capped_by": capped, "weight": total_w}
@@ -1292,7 +1296,7 @@ def render_html(report: dict) -> str:
                + (f'<span class="pin" style="left:{pos:.1f}%"></span>' if value is not None else "") + "</div>")
         vitals.append(f'<div class="vital {b}"><div class="vital-label">{shape(b)}<span class="grow">{esc(label)}</span>'
                       f'{info_html(label, info, fmt_budget(code))}</div>'
-                      f'<div class="vital-value">{value_html(value, unit)}</div>'
+                      f'<div class="vital-value">{"none sent" if code == "C02" and m.get("instructions_bytes") is None else value_html(value, unit)}</div>'
                       f'<div class="vital-where">{esc(where)}</div>{bar}'
                       f'<div class="vital-budget">{esc(fmt_budget(code))}</div></div>')
 
@@ -1600,8 +1604,38 @@ def trials_html(trials: dict | None, results: dict) -> str:
             f'<div class="trials">{"".join(cards)}</div>{legend}</details>')
 
 
+def backfill_call_text(probe: dict, transcript: Path) -> None:
+    """Older probes kept only the size of the whole result; recover the content text from the call transcript."""
+    calls = [c for c in probe.get("calls") or [] if "bytes" in c and "tokens" not in c]
+    if not calls or not transcript.exists():
+        return
+    asked, answers = [], {}
+    for line in transcript.open(encoding="utf-8"):
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        msg = rec.get("msg")
+        if not isinstance(msg, dict):
+            continue
+        if rec.get("dir") == "out" and msg.get("method") == "tools/call":
+            asked.append((msg.get("id"), (msg.get("params") or {}).get("name"), (msg.get("params") or {}).get("arguments") or {}))
+        elif rec.get("dir") == "in" and "id" in msg:
+            answers[msg["id"]] = msg
+    for c in calls:
+        hit = next((a for a in asked if a[1] == c["tool"] and a[2] == (c.get("arguments") or {})), None)
+        if hit is None:
+            continue
+        asked.remove(hit)
+        res = (answers.get(hit[0]) or {}).get("result") or {}
+        text = "\n".join(str(x.get("text", "")) for x in res.get("content") or [] if isinstance(x, dict) and x.get("type") == "text")
+        c["text_bytes"] = len(text.encode("utf-8"))
+        c["tokens"] = estimate_tokens(text)
+
+
 def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) -> dict:
     probe = json.loads((dir_ / "probe.json").read_text(encoding="utf-8"))
+    backfill_call_text(probe, dir_ / "transcript-calls.jsonl")
     findings = {}
     fp = findings_path or (dir_ / "findings.json")
     if fp and fp.exists():
