@@ -180,39 +180,8 @@
       ]
     }
   ],
-  "settings": [
-    {
-      "name": "max-attempts",
-      "value": "5",
-      "meaning": "Failed runs in a row before the item is marked failed."
-    },
-    {
-      "name": "retry-backoff-seconds",
-      "value": "60 to 3600",
-      "meaning": "Wait before a retry, doubling up to max-backoff-seconds."
-    },
-    {
-      "name": "agent-timeout-minutes",
-      "value": "180",
-      "meaning": "Per run; the preparer and integrator get 60, the reviewer 120."
-    },
-    {
-      "name": "queue",
-      "value": "milestones: order",
-      "meaning": "Earlier milestones first, then priority:urgent to priority:low (default medium)."
-    },
-    {
-      "name": "approvals",
-      "value": "unset",
-      "meaning": "On while the repository is public: only a maintainer's trigger label starts work."
-    },
-    {
-      "name": "different-runtime-from",
-      "value": "reviewer: implementer",
-      "meaning": "The reviewer never runs on the implementer's CLI and model."
-    }
-  ],
   "notes": [
+    "`queue.milestones: order` Priority always wins; at equal priority, issues from earlier milestones, in alphabetical order of their titles, go first. [Queue: Milestones](https://agents.uberblick.ai/docs/configuration/queue.html#milestones)",
     "The implementer has no needs-human outcome: it stops by reporting blocked, which leaves an Action needed comment until a maintainer runs ub-agents retry."
   ]
 }

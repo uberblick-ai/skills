@@ -41,6 +41,12 @@ class PageTests(unittest.TestCase):
         self.data["phases"][1]["gates"].insert(0, "G2")
         self.assertIn("G2 is in no flow", page.validate(self.data, self.flows))
 
+    def test_a_gate_only_in_an_edge_label_is_not_drawn(self):
+        self.flows["Issue phase"] = self.flows["Issue phase"].replace(
+            '"G2 Clear and in scope?"', '"Clear and in scope?"').replace(
+            "g2 --> ready : prepared", "g2 --> ready : G2 prepared")
+        self.assertIn("G2 is in no flow", page.validate(self.data, self.flows))
+
     def test_every_role_and_gate_sits_in_one_phase(self):
         for change in (lambda d: d["phases"][1]["roles"].remove("reviewer"),
                        lambda d: d["phases"][0]["roles"].append("reviewer"),
@@ -71,6 +77,7 @@ class PageTests(unittest.TestCase):
             lambda d: d["gates"][1].update(id="G1"),
             lambda d: d["gates"][0].update(sources=[]),
             lambda d: d["gates"][0].pop("rule"),
+            lambda d: d.update(settings=[]),
             lambda d: d["roles"][0].update(outcomes={}),
             lambda d: d["roles"].append(copy.deepcopy(d["roles"][0])),
             lambda d: d.pop("phases"),
@@ -89,7 +96,8 @@ class PageTests(unittest.TestCase):
         self.assertIn("## Implementation and PR phase", md)
         self.assertIn("label: G4 · reviewer · agent decides\ntitle: Review\nfooter: "
                       "[.agents/reviewer.md:3-17](https://github.com/uberblick-ai/ub-agents/blob/a021eaa/.agents/reviewer.md#L3-L17)", md)
-        self.assertIn("| `max-attempts` | 5 | Failed runs in a row before the item is marked failed. |", md)
+        self.assertIn("## Notes\n\n- `queue.milestones: order` Priority always wins", md)
+        self.assertNotIn("Limits and policy", md)
 
     def test_table_cells_escape_pipes(self):
         self.data["roles"][0]["does"] = "Reads a | b"

@@ -69,9 +69,10 @@ legend
   a box for the work itself, such as `box implement "builds the one PR"`.
 - Every gate in `flow.json` appears in the drawing with its number as the
   first word of its text (`G2 ...`), as a `decision` with `tone=system`, or
-  inside the stop panel for a gate a person decides. A launcher gate that
-  applies to every run goes once, before the first agent, with an edge label
-  that says so.
+  inside the stop panel for a gate a person decides, never only in an edge
+  label, where it reads as a step rather than a check (`page.py` warns). A
+  launcher gate that applies to every run goes once, before the first agent,
+  with an edge label that says so.
 - Pills: the entry label `tone=muted`, labels that lead to the next agent
   `tone=agent` or `tone=done`, rework labels `tone=rework`, stop labels inside
   a `tone=stop` panel.

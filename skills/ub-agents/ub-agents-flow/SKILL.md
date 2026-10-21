@@ -4,8 +4,8 @@ description: >-
   Explain how the ub-agents loop runs in a GitHub repository as a short
   report in two phases, the issue phase and the implementation and PR phase:
   each drawn with ablauf, every gate that holds work back (from the config and
-  the agents' instruction files) numbered and highlighted, with the roles,
-  limits and policy. Writes Uberblick Markdown and a matching page to read or
+  the agents' instruction files) numbered and highlighted, with the roles
+  and the queue rules. Writes Uberblick Markdown and a matching page to read or
   print. Use when a maintainer asks how their loop works, what the flow or the
   gates look like, or wants an overview of the agents. Reads only. Not for a
   loop role.
@@ -78,8 +78,11 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
 3. Write `DIR/flow.json` as [references/page.md](references/page.md)
    describes: a three-sentence summary, the two phases with a sentence each
    and their roles and gates, every role, the gates in the order an item
-   meets them with one plain sentence each, the settings that change how work moves, and the notes from
-   step 2.
+   meets them with one plain sentence each, and the notes: first one per
+   `queue` setting in use, saying what it does and linking its section of
+   https://agents.uberblick.ai/docs/configuration/queue.html, then the
+   findings from step 2. Describe the queue as the launcher runs it; where
+   the repository's own instructions say otherwise, add that as a finding.
 
 4. Draw `DIR/issue.flow` and `DIR/pr.flow` as
    [references/flow.md](references/flow.md) describes, starting from
