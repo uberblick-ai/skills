@@ -27,7 +27,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-PROBE_VERSION = "0.2"
+PROBE_VERSION = "0.3"
+TOKEN_ESTIMATOR = "chars-2026-10-21"  # see estimate_tokens
 CLIENT_INFO = {"name": "mcp-insights", "version": PROBE_VERSION}
 REQUESTED_VERSION = "2025-11-25"
 MODERN_VERSION = "2026-07-28"
@@ -410,6 +411,7 @@ def list_all(conn, method: str, key: str):
     items, pages, cursors_seen, error = [], 0, set(), None
     cursor = None
     cache = None
+    repeated = False
     while pages < LIST_PAGE_LIMIT:
         params = {"cursor": cursor} if cursor else {}
         msg, ms = conn.request(method, params)
@@ -422,10 +424,15 @@ def list_all(conn, method: str, key: str):
             cache = {"ttlMs": res.get("ttlMs"), "cacheScope": res.get("cacheScope")}
         items.extend(res.get(key) or [])
         cursor = res.get("nextCursor")
-        if not cursor or cursor in cursors_seen:
+        if not cursor:
+            break
+        if cursor in cursors_seen:
+            repeated = True  # the server would page forever
             break
         cursors_seen.add(cursor)
-    return {"items": items, "pages": pages, "error": error, "cache": cache}
+    # Hitting the page limit with a cursor still pending means the list was cut short here.
+    return {"items": items, "pages": pages, "error": error, "cache": cache, "repeated_cursor": repeated,
+            "page_limit_hit": bool(cursor) and not repeated and pages >= LIST_PAGE_LIMIT}
 
 
 def size(obj) -> int:
@@ -483,6 +490,7 @@ def collect(args) -> int:
     transcript = Transcript(out / "transcript.jsonl")
     record: dict = {
         "probe_version": PROBE_VERSION,
+        "token_estimator": TOKEN_ESTIMATOR,
         "collected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "target": {"transport": "http" if args.url else "stdio",
                    "command": args.command, "url": args.url, "cwd": args.cwd,
@@ -548,6 +556,7 @@ def collect(args) -> int:
         record["tools_list_ms"] = int((time.monotonic() - t0) * 1000)
         record["tools"] = tools["items"]
         probes["tools_list"] = {"declared": "tools" in caps, "pages": tools["pages"], "error": tools["error"], "cache": tools["cache"],
+                                "repeated_cursor": tools["repeated_cursor"], "page_limit_hit": tools["page_limit_hit"],
                                 "stable_order": [t.get("name") for t in tools["items"]] == [t.get("name") for t in again["items"]]}
 
         for method, key, cap in (("resources/list", "resources", "resources"),
@@ -556,7 +565,7 @@ def collect(args) -> int:
             got = list_all(conn, method, key)
             record[key] = got["items"]
             probes[method] = {"declared": cap in caps, "pages": got["pages"], "error": got["error"], "count": len(got["items"]),
-                              "cache": got["cache"]}
+                              "cache": got["cache"], "repeated_cursor": got["repeated_cursor"], "page_limit_hit": got["page_limit_hit"]}
 
         reads = []
         for r in record["resources"][:RESOURCE_READ_LIMIT]:
@@ -668,19 +677,28 @@ def discover_first(args, out: Path) -> dict:
 
 
 def probe_origin(args):
-    """A request from a foreign Origin should be refused by a local server."""
-    headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
-               "Origin": "https://evil.example"}
+    """A request from a foreign Origin should be refused.
+
+    The configured headers go along, so a server that wants credentials judges the
+    Origin and not the missing key; without them a 401 says nothing about Origin checks.
+    """
+    headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+    auth = {}
+    for h in args.header or []:
+        name, _, value = h.partition(":")
+        auth[name.strip()] = value.strip()
+    headers.update(auth)
+    headers["Origin"] = "https://evil.example"
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
                        "params": {"protocolVersion": REQUESTED_VERSION, "capabilities": {}, "clientInfo": CLIENT_INFO}})
     req = urllib.request.Request(args.url, data=body.encode(), headers=headers, method="POST")
     try:
         resp = urllib.request.urlopen(req, timeout=15)
-        return {"status": resp.status}
+        return {"status": resp.status, "with_auth": bool(auth)}
     except urllib.error.HTTPError as exc:
-        return {"status": exc.code}
+        return {"status": exc.code, "with_auth": bool(auth)}
     except (urllib.error.URLError, OSError) as exc:
-        return {"status": None, "error": str(exc)}
+        return {"status": None, "error": str(exc), "with_auth": bool(auth)}
 
 
 def summary_line(record) -> str:

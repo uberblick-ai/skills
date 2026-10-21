@@ -98,10 +98,15 @@ def summarize(lines: list[dict], server: str, trial: dict, help_spec: dict) -> d
     first_use = next((e["i"] for e in events if e["tool"] in needs), None)
     help_events = [e for e in events if e["kind"] == "help"]
     errors = [e for e in events if e.get("is_error") and e["kind"] in ("tool", "help")]
+    # Recovered: the agent retried the same tool with changed input and it worked, with at most
+    # one or two other server calls (a help read, a lookup) in between. A later unrelated success does not count.
     recovered = 0
+    server = [x for x in events if x["kind"] in ("tool", "help")]
     for e in errors:
-        nxt = next((x for x in events[e["i"] + 1:] if x["tool"] == e["tool"]), None)
-        recovered += bool(nxt and not nxt.get("is_error"))
+        after = [x for x in server if x["i"] > e["i"]]
+        nxt = next((k for k, x in enumerate(after) if x["tool"] == e["tool"]), None)
+        recovered += bool(nxt is not None and nxt <= 2 and after[nxt]["input"] != e["input"]
+                          and not after[nxt].get("is_error") and not after[nxt]["denied"])
     seen, repeats = set(), 0
     for e in events:
         key = (e["tool"], e["input"])

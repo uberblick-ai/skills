@@ -60,6 +60,10 @@ code, pre { font-family: var(--mono); font-size: 0.86em; }
 .gauge-link { display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--ink); border-radius: 12px; padding: 8px 4px 10px; position: relative; }
 .gauge-link:hover { background: var(--surface-2); text-decoration: none; }
 .gauge-name { font-weight: 600; font-size: 14px; text-align: center; }
+.gauge-sub { font-size: 12px; color: var(--muted); text-align: center; margin-top: -4px; }
+.gauge-link.provisional svg { opacity: .6; }
+.fix-where { margin: 6px 0 0; font-size: 13.5px; color: var(--muted); } .fix-where span { font-weight: 650; color: var(--ink); margin-right: 8px; }
+.pill.crit { background: var(--poor-bg); color: var(--poor); }
 .gauge .track { stroke: var(--line); }
 .gauge text { font: 650 30px var(--sans); fill: var(--ink); letter-spacing: -.02em; }
 .cat-head .gauge text { font-size: 22px; }
@@ -287,8 +291,8 @@ footer { margin-top: 40px; color: var(--faint); font-size: 12.5px; text-align: c
   <h2 class="section-title">Agent trials</h2>
   {{TRIALS}}
 
-  <h2 class="section-title">Top fixes</h2>
-  <p class="section-lead">The five changes with the best estimated gain for the effort. Copy a fix as text, or as a ready-to-file issue.</p>
+  <h2 class="section-title">Suggestions</h2>
+  <p class="section-lead">{{FIXES_LEAD}}</p>
   <div class="fixes">{{FIXES}}</div>
 
   {{NOTES}}

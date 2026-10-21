@@ -4,7 +4,7 @@ description: >-
   Review an MCP server the way PageSpeed Insights reviews a web page: five
   scores from 0 to 100 (protocol, agent guidance, error recovery, context
   cost, safety), context vitals such as tool list size, agent trials that show
-  whether a fresh agent finds the help it needs, and a ranked list of fixes,
+  whether a fresh agent finds the help it needs, and ranked suggestions,
   in one self-contained HTML report. Use when someone asks how good
   an MCP server is, why agents struggle with it, how much context its tools
   cost, or what to fix first. Works on any stdio or Streamable HTTP server.
@@ -23,6 +23,9 @@ metadata:
 
 Scripts collect facts, you judge the text, and the renderer computes the
 scores, so numbers are reproducible and every judgement shows its evidence.
+The report is the result; the suggestions at its end are a starting point
+for the maintainer. Each score shows how much of its category was checked,
+so a quick automatic run is not mistaken for a full review.
 `scripts/probe.py` and `scripts/render.py` live next to this file; call them
 by their path inside this skill's directory. `DIR` is a scratch directory
 outside the server's repository.
@@ -60,19 +63,22 @@ Read the tool list in `probe.json` and write `DIR/calls.json` with one
 realistic call per read-only tool, so the report can measure response sizes
 and check structured output. Response size depends on the data, so prefer a
 workspace with real content (read-only) over an empty sandbox, and read its
-largest items:
+largest items. Large reads are fair when they can be narrowed: for a read
+that may come back large, call it once with its defaults and once with its
+limit, page or filter, so the report can check that the agent can ask for
+less (C13):
 
 ```json
 {"calls": [
   {"tool": "list_docs", "arguments": {}, "purpose": "list"},
-  {"tool": "get_doc", "arguments": {"uuid": "<id from list_docs>"}, "purpose": "largest typical read"}
+  {"tool": "get_doc", "arguments": {"uuid": "<id from list_docs>"}, "purpose": "largest typical read"},
+  {"tool": "list_docs", "arguments": {"tag": "<one tag>"}, "purpose": "the list, narrowed"}
 ]}
 ```
 
-Chain them: list first, then use real ids. Prefer the largest realistic
-object for the "get" calls. A tool not marked `readOnlyHint: true` runs only
-with `"confirmed_read_only": true`, which you set after reading its
-description and being sure it changes nothing. Then:
+Chain them: list first, then use real ids. A tool not marked
+`readOnlyHint: true` runs only with `"confirmed_read_only": true`, which you
+set after reading its description and being sure it changes nothing. Then:
 
 ```sh
 python3 scripts/probe.py call --command "..." --out DIR --calls DIR/calls.json
@@ -91,6 +97,8 @@ trial per behavioural question the report leaves open, never a fixed set:
 Skip trials for small read-only servers, for a server already tried under
 another name, and for anything that would write outside a sandbox. Include a
 plain task that should need no help, to check the descriptions stand alone.
+Trials are shown beside the scores and never change them, because which
+trials run is your choice; they show what the scores cannot.
 
 Write `DIR/mcp.json` in Claude Code's MCP config format with only this
 server (take secrets from the user's secret manager, never from a file in
@@ -118,9 +126,13 @@ Read every model-facing text in `probe.json`: `initialize.instructions`, each
 tool's description and field descriptions, resource and prompt texts, and the
 error messages under `probes`. Score the judged audits with the anchors in
 [references/rubric.md](references/rubric.md) and write `DIR/findings.json`
-in the shape described there. Every score below 1 needs quoted evidence or it
-is not counted. Write concrete fixes: for a description, the rewritten text
-ready to paste. Quote wasted spans under `density`, so context cost counts
+in the shape described there. Every score needs evidence, passes included,
+or it is not counted. Judge what the server needs: a one-tool server is not
+marked down for lacking a workflow or help topics. Write concrete fixes: for
+a description, the rewritten text ready to paste, keeping every guarantee
+the old text gave (what refuses before writing, partial writes, recovery).
+Set `"repo": true` only when you read the server's source; then suggestions
+can name files and carry an effort estimate. Quote wasted spans under `density`, so context cost counts
 waste rather than length. For a server with many formats or a large help
 surface, judge one content family at a time (a syntax, a block type, a
 workflow), one sub-agent per family when you can start them: each reads the
@@ -136,12 +148,15 @@ python3 scripts/render.py DIR --open
 ```
 
 It merges `probe.json` and `findings.json`, scores each category, ranks the
-fixes by estimated gain per effort, and writes `DIR/report.html` and
-`DIR/report.json`. Add `--baseline OLD_DIR/report.json` to show changes since
+suggestions by their effect (re-scoring the categories as if each one were
+done, those that lift a critical cap first), and writes `DIR/report.html`
+and `DIR/report.json`. Fix any warning it prints about suggestions without
+`targets` or `check`, or scores without evidence. Add `--baseline OLD_DIR/report.json` to show changes since
 an earlier run.
 
 ## 7. Reply
 
-Give the five scores, the top three fixes and the path to `report.html`.
-Mention any category that rests on automatic checks only, and whether trials
-ran. Scores are for the team's own use: do not publish them.
+Give the five scores, the top three suggestions and the path to
+`report.html`. Say whether this was a full review, a partial one or automatic
+checks only, name any provisional category, and say whether trials ran.
+Scores are for the team's own use: do not publish them.

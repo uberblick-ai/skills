@@ -11,6 +11,7 @@ DIR/report.html. Standard library only.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import html
 import json
 import math
@@ -19,12 +20,12 @@ import sys
 import webbrowser
 from pathlib import Path
 
-RENDER_VERSION = "0.1"
-CATALOG_VERSION = "0.1"
+RENDER_VERSION = "0.2"
+CATALOG_VERSION = "0.2"
 HERE = Path(__file__).resolve().parent
 TEMPLATE = HERE.parent / "assets" / "report.html"
 sys.path.insert(0, str(HERE))
-from probe import estimate_tokens  # noqa: E402
+from probe import TOKEN_ESTIMATOR, estimate_tokens  # noqa: E402
 
 CATEGORIES = [
     ("protocol", "Protocol", "Does it speak MCP correctly?"),
@@ -102,11 +103,11 @@ CATALOG = [
      "Write descriptions for the model: drop docstring sections, internal arguments the client never sends, and notes for developers.", ["tools"], "", False),
     ("G02", "guidance", 6, "auto", "Every tool has a real description",
      "The description is how a model picks a tool; a missing or one-line one leads to wrong calls.",
-     "Describe each tool in at least two plain sentences: what it does and what it returns.", ["tools"], "/server/tools#tool", False),
+     "Give each tool a description that says what it does and what it returns, not just its name again.", ["tools"], "/server/tools#tool", False),
     ("G03", "guidance", 6, "auto", "Input fields are described",
      "An undescribed field leaves the model to guess formats, units and meaning.",
      "Add a description to every input field, with format and an example where it can be read several ways.", ["tools"], "/server/tools#tool", False),
-    ("G04", "guidance", 2, "auto", "Tools have human-readable titles",
+    ("G04", "guidance", 1, "auto", "Tools have human-readable titles",
      "Clients show the title to users who approve calls.",
      "Set title on every tool.", ["tools"], "/server/tools#tool", False),
     ("G05", "guidance", 4, "auto", "Tools carry behaviour annotations",
@@ -182,7 +183,7 @@ CATALOG = [
      "Since 2025-11-25 tool schemas default to JSON Schema 2020-12; an explicit older $schema still works but some clients validate it differently.",
      "Emit 2020-12 schemas, or drop the $schema line.", ["tools"], "/server/tools#tool", False),
     ("C01", "context", 7, "metric", "Tool list fits the budget",
-     "Every tool's name, description and input schema is sent to the model on every turn.",
+     "Clients that load every tool send each one's name, description and input schema with every request; clients with tool search pay it per tool the agent picks.",
      "Move syntax and examples into help topics and keep descriptions to plain sentences.", ["tools"], "", False),
     ("C02", "context", 3, "metric", "Startup instructions fit the budget",
      "Instructions are always in context; long ones crowd out the task.",
@@ -199,9 +200,9 @@ CATALOG = [
     ("C06", "context", 1, "metric", "All help together fits the budget",
      "Total help size is a proxy for duplication and drift.",
      "Remove duplicated syntax and history from help.", ["resources", "prompts"], "", False),
-    ("C07", "context", 5, "metric", "Largest read response fits the budget",
-     "Responses land in context too; a huge read costs more than the whole tool list, and one far over budget can fill the context by itself.",
-     "Page or trim large responses and offer a summary view.", ["tools"], "", True),
+    ("C13", "context", 5, "auto", "Large reads can be bounded",
+     "Some reads are large by nature, like a long document; what matters is whether the agent can ask for less. A read over 8k tokens with no limit, page, field selection or filter can fill the context in one call.",
+     "Give large reads a way to narrow them (a limit with a cursor, a field or name selection, a filter or range) and keep the default small.", ["tools"], "", True),
     ("C08", "context", 3, "metric", "Starts quickly",
      "Slow starts delay every session and time out some clients.",
      "Defer heavy work until the first call that needs it.", ["transport"], "", False),
@@ -244,7 +245,15 @@ CATALOG = [
 CRITICAL = {row[0] for row in CATALOG if row[9]}
 # Audits measured on the data the server returned during the review, not on
 # the server alone: the same server scores differently on a busier workspace.
-DATA_DEPENDENT = {"C07": "Measured on the data this server returned during the review; a workspace with more data returns more."}
+DATA_DEPENDENT = {"C13": "Judged on the reads that came back over 8k tokens on this workspace; a busier workspace may show more."}
+# Audits that are only shown, never scored.
+BIG_READ, HUGE_READ = 8000, 32_000  # tokens: a read worth bounding, and one that floods a context
+NARROW_WORDS = {"limit", "max", "page", "cursor", "offset", "after", "before", "top", "first", "last", "count", "size",
+                "field", "fields", "select", "column", "columns", "properties", "include", "exclude", "range", "since",
+                "until", "from", "to", "start", "end", "filter", "filters", "query", "where", "depth", "summary",
+                "truncate", "names", "ids", "keys", "types", "metrics", "bytes", "lines", "window", "period", "section"}
+HELP_WORDS = re.compile(r"help|guide|docs?\b|documentation|manual|readme|instruction|tutorial|how-?to|syntax|reference|faq|usage|example|cheat", re.I)
+PROVISIONAL = 0.8  # categories with less of their applicable weight checked are marked provisional
 
 # Metric thresholds: (good, poor, unit). Good scores 0.9, poor 0.5 (Lighthouse-style log-normal).
 # Calibrated 2026-10-21 on 15 servers (13 public, the reference server, Uberblick):
@@ -258,7 +267,6 @@ BUDGETS = {
     "C04": (300, 600, "ch"),
     "C05": (2500, 5000, "tok"),
     "C06": (50_000, 100_000, "tok"),
-    "C07": (8000, 32_000, "tok"),
     "C08": (1000, 3500, "ms"),
     "C09": (0.05, 0.20, "%"),
     "C10": (0.05, 0.25, "%"),
@@ -413,8 +421,6 @@ VITALS = [
      "Text the server sends at startup. Clients keep it in the system prompt for the whole session; Claude Code shows only about the first 2 KB."),
     ("C03", "Largest tool description",
      "The longest tool description, in characters. A long description usually carries syntax that belongs in a help topic."),
-    ("C07", "Largest read response",
-     "The biggest answer to a read call during the review, as the model receives it. It depends on the data: a busier workspace returns more."),
     ("C08", "Cold start",
      "Time from starting the server to its first answer. Slow starts delay every session, and some clients give up."),
 ]
@@ -499,6 +505,32 @@ def waste_index(probe: dict, findings: dict) -> tuple[dict, list]:
     return out, problems
 
 
+def is_help(uri: str, probe: dict, findings: dict | None) -> bool:
+    """A resource counts as help when the reviewer says so, or its uri, name or description reads like help."""
+    f = findings or {}
+    if any(fnmatch.fnmatch(uri, g) for g in f.get("data_resources") or []):
+        return False
+    if any(fnmatch.fnmatch(uri, g) for g in f.get("help_resources") or []):
+        return True
+    meta = next((x for x in probe.get("resources") or [] if x.get("uri") == uri), {})
+    return bool(HELP_WORDS.search(" ".join(str(v) for v in (uri, meta.get("name"), meta.get("title"), meta.get("description")) if v)))
+
+
+def narrowing_params(tool: dict) -> list[str]:
+    """Optional arguments that can make a read smaller: limits, pages, selections, filters, ranges."""
+    schema = tool.get("inputSchema") or {}
+    required = set(schema.get("required") or [])
+    out = []
+    for name, prop in (schema.get("properties") or {}).items():
+        if name in required:
+            continue
+        words = {w.lower() for w in re.findall(r"[A-Za-z][a-z]*|[A-Z]+(?![a-z])", name)}
+        alts = [prop] + list((prop or {}).get("anyOf") or []) + list((prop or {}).get("oneOf") or [])
+        if words & NARROW_WORDS or any(isinstance(a, dict) and a.get("type") == "array" for a in alts):
+            out.append(name)
+    return out
+
+
 def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     """Return (metrics, auto audit results) from probe.json."""
     waste, waste_problems = waste_index(probe, findings or {})
@@ -510,9 +542,11 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     m: dict = {}
     r: dict = {}
 
-    def res(code, score, display="", items=None, note="", na=False):
+    def res(code, score, display="", items=None, note="", na=False, untested=False):
+        # na: does not apply to this server; untested: applies but could not be checked in this run.
+        na = na or untested
         r[code] = {"score": None if na else round(max(0.0, min(1.0, score)), 2), "display": display,
-                   "items": items or [], "note": note, "na": na}
+                   "items": items or [], "note": note, "na": na, "untested": untested}
 
     # --- metrics
     per_tool = []
@@ -568,7 +602,7 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
                 if eff > best_field[2]:
                     best_field = (n, f"{t.get('name')}.{path}", eff)
         m["max_field_desc"] = {"value": best_field[0], "where": best_field[1], "effective": best_field[2]}
-    topics = [dict(x) for x in probe.get("resource_reads") or [] if x.get("text_bytes")]
+    topics = [dict(x) for x in probe.get("resource_reads") or [] if x.get("text_bytes") and is_help(x["uri"], probe, findings)]
     topics += [{"uri": f"prompt:{x['name']}", "text_bytes": len((x.get("text") or "").encode("utf-8")), "text": x.get("text")}
                for x in probe.get("prompt_gets") or [] if x.get("text")]
     for x in topics:
@@ -667,6 +701,12 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             served = not err and (pr.get("count") or (method == "tools/list" and tools))
             checks.append({"item": method, "score": 0 if served else 1,
                            "evidence": "not declared but served" if served else "not declared, not served"})
+        if pr.get("repeated_cursor"):
+            checks.append({"item": f"{method} paging", "score": 0,
+                           "evidence": f"nextCursor repeated after {pr.get('pages')} pages: a client would page forever"})
+        elif pr.get("page_limit_hit"):
+            checks.append({"item": f"{method} paging", "score": 0.5,
+                           "evidence": f"still paging after {pr.get('pages')} pages; the probe stopped there"})
     res("P07", sum(c["score"] for c in checks) / len(checks), f"{sum(c['score'] for c in checks)} of {len(checks)}", items=checks)
     ping = probes.get("ping") or {}
     if lifecycle == "modern":
@@ -731,10 +771,10 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
         res("P13", sum(x["score"] for x in out_calls) / len(out_calls),
             f"{sum(x['score'] for x in out_calls):.0f} of {len(out_calls)} calls", items=out_calls)
     else:
-        res("P13", 0, na=True, note="no calls to tools with an output schema")
+        res("P13", 0, na=True, untested=any(t.get("outputSchema") for t in tools), note="no calls to tools with an output schema")
     rnf = (probes.get("resource_not_found") or {}).get("response")
     if "resources" not in caps or rnf is None:
-        res("P15", 0, na=True, note="no resources capability" if "resources" not in caps else "not probed")
+        res("P15", 0, na=True, untested="resources" in caps, note="no resources capability" if "resources" not in caps else "not probed")
     else:
         want = -32602 if lifecycle == "modern" else -32002
         code = rnf.get("code")
@@ -748,8 +788,11 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     else:
         res("P16", 0, na=True, note="only required by 2026-07-28")
     deprecated = [k for k in ("logging",) if k in caps]
-    res("P17", 0.5 if deprecated else 1, ", ".join(deprecated) + " capability declared" if deprecated else "none used",
-        note="Logging is deprecated in 2026-07-28; harmless for 2025-11-25 clients, so this only costs half." if deprecated else "")
+    if lifecycle in ("modern", "dual"):
+        res("P17", 0.5 if deprecated else 1, ", ".join(deprecated) + " capability declared" if deprecated else "none used",
+            note="Logging is deprecated in 2026-07-28." if deprecated else "")
+    else:
+        res("P17", 0, na=True, note="only applies to servers that speak 2026-07-28")
     ut = (probes.get("unknown_tool") or {}).get("response") or {}
     if ut.get("kind") in ("tool", "protocol"):
         named = "mcp_insights_no_such_tool" in (ut.get("message") or "")
@@ -759,7 +802,12 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
         res("P14", 0, ut.get("kind", "no answer"))
 
     # --- guidance
-    res("G01", 1 if instr.strip() else 0, fmt_bytes(m["instructions_bytes"]) if instr else "none")
+    # Prompts are picked by the user, not the model, so they need no pointer in the instructions.
+    small = len(tools) <= 3 and not probe.get("resources") and not probe.get("resourceTemplates")
+    if instr.strip() or not small:
+        res("G01", 1 if instr.strip() else 0, fmt_bytes(m["instructions_bytes"]) if instr else "none")
+    else:
+        res("G01", 0, na=True, note="Three tools or fewer and no resources: the tool descriptions can carry everything.")
     if tools:
         leftovers = []
         for t in tools:
@@ -777,9 +825,13 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     else:
         res("G07", 0, na=True, note="no instructions")
     if tools:
-        weak = [p for p in per_tool if p["description_chars"] < 40]
+        def restates(t):
+            words = set(re.findall(r"[a-z]+", (t.get("description") or "").lower())) - {"a", "an", "the", "of", "to", "for"}
+            return words <= set(re.findall(r"[a-z]+", (t.get("name") or "").lower().replace("_", " ")))
+        weak = [p for p, t in zip(per_tool, tools) if p["description_chars"] < 20 or restates(t)]
         res("G02", 1 - len(weak) / len(tools), f"{len(tools) - len(weak)} of {len(tools)}",
-            items=[{"item": p["name"], "score": 0, "evidence": f"{p['description_chars']} characters"} for p in weak])
+            items=[{"item": p["name"], "score": 0, "evidence": f"{p['description_chars']} characters" if p["description_chars"] < 20
+                    else "only restates the name"} for p in weak])
         nf = sum(p["fields"] for p in per_tool)
         nd = sum(p["fields_described"] for p in per_tool)
         if nf:
@@ -794,8 +846,15 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
         annotated = [p for p in per_tool if "readOnlyHint" in p["annotations"]]
         res("G05", len(annotated) / len(tools), f"{len(annotated)} of {len(tools)}",
             items=[{"item": p["name"], "score": 0, "evidence": "no readOnlyHint"} for p in per_tool if p not in annotated])
-        with_out = sum(1 for t in tools if t.get("outputSchema"))
-        res("G06", with_out / len(tools), f"{with_out} of {len(tools)}")
+        answered = [c for c in probe.get("calls") or [] if "bytes" in c]
+        structured = {c["tool"] for c in answered if c.get("has_structured") or (c.get("text_head") or "").lstrip()[:1] in ("{", "[")}
+        by_name = {t.get("name"): t for t in tools}
+        if structured:
+            with_out = [n for n in structured if (by_name.get(n) or {}).get("outputSchema")]
+            res("G06", len(with_out) / len(structured), f"{len(with_out)} of {len(structured)} tools with structured results",
+                items=[{"item": n, "score": 0, "evidence": "returns JSON without an outputSchema"} for n in sorted(structured - set(with_out))])
+        else:
+            res("G06", 0, na=True, untested=not answered, note="no read call returned structured data" if answered else "no read calls")
     else:
         for code in ("G02", "G03", "G04", "G05", "G06"):
             res(code, 0, na=True)
@@ -824,7 +883,7 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             res("E03", 0, na=True)
     else:
         for code in ("E01", "E02", "E03"):
-            res(code, 0, na=True, note="no read-only tool to probe with invalid arguments")
+            res(code, 0, untested=True, note="no read-only tool to probe with invalid arguments")
     messages = [((x.get("response") or {}).get("message") or "") for x in inv]
     messages += [ut.get("message") or "", um.get("message") or ""]
     traces = [msg for msg in messages if re.search(r"\n\s+at .+:\d+:\d+|Traceback \(most recent call last\)", msg)]
@@ -836,13 +895,16 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
         res("E05", 1 - len(hidden) / len(answered), f"{len(hidden)} of {len(answered)} hidden" if hidden else "all flagged",
             items=[{"item": c["tool"], "score": 0, "evidence": (c.get("text_head") or "")[:200]} for c in hidden])
     else:
-        res("E05", 0, na=True, note="no read calls")
+        res("E05", 0, untested=True, note="no read calls")
 
     # --- context
     def metric(code, value, where="", effective=None):
         good, poor, unit = BUDGETS[code]
         if value is None:
-            res(code, 0, na=True, note="not measured")
+            if code == "C02":
+                res(code, 0, na=True, note="no instructions")
+            else:
+                res(code, 0, untested=True, note="not measured")
             return
         eff = effective if effective is not None else value
         shown = fmt_value(value, unit)
@@ -874,13 +936,19 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     else:
         res("C12", 0, na=True, note="no help topics")
     always = {k: v for k, v in waste.items() if k == "instructions" or k.startswith("tool:") or k.startswith("field:")}
-    on_demand = {k: v for k, v in waste.items() if k.startswith("topic:")}
+    help_uris = {x["uri"] for x in topics}
+    on_demand = {k: v for k, v in waste.items() if k.startswith("topic:") and k[len("topic:"):] in help_uris}
     field_tokens = sum(estimate_tokens(v) for k, v in text_index(probe).items() if k.startswith("field:"))
-    always_total = (m["instructions_tokens"] or 0) + sum(p["description_tokens"] for p in per_tool) + field_tokens
-    for code, group, total in (("C10", always, always_total),
-                               ("C11", on_demand, sum(v["total_tokens"] for v in on_demand.values()))):
+    n_always = sum(1 for k in text_index(probe) if k == "instructions" or k.startswith(("tool:", "field:")))
+    # Both shares divide by the text that was reviewed, so a partial review is a sample, not a pass for the rest.
+    always_total = sum(v["total_tokens"] for v in always.values())
+    for code, group, total, n_all in (("C10", always, always_total, n_always),
+                                      ("C11", on_demand, sum(v["total_tokens"] for v in on_demand.values()), len(topics))):
+        if not n_all:
+            res(code, 0, na=True, note="no text")
+            continue
         if not group or not total:
-            res(code, 0, na=True, note="waste not judged" if not group else "no text")
+            res(code, 0, untested=True, note="waste not judged")
             continue
         wasted = sum(v["tokens"] for v in group.values())
         ratio = wasted / total
@@ -890,17 +958,39 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             for w in v["waste"]:
                 items.append({"item": tid, "score": 0, "evidence": f"\u201c{norm(w['quote'])[:260]}\u201d \u2014 {w['why']}"})
         res(code, lognormal_score(max(ratio, 1e-6), good, poor), f"{fmt_tokens(wasted)} of {fmt_tokens(total)} ({ratio * 100:.0f}%)",
-            items=items, note=f"Share of reviewed text quoted as waste; good \u2264 {good * 100:.0f}%, poor \u2265 {poor * 100:.0f}%.")
+            items=items, note=f"Share of the reviewed text quoted as waste ({len(group)} of {n_all} texts reviewed); good \u2264 {good * 100:.0f}%, poor \u2265 {poor * 100:.0f}%.")
         r[code]["value"] = wasted
         r[code]["ratio"] = ratio
     m["waste_per_turn"] = {"tokens": sum(v["tokens"] for v in always.values()), "total": always_total,
                            "ratio": (r.get("C10") or {}).get("ratio")}
-    metric("C07", (m.get("max_response") or {}).get("value"), (m.get("max_response") or {}).get("where", ""))
-    if "C07" in r and not r["C07"].get("na"):
-        r["C07"]["note"] = DATA_DEPENDENT["C07"]
-        if (m.get("max_response") or {}).get("from_whole_result"):
-            r["C07"]["note"] += (" This probe predates text measurement, so the size counts the whole result; servers that also"
-                                 " return structuredContent are counted about twice. Re-run probe.py call for the text the model gets.")
+    if not calls:
+        res("C13", 0, untested=True, note="no read calls")
+    else:
+        biggest: dict = {}
+        for c in calls:
+            if c["tokens_est"] > BIG_READ and c["tokens_est"] > biggest.get(c["tool"], {}).get("tokens_est", 0):
+                biggest[c["tool"]] = c
+        by_name = {t.get("name"): t for t in tools}
+        items = []
+        for name, c in sorted(biggest.items(), key=lambda kv: -kv[1]["tokens_est"]):
+            narrow = narrowing_params(by_name.get(name) or {})
+            used = [a for a in narrow if a in (c.get("arguments") or {})]
+            size_ = fmt_tokens(c["tokens_est"]) + (" (whole result)" if "tokens" not in c else "")
+            if narrow and c["tokens_est"] >= HUGE_READ:
+                score, why = 0.5, (f"{size_} even with {', '.join(used)}" if used else
+                                   f"{size_} by default; {', '.join(narrow)} can narrow it, but the default returns everything")
+            elif narrow:
+                score, why = 1, f"{size_}; can narrow with {', '.join(narrow)}"
+            elif c["tokens_est"] < HUGE_READ:
+                score, why = 0.5, f"{size_}; no way to ask for less"
+            else:
+                score, why = 0, f"{size_}; no way to ask for less"
+            items.append({"item": name, "score": score, "evidence": why})
+        if items:
+            res("C13", sum(i["score"] for i in items) / len(items), f"{sum(1 for i in items if i['score'] >= 1)} of {len(items)} large reads",
+                items=items, note=DATA_DEPENDENT["C13"])
+        else:
+            res("C13", 0, na=True, note=f"no read over {BIG_READ // 1000}k tokens on this workspace")
     metric("C08", m.get("cold_start_ms"))
     if tools:
         metric("C09", m["duplication"]["value"])
@@ -938,13 +1028,21 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
                         "evidence": f"{t['calls']} calls, {t['help_reads']} help reads ({help_size(t)})"} for t in plain])
         else:
             res("G18", 0, na=True, note="no plain-task trial")
-        judged_runs = [(t, verdicts[t["id"]]) for t in runs if isinstance(verdicts.get(t["id"]), dict)
-                       and verdicts[t["id"]].get("success") is not None
-                       and (verdicts[t["id"]]["success"] >= 1 or (verdicts[t["id"]].get("evidence") or "").strip())]
+        judged_runs = []
+        for t in runs:
+            v = verdicts.get(t["id"]) if isinstance(verdicts.get(t["id"]), dict) else {}
+            o = trial_outcome(t, v)
+            # Blocked and declined runs say nothing about the server; anything short of done needs evidence.
+            if o is None or o in UNCOUNTED_OUTCOMES or (o != "done" and not (v.get("evidence") or "").strip()):
+                continue
+            judged_runs.append((t, v, o, outcome_score(o, v)))
         if judged_runs:
-            res("G19", sum(v["success"] for _, v in judged_runs) / len(judged_runs),
-                f"{sum(1 for _, v in judged_runs if v['success'] >= 1)} of {len(judged_runs)} done",
-                items=[{"item": t["id"], "score": float(v["success"]), "evidence": v.get("evidence", "")} for t, v in judged_runs])
+            done = sum(1 for *_, o, _ in judged_runs if o == "done")
+            drafted = sum(1 for *_, o, _ in judged_runs if o == "drafted")
+            res("G19", sum(sc for *_, sc in judged_runs) / len(judged_runs),
+                f"{done} of {len(judged_runs)} done" + (f", {drafted} drafted" if drafted else ""),
+                items=[{"item": t["id"], "score": sc, "evidence": f"{OUTCOMES[o]}. {v.get('evidence', '')}".strip()}
+                       for t, v, o, sc in judged_runs])
         else:
             res("G19", 0, na=True, note="trial outcomes not judged")
         rules = [(t["id"], r) for t in runs for r in t.get("rules") or [] if r.get("applies")]
@@ -1025,9 +1123,13 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     origin = probes.get("origin")
     if origin:
         st = origin.get("status")
-        res("S04", 1 if st in (400, 401, 403) else 0, f"HTTP {st}")
+        if st == 401 and not origin.get("with_auth"):
+            # The server asked for credentials before it looked at the Origin, so the check was never reached.
+            res("S04", 0, f"HTTP {st}", untested=True, note="Refused for missing credentials; rerun the probe with --header to test the Origin check.")
+        else:
+            res("S04", 1 if st in (400, 401, 403) else 0, f"HTTP {st}")
     else:
-        res("S04", 0, na=True, note="stdio transport" if stdio else "not probed")
+        res("S04", 0, na=True, untested=not stdio, note="stdio transport" if stdio else "not probed")
     return m, r
 
 
@@ -1041,7 +1143,7 @@ def merge_judged(results: dict, findings: dict) -> list[str]:
         j = judged.get(code)
         if not j:
             results[code] = {"score": None, "display": "not judged", "items": [], "note": "No finding recorded for this audit.",
-                             "na": True, "judged": True, "unjudged": True}
+                             "na": True, "untested": True, "judged": True, "unjudged": True}
             continue
         if j.get("na"):
             results[code] = {"score": None, "display": "not applicable", "items": [], "note": j.get("reason", ""),
@@ -1052,87 +1154,184 @@ def merge_judged(results: dict, findings: dict) -> list[str]:
             s = it.get("score")
             if s is None:
                 continue
-            if s < 1 and not (it.get("evidence") or "").strip():
+            # A pass is a claim too: without evidence it is not scored either.
+            if not (it.get("evidence") or "").strip():
                 warnings.append(f"{code} {it.get('item')}: score {s} without evidence, not scored")
                 continue
             items.append({"item": it.get("item"), "score": float(s), "evidence": it.get("evidence", ""), "fix": it.get("fix", "")})
         if items:
             score = sum(i["score"] for i in items) / len(items)
             display = f"{sum(1 for i in items if i['score'] >= 1)} of {len(items)} pass"
-        elif j.get("score") is not None and (j.get("score") >= 1 or (j.get("evidence") or "").strip()):
+        elif j.get("score") is not None and (j.get("evidence") or "").strip():
             score = float(j["score"])
             display = j.get("display") or ""
         else:
             warnings.append(f"{code}: no scored items with evidence")
-            results[code] = {"score": None, "display": "not judged", "items": [], "note": "", "na": True, "judged": True, "unjudged": True}
+            results[code] = {"score": None, "display": "not judged", "items": [], "note": "", "na": True, "untested": True,
+                             "judged": True, "unjudged": True}
             continue
         results[code] = {"score": round(score, 2), "display": j.get("display") or display, "items": items,
                          "note": j.get("summary", ""), "evidence": j.get("evidence", ""), "na": False, "judged": True}
     return warnings
 
 
+def category_score(key: str, results: dict) -> dict:
+    """Score one category. Trials and info audits are shown but never scored, so reviews stay comparable."""
+    rows = [row for row in CATALOG if row[1] == key and row[3] != "trial"]
+    applicable = [(row, results[row[0]]) for row in rows if results.get(row[0]) and not results[row[0]]["na"]]
+    scored_w = sum(row[2] for row, _ in applicable)
+    untested_w = sum(row[2] for row in rows if not results.get(row[0]) or results[row[0]].get("untested"))
+    coverage = scored_w / (scored_w + untested_w) if scored_w + untested_w else 0.0
+    out = {"score": None, "coverage": round(coverage, 2), "provisional": False, "capped_by": [], "weight": scored_w}
+    if not scored_w or coverage < 1 / 3:
+        out["note"] = "Too few checks applied to score this category." if scored_w else "No check applied."
+        return out
+    score = round(sum(row[2] * res["score"] for row, res in applicable) / scored_w * 100)
+    # A critical audit caps on any failed item, not only on a failing average:
+    # one silent truncation, one read tool that writes or one unbounded huge read is enough.
+    capped = [row[0] for row, res in applicable if row[0] in CRITICAL
+              and (res["score"] < 0.1 or any(it.get("score") == 0 for it in res.get("items") or []))]
+    if capped:
+        score = min(score, 49)
+    out.update(score=score, capped_by=capped, provisional=coverage < PROVISIONAL)
+    return out
+
+
 def score_categories(results: dict) -> dict:
     cats = {}
     for key, name, question in CATEGORIES:
-        rows = [row for row in CATALOG if row[1] == key]
-        applicable = [(row, results.get(row[0])) for row in rows if results.get(row[0]) and not results[row[0]]["na"]]
-        total_w = sum(row[2] for row, _ in applicable)
-        # Trials are optional, so they do not count toward coverage.
-        possible = sum(row[2] for row in rows if row[3] != "trial")
-        covered = sum(row[2] for row, _ in applicable if row[3] != "trial")
-        if not total_w or covered < possible / 3:
-            cats[key] = {"score": None, "name": name, "question": question,
-                         "note": "Too few checks applied to score this category." if total_w else ""}
-            for row, res in applicable:
-                res["gain"] = 0.0
-            continue
-        raw = sum(row[2] * res["score"] for row, res in applicable) / total_w
-        score = round(raw * 100)
-        # A critical audit caps on any failed item, not only on a failing average:
-        # one silent truncation or one read tool that writes is enough. A critical
-        # metric caps at twice its poor mark (a 64k-token response fills a third of a 200k context).
-        def critical_fail(code, res):
-            if code in BUDGETS and res.get("effective", res.get("value")) is not None:
-                return res.get("effective", res.get("value")) >= 2 * BUDGETS[code][1]
-            return res["score"] < 0.1 or any(it.get("score") == 0 for it in res.get("items") or [])
-        capped = [row[0] for row, res in applicable if row[0] in CRITICAL and critical_fail(row[0], res)]
-        if capped:
-            score = min(score, 49)
-        cats[key] = {"score": score, "name": name, "question": question, "capped_by": capped, "weight": total_w}
-        for row, res in applicable:
-            res["gain"] = round(row[2] * (1 - res["score"]) / total_w * 100, 1)
+        cats[key] = {**category_score(key, results), "name": name, "question": question}
+    # Without a handshake nothing else can be checked: say so instead of scoring around it.
+    if (results.get("P01") or {}).get("score") == 0:
+        for key, c in cats.items():
+            if key == "protocol":
+                c.update(score=0, capped_by=["P01"], provisional=False, note="Unusable: the handshake failed.")
+            else:
+                c.update(score=None, note="Not scored: the server did not complete a handshake.")
+    for key, _, _ in CATEGORIES:
+        for row in CATALOG:
+            res = results.get(row[0])
+            if row[1] == key and res and not res["na"]:
+                res["gain"] = fix_effects(results, cats, [row[0]]).get(key, 0.0)
     return cats
 
 
+def passed(code: str, res: dict, item: str | None = None) -> dict:
+    """The audit result as it would be after the fix: the whole audit, or one item of it."""
+    new = {**res, "items": [dict(it) for it in res.get("items") or []]}
+    if item is not None and new["items"]:
+        for it in new["items"]:
+            if it.get("item") == item:
+                it["score"] = 1.0
+        new["score"] = round(sum(it["score"] for it in new["items"]) / len(new["items"]), 2)
+        return new
+    for it in new["items"]:
+        it["score"] = 1.0
+    new["score"] = 1.0
+    if code in BUDGETS:
+        new["value"] = new["effective"] = BUDGETS[code][0]
+    return new
+
+
+def apply_fix(results: dict, targets: list[str]) -> dict:
+    """The results as they would be if the targets passed. Targets are audit ids or 'AUDIT:item'."""
+    changed = dict(results)
+    for t in targets:
+        code, _, item = t.partition(":")
+        res = changed.get(code)
+        if res and not res["na"] and res["score"] is not None:
+            changed[code] = passed(code, res, item or None)
+    return changed
+
+
+def caps_after(results: dict, targets: list[str]) -> set:
+    changed = apply_fix(results, targets)
+    return {code for key, _, _ in CATEGORIES for code in category_score(key, changed)["capped_by"]}
+
+
+def fix_effects(results: dict, cats: dict, targets: list[str]) -> dict:
+    """Points each category gains if the targets pass."""
+    changed = apply_fix(results, targets)
+    effects = {}
+    for key in {row[1] for row in CATALOG if row[0] in {t.partition(":")[0] for t in targets}}:
+        before = (cats.get(key) or {}).get("score")
+        after = category_score(key, changed)["score"]
+        if before is not None and after is not None and after > before:
+            effects[key] = float(after - before)
+    return effects
+
+
 EFFORT = {"S": 1, "M": 2, "L": 3}
+ALIASES = {"C07": "C13"}  # audits renamed since older findings were written
 
 
 def recommendations(results: dict, findings: dict, cats: dict) -> list[dict]:
+    # Effort is only knowable with the source; from the outside, suggestions rank by their effect alone.
+    repo = bool((findings or {}).get("repo"))
     recs = []
     covered = set()
     by_code = {row[0]: row for row in CATALOG}
+    cat_names = {k: n for k, n, _ in CATEGORIES}
+    capped = {code for c in cats.values() for code in c.get("capped_by") or []}
     for rec in (findings or {}).get("recommendations") or []:
-        audits = [a for a in rec.get("audits") or [] if a in by_code]
-        gain = sum((results.get(a) or {}).get("gain", 0) or 0 for a in audits)
-        covered.update(audits)
+        targets = []
+        for a in rec.get("audits") or []:
+            code, sep, item = a.partition(":")
+            code = ALIASES.get(code, code)
+            if code in by_code:
+                targets.append(code + sep + item)
+        audits = list(dict.fromkeys(t.partition(":")[0] for t in targets))
+        covered.update(targets)
         cat = rec.get("category") or (by_code[audits[0]][1] if audits else "guidance")
-        recs.append({**rec, "audits": audits, "category": cat, "gain": round(gain, 1),
-                     "effort": rec.get("effort", "M"), "source": "agent"})
+        recs.append({**rec, "audits": audits, "targets_audits": targets, "category": cat,
+                     "effects": fix_effects(results, cats, targets), "effort": rec.get("effort", "M"), "source": "agent"})
     for row in CATALOG:
         code = row[0]
         res = results.get(code)
-        if not res or res["na"] or code in covered or res["score"] is None or res["score"] >= 0.9:
+        if not res or res["na"] or code in covered or res["score"] is None or res["score"] >= 0.9 or row[3] == "trial":
             continue
+        # Items an agent suggestion already fixes are left out; the generic one covers the rest.
+        failing = [it for it in res.get("items") or [] if (it.get("score") or 0) < 1 and f"{code}:{it.get('item')}" not in covered]
+        if res.get("items") and not failing:
+            continue
+        targets = [f"{code}:{it.get('item')}" for it in failing] if res.get("items") and row[3] != "metric" else [code]
         action = re.split(r"(?<=[.;])\s", row[6])[0].rstrip(".;")
-        recs.append({"title": action, "category": row[1], "audits": [code],
+        recs.append({"title": action, "category": row[1], "audits": [code], "targets_audits": targets,
+                     "targets": list(dict.fromkeys(str(it.get("item")) for it in failing))[:8],
                      "why": row[5], "fix": row[6], "effort": "M" if row[3] == "metric" else "S",
-                     "evidence": "; ".join(i.get("evidence", "") for i in (res.get("items") or [])[:3]),
-                     "gain": res.get("gain", 0), "source": "catalog"})
+                     "evidence": "; ".join(f"{it.get('item')}: {it.get('evidence', '')}" for it in failing[:3]),
+                     "effects": fix_effects(results, cats, targets), "source": "catalog"})
     for rec in recs:
-        rec["rank_value"] = (rec["gain"] or 0) / EFFORT.get(rec["effort"], 2)
-        cname = dict((k, n) for k, n, _ in CATEGORIES).get(rec["category"], rec["category"])
-        body = [f"**Category:** {cname}", f"**Estimated gain:** +{rec['gain']} points", "", rec.get("why", ""), "",
-                "**Fix**", "", rec.get("fix", "")]
+        touched = capped & set(rec["audits"])
+        rec["lifts_cap"] = bool(touched) and not touched & caps_after(results, rec["targets_audits"])
+    # A cap held by two failing items lifts only when both are fixed: say so instead of showing no effect.
+    for code in capped:
+        group = [r for r in recs if code in r["audits"] and r["source"] == "agent"]
+        if len(group) > 1 and not any(r["lifts_cap"] for r in group):
+            joint = [t for r in group for t in r["targets_audits"]]
+            if code not in caps_after(results, joint):
+                eff = fix_effects(results, cats, joint)
+                for r in group:
+                    r["lifts_cap_with"] = [g["title"] for g in group if g is not r]
+                    r["joint_effects"] = eff
+    for rec in recs:
+        rec["gain"] = round(sum(rec["effects"].values()), 1)
+        joint_gain = sum((rec.get("joint_effects") or {}).values()) / (len(rec.get("lifts_cap_with") or []) + 1)
+        # A fix that lifts a critical cap goes first; the rest rank by points per effort.
+        rec["rank_value"] = ((1000 if rec["lifts_cap"] or rec.get("lifts_cap_with") else 0)
+                             + max(rec["gain"], joint_gain) / (EFFORT.get(rec["effort"], 2) if repo else 1))
+        if not repo:
+            rec.pop("effort", None)
+        effects = ", ".join(f"+{v:g} {cat_names.get(k, k)}" for k, v in sorted(rec["effects"].items(), key=lambda kv: -kv[1]))
+        if rec.get("lifts_cap_with"):
+            joint = ", ".join(f"+{v:g} {cat_names.get(k, k)}" for k, v in sorted(rec["joint_effects"].items(), key=lambda kv: -kv[1]))
+            effects = (effects + "; " if effects else "") + f"{joint} together with: {'; '.join(rec['lifts_cap_with'])}"
+        body = [f"**Expected effect:** {effects or 'no score change (category not scored or already capped elsewhere)'}"]
+        if rec.get("targets"):
+            body += [f"**Where:** {', '.join(rec['targets'])}"]
+        body += ["", rec.get("why", ""), "", "**Fix**", "", rec.get("fix", "")]
+        if rec.get("check"):
+            body += ["", "**Done when**", "", rec["check"]]
         if rec.get("evidence"):
             body += ["", "**Evidence**", "", rec["evidence"]]
         body += ["", f"Found by mcp-insights ({', '.join(rec['audits'])})."]
@@ -1256,7 +1455,12 @@ def render_html(report: dict) -> str:
         if base.get(key) is not None and c["score"] is not None:
             d = c["score"] - base[key]
             delta = f'<span class="delta {"up" if d > 0 else "down" if d < 0 else ""}">{"+" if d > 0 else ""}{d}</span>'
-        gauges.append(f'<a class="gauge-link" href="#{key}">{gauge_svg(c["score"])}<span class="gauge-name">{esc(name)}</span>{delta}</a>')
+        sub = ("unusable" if c.get("capped_by") == ["P01"] and c["score"] == 0 else
+               "capped by " + ", ".join(c["capped_by"]) if c.get("capped_by") else
+               f'provisional \u00b7 {round(c.get("coverage", 0) * 100)}% checked' if c.get("provisional") else
+               "not scored" if c["score"] is None else f'{round(c.get("coverage", 0) * 100)}% checked')
+        gauges.append(f'<a class="gauge-link{" provisional" if c.get("provisional") else ""}" href="#{key}">{gauge_svg(c["score"])}'
+                      f'<span class="gauge-name">{esc(name)}</span><span class="gauge-sub">{esc(sub)}</span>{delta}</a>')
 
     vitals = []
     for code, label, info in VITALS:
@@ -1269,9 +1473,6 @@ def render_html(report: dict) -> str:
             where = (m.get("max_tool_desc") or {}).get("where", "")
         elif code == "C04":
             where = (m.get("max_field_desc") or {}).get("where", "")
-        elif code == "C07":
-            where = (m.get("max_response") or {}).get("where", "")
-            where = f"{where} \u00b7 depends on data" if where else ""
         elif code == "C01":
             where = f"{m.get('tool_count', 0)} tools"
             if res.get("effective") and res.get("effective") != value:
@@ -1303,28 +1504,42 @@ def render_html(report: dict) -> str:
     cat_names = {k: n for k, n, _ in CATEGORIES}
     fixes = []
     for i, rec in enumerate(report["recommendations"][:5], 1):
-        gain = f'+{rec["gain"]:g} {esc(cat_names.get(rec["category"], ""))}' if rec.get("gain") else esc(cat_names.get(rec["category"], ""))
+        effects = [f'<span class="pill cat-{esc(k)}">+{v:g} {esc(cat_names.get(k, k))}</span>'
+                   for k, v in sorted((rec.get("effects") or {}).items(), key=lambda kv: -kv[1])]
+        if rec.get("lifts_cap_with"):
+            ranks = [str(j) for j, other in enumerate(report["recommendations"], 1) if other["title"] in rec["lifts_cap_with"]]
+            effects = [f'<span class="pill crit">lifts a cap with #{", #".join(ranks)}</span>'] + [
+                f'<span class="pill cat-{esc(k)}">+{v:g} {esc(cat_names.get(k, k))} together</span>'
+                for k, v in sorted(rec["joint_effects"].items(), key=lambda kv: -kv[1])]
+        elif not effects:
+            effects = [f'<span class="pill effort">{esc(cat_names.get(rec["category"], ""))}</span>']
+        if rec.get("lifts_cap"):
+            effects.insert(0, '<span class="pill crit">lifts a cap</span>')
         saves = f'<span class="pill">{esc(rec["saves"])}</span>' if rec.get("saves") else ""
+        effort = f'<span class="pill effort">Effort {esc(rec["effort"])}</span>' if rec.get("effort") else ""
+        where = f'<p class="fix-where"><span>Where</span>{esc(", ".join(rec["targets"]))}</p>' if rec.get("targets") else ""
+        check = f'<p class="fix-where"><span>Done when</span>{esc(rec["check"])}</p>' if rec.get("check") else ""
         fixes.append(
             f'<article class="fix"><div class="fix-rank">{i}</div><div class="fix-body">'
-            f'<div class="fix-meta"><span class="pill cat-{esc(rec["category"])}">{gain}</span>{saves}'
-            f'<span class="pill effort">Effort {esc(rec.get("effort", "M"))}</span></div>'
-            f'<h3>{esc(rec["title"])}</h3><p>{esc(rec.get("why", ""))}</p>'
-            f'<details class="fix-detail"><summary>The fix</summary><pre>{esc(rec.get("fix", ""))}</pre></details>'
-            f'<div class="fix-actions"><button type="button" data-copy="{esc(rec.get("fix", ""))}">Copy fix</button>'
+            f'<div class="fix-meta">{"".join(effects)}{saves}{effort}</div>'
+            f'<h3>{esc(rec["title"])}</h3><p>{esc(rec.get("why", ""))}</p>{where}'
+            f'<details class="fix-detail"><summary>The suggestion</summary><pre>{esc(rec.get("fix", ""))}</pre>{check}</details>'
+            f'<div class="fix-actions"><button type="button" data-copy="{esc(rec.get("fix", ""))}">Copy suggestion</button>'
             f'<button type="button" data-copy="{esc("# " + rec["issue"]["title"] + chr(10) + chr(10) + rec["issue"]["body"])}">Copy as issue</button></div>'
             f'</div></article>')
 
     sections = []
     for key, name, question in CATEGORIES:
         c = cats[key]
-        rows = [row for row in CATALOG if row[1] == key]
-        opps, passed, na = [], [], []
+        rows = [row for row in CATALOG if row[1] == key and row[3] != "trial"]
+        opps, passed, na, untested = [], [], [], []
         for row in rows:
             res = results.get(row[0])
             if not res:
                 continue
-            if res["na"]:
+            if res.get("untested"):
+                untested.append((row, res))
+            elif res["na"]:
                 na.append((row, res))
             elif res["score"] is not None and res["score"] >= 0.9:
                 passed.append((row, res))
@@ -1337,13 +1552,17 @@ def render_html(report: dict) -> str:
             capped = f'<p class="capped">Capped at 49 by a failed critical audit: {esc(", ".join(c["capped_by"]))}.</p>'
         elif c.get("note"):
             capped = f'<p class="question">{esc(c["note"])}</p>'
+        if c.get("provisional"):
+            capped += (f'<p class="question">Provisional: {round(c.get("coverage", 0) * 100)}% of the applicable checks ran. '
+                       "Audits that were not checked are listed below; the score can move either way once they are.</p>")
         sections.append(
             f'<section class="category" id="{key}"><header class="cat-head">{gauge_svg(c["score"], 72, 6)}'
             f'<div><h2>{esc(name)}</h2><p class="question">{esc(question)}</p>'
             + (f'<p class="cat-summary">{esc(summary)}</p>' if summary else "") + capped + "</div></header>"
             + audit_group("Opportunities", opps, by_code, open_=True, hint="ranked by estimated gain")
             + audit_group(f"Passed audits ({len(passed)})", passed, by_code, folded=True)
-            + audit_group(f"Not applicable or not judged ({len(na)})", na, by_code, folded=True)
+            + audit_group(f"Not checked in this run ({len(untested)})", untested, by_code, folded=True)
+            + audit_group(f"Not applicable ({len(na)})", na, by_code, folded=True)
             + "</section>")
 
     inventory_rows = []
@@ -1356,9 +1575,9 @@ def render_html(report: dict) -> str:
         grade = tool_grade(p, results)
         inventory_rows.append(
             f'<tr><td><code>{esc(p["name"])}</code>' + (f'<div class="sub">{esc(p["title"])}</div>' if p["title"] else "") + "</td>"
-            f'<td class="grade g-{grade}" data-v="{"ABCDF".index(grade)}">{grade}</td>'
+            f'<td class="grade g-{grade}" data-v="{"ABCDF–".index(grade)}">{grade}</td>'
             f'<td data-v="{p["description_chars"]}">{p["description_chars"]:,}</td>'
-            f'<td data-v="{p["description_tokens"]}">{p["description_tokens"]:,}</td>'
+            f'<td data-v="{p["model_tokens"] - p["description_tokens"]}">{p["model_tokens"] - p["description_tokens"]:,}</td>'
             f'<td data-v="{p["model_tokens"]}">{p["model_tokens"]:,}</td>'
             f'<td data-v="{p["output_schema_tokens"]}">{f"{p[chr(111) + "utput_schema_tokens"]:,}" if p["output_schema_tokens"] else "–"}</td>'
             f'<td data-v="{p["fields_described"] / p["fields"] if p["fields"] else 1}">{fd}</td><td>{flags}</td></tr>')
@@ -1378,9 +1597,9 @@ def render_html(report: dict) -> str:
     if report.get("warnings"):
         warn = '<div class="warnings"><strong>Run warnings</strong><ul>' + "".join(f"<li>{esc(w)}</li>" for w in report["warnings"]) + "</ul></div>"
 
-    badges = [meta["transport"]]
-    if meta.get("judged"):
-        badges.append("judged")
+    badges = [meta["transport"], meta.get("review_mode") or ("reviewed" if meta.get("judged") else "automatic checks only")]
+    if meta.get("trial_count"):
+        badges.append(f'{meta["trial_count"]} agent trials')
     if meta.get("calls"):
         badges.append(f'{meta["calls"]} read calls')
     if meta.get("repo"):
@@ -1390,13 +1609,17 @@ def render_html(report: dict) -> str:
         "TITLE": esc(f"MCP Insights: {meta['server_title']}"),
         "SERVER_TITLE": esc(meta["server_title"]),
         "SERVER_META": esc(" · ".join(x for x in (meta.get("server_name"), meta.get("server_version"),
-                                                       f"protocol {meta.get('protocol')}", meta.get("target")) if x)),
+                                                       meta.get("protocol") and f"protocol {meta['protocol']}", meta.get("target")) if x)),
         "BADGES": "".join(f'<span class="badge">{esc(b)}</span>' for b in badges),
         "DATE": esc(pretty_date(meta["collected_at"])),
         "GAUGES": "".join(gauges),
         "VITALS": "".join(vitals),
         "TRIALS": trials_html(report.get("trials"), results),
-        "FIXES": "".join(fixes) or '<p class="empty">Nothing to fix above the noise.</p>',
+        "FIXES": "".join(fixes) or '<p class="empty">Nothing to suggest above the noise.</p>',
+        "FIXES_LEAD": esc("The five changes with the largest expected effect on the scores; those that lift a cap come first. "
+                          + ("Based on the source checkout, with effort estimates." if meta.get("repo") else
+                             "Made from the outside, without the source: they describe what the agent saw and what it should see instead, "
+                             "so check them against the code before acting.")),
         "TREEMAP": treemap_svg(m.get("tools") or []) if m.get("tools") else '<p class="empty">No tools.</p>',
         "TREEMAP_NOTE": esc(f"{fmt_tokens(m.get('tool_list_model_tokens'))} reach the model (name, title, description and input schema of every tool). "
                             f"The full tools/list is {fmt_tokens(m.get('tool_list_wire_tokens'))}; output schemas and annotations stay with the client."),
@@ -1421,12 +1644,13 @@ def pretty_date(stamp) -> str:
 
 
 def tool_grade(p, results) -> str:
-    """A to F per tool from its judged description item, field coverage and size."""
+    """A to F per tool from its judged description item, field coverage and size; '–' when the description was not judged."""
     parts = []
     g10 = results.get("G10") or {}
-    for it in g10.get("items") or []:
-        if it.get("item") == p["name"]:
-            parts.append(it["score"])
+    mine = [it["score"] for it in g10.get("items") or [] if it.get("item") == p["name"]]
+    if not mine:
+        return "–"
+    parts += mine
     parts.append(p["fields_described"] / p["fields"] if p["fields"] else 1)
     parts.append(lognormal_score(p["description_chars"], 1000, 2000))
     parts.append(1 if "readOnlyHint" in p["annotations"] else 0.5)
@@ -1485,8 +1709,35 @@ def trials_report(probe: dict, findings: dict) -> dict | None:
     runs = []
     for r in t.get("runs") or []:
         v = verdicts.get(r["id"]) if isinstance(verdicts.get(r["id"]), dict) else {}
-        runs.append({**r, "verdict": v})
+        runs.append({**r, "verdict": v, "outcome": trial_outcome(r, v)})
     return {**t, "runs": runs}
+
+
+OUTCOMES = {"done": "Done", "partial": "Partly done", "drafted": "Drafted, not run", "failed": "Failed",
+            "blocked": "Blocked", "declined": "Declined"}
+UNCOUNTED_OUTCOMES = {"blocked", "declined"}
+
+
+def trial_outcome(run: dict, verdict: dict) -> str | None:
+    """done, partial, drafted or failed; blocked (by the environment) and declined (rightly) do not count."""
+    if not isinstance(verdict, dict):
+        return None
+    if verdict.get("outcome") in OUTCOMES:
+        return verdict["outcome"]
+    s = verdict.get("success")
+    if s is None:
+        return None
+    # A right call that was denied is a draft: the agent found the call, nobody saw it work.
+    main_denied = any(e.get("denied") and e.get("tool") in (run.get("needs") or []) for e in run.get("events") or [])
+    if s >= 1:
+        return "drafted" if main_denied else "done"
+    return "partial" if s > 0 else "failed"
+
+
+def outcome_score(outcome: str, verdict: dict) -> float:
+    if outcome == "partial":
+        return max(0.0, min(1.0, float(verdict.get("success") or 0.5)))
+    return {"done": 1.0, "drafted": 0.5}.get(outcome, 0.0)
 
 
 def help_size(t: dict) -> str:
@@ -1552,10 +1803,10 @@ def trials_html(trials: dict | None, results: dict) -> str:
             v = r.get("verdict") or {}
             if r.get("invalid"):
                 verdict = f'<p class="trial-verdict na">{shape("na")}{esc(r.get("status"))}</p>'
-            elif v.get("success") is not None:
-                vb = band(v["success"])
-                word = "Done" if v["success"] >= 1 else "Partly done" if v["success"] > 0 else "Failed"
-                verdict = f'<p class="trial-verdict {vb}">{shape(vb)}<span><b>{word}.</b> {esc(v.get("evidence", ""))}</span></p>'
+            elif r.get("outcome"):
+                o = r["outcome"]
+                vb = "na" if o in UNCOUNTED_OUTCOMES else band(outcome_score(o, v))
+                verdict = f'<p class="trial-verdict {vb}">{shape(vb)}<span><b>{OUTCOMES[o]}.</b> {esc(v.get("evidence", ""))}</span></p>'
             else:
                 verdict = f'<p class="trial-verdict na">{shape("na")}<span>Outcome not judged.</span></p>'
             hb = r.get("help_before_use")
@@ -1585,17 +1836,20 @@ def trials_html(trials: dict | None, results: dict) -> str:
     legend = ('<div class="tm-legend steps-legend"><span><i class="k help"></i>help read</span><span><i class="k read"></i>other call</span>'
               '<span><i class="k write"></i>the task\u2019s main call</span><span><i class="k denied"></i>blocked write</span>'
               '<span><i class="k err"></i>error</span></div>')
-    judged = [r for r in runs if (r.get("verdict") or {}).get("success") is not None]
-    done = sum(1 for r in judged if r["verdict"]["success"] >= 1)
+    judged = [r for r in runs if r.get("outcome") and r["outcome"] not in UNCOUNTED_OUTCOMES]
+    done = sum(1 for r in judged if r["outcome"] == "done")
+    drafted = sum(1 for r in judged if r["outcome"] == "drafted")
     helpy = [r for r in runs if r.get("expects_help") is True and r.get("help_before_use") is not None]
     plain = [r for r in runs if r.get("expects_help") is False]
     parts = [f"{done} of {len(judged)} tasks done" if judged else f"{len(runs)} trials, outcomes not judged"]
+    if drafted:
+        parts.append(f"{drafted} more drafted with the write blocked")
     if helpy:
         parts.append(f"help read first in {sum(1 for r in helpy if r['help_before_use'])} of {len(helpy)} that needed it")
     if plain:
         parts.append(f"{sum(1 for r in plain if not r.get('help_reads'))} of {len(plain)} plain tasks without help")
     blocked = sum(len(r.get("drafts") or []) for r in runs)
-    if blocked:
+    if blocked and not drafted:
         parts.append(f"{blocked} blocked writes recorded as drafts")
     summary = "; ".join(parts) + "."
     return (f'<p class="section-lead">{lead}</p><div class="vitals trial-stats">{"".join(stats)}</div>'
@@ -1652,8 +1906,24 @@ def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) ->
         old = json.loads(baseline_path.read_text(encoding="utf-8"))
         baseline = {k: v.get("score") for k, v in (old.get("categories") or {}).items()}
     warnings += metrics.get("waste_problems") or []
+    for rec in (findings or {}).get("recommendations") or []:
+        missing = [f for f in ("targets", "check") if not rec.get(f)]
+        if not rec.get("audits"):
+            missing.append("audits")
+        if missing:
+            warnings.append(f"suggestion \"{rec.get('title', '?')}\" has no {', '.join(missing)}: name the tools or fields, "
+                            "how to confirm the fix, and the audits it moves")
+    # Trials sit beside the review, not in it: they never change a score.
+    judged_rows = [results.get(row[0]) or {} for row in CATALOG if row[3] == "judged"]
+    n_judged = sum(1 for x in judged_rows if x and not x.get("na"))
+    n_open = sum(1 for x in judged_rows if not x or x.get("untested"))
+    review_mode = ("handshake failed" if not init.get("ok") else "automatic checks only" if not n_judged
+                   else "full review" if not n_open else "partial review")
+    n_trials = len([r for r in (probe.get("trials") or {}).get("runs") or [] if not r.get("invalid")])
     unjudged = [code for code, r in results.items() if r.get("unjudged")]
-    if unjudged and findings:
+    if not init.get("ok"):
+        warnings.append("The handshake failed, so nothing beyond it could be checked. See stderr_tail in probe.json.")
+    elif unjudged and findings:
         warnings.append(f"not judged: {', '.join(sorted(unjudged))}")
     elif not findings:
         warnings.append("No findings.json: judged audits are missing, so Agent guidance, Error recovery and Safety rest on the automatic checks only.")
@@ -1665,7 +1935,9 @@ def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) ->
             "target": target.get("label") or target.get("url") or "",
             "collected_at": probe.get("collected_at"), "probe_version": probe.get("probe_version"),
             "render_version": RENDER_VERSION, "catalog_version": CATALOG_VERSION,
-            "judged": bool(findings), "calls": len([c for c in probe.get("calls") or [] if "bytes" in c]),
+            "judged": bool(n_judged), "review_mode": review_mode, "trial_count": n_trials,
+            "token_estimator": TOKEN_ESTIMATOR,
+            "calls": len([c for c in probe.get("calls") or [] if "bytes" in c]),
             "repo": bool((findings or {}).get("repo")),
         },
         "categories": cats,
