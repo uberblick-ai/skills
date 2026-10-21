@@ -63,7 +63,10 @@ legend
   where a person steps in. Leave out a column the loop does not need.
 - Main column, top to bottom: the entry label, then per agent its box, its
   gate as a `decision` and the label its passing outcome adds. Edges out of a
-  gate carry the outcome name. Finish with an `end`.
+  gate carry the outcome name. Finish with an `end`. When an agent checks
+  something before it does its work (a contract still valid, a PR it must not
+  duplicate), draw that gate between two boxes: the agent's box, the gate, then
+  a box for the work itself, such as `box implement "builds the one PR"`.
 - Every gate in `flow.json` appears in the drawing with its number as the
   first word of its text (`G2 ...`), as a `decision` with `tone=system`, or
   inside the stop panel for a gate a person decides. A launcher gate that
