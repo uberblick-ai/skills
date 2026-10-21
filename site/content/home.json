@@ -18,6 +18,7 @@
     {"label": "Contribute", "question": "How do I write a skill for this repository?", "links": [["Guide", "AGENTS.md", "https://github.com/uberblick-ai/skills/blob/main/AGENTS.md"], ["Spec", "Agent Skills specification", "https://agentskills.io/specification"]]}
   ],
   "changes": [
+    ["2026-10-21", "Skill", "ub-agents-deliver-report 1.9: the Changelog's issues and PRs show as GitHub pills, with the right issue or pull request icon."],
     ["2026-10-21", "Skill", "ub-agents-deliver-report 1.8: the page's What to change cards open a Claude Code discussion too, and costs carry dates instead of \"today\"."],
     ["2026-10-21", "Skill", "ci-health 1.7: each action card's footer shows its evidence: where it applies, what it costs and the issues and PRs behind it, as GitHub pills."],
     ["2026-10-21", "Skill", "ub-agents-deliver-report 1.7: a new delivery report document starts with its charts, without a KPI table."],

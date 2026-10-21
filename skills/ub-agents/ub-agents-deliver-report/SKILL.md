@@ -17,7 +17,7 @@ compatibility: >-
   the page.
 metadata:
   author: uberblick-ai
-  version: "1.8"
+  version: "1.9"
 ---
 
 # Deliver report
@@ -97,7 +97,9 @@ classes, the page and the records are defined in
    when none fits, named for the mechanism, not the incident. Count the runs
    each cause cost on this day, and mark it fixed, naming the change, when
    `main` or ub-agents already fixed it; record each such change that landed on
-   this day in `changes` with why it was made. A retrospective is a claim;
+   this day in `changes` with why it was made, citing issues and PRs as `#n`
+   in the change's repository or `owner/name#n`, which the Changelog shows as
+   GitHub pills. A retrospective is a claim;
    count it only where the records agree. Group the day's retrospectives by
    cause, one summary sentence per group.
 

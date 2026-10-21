@@ -20,6 +20,7 @@ come from the repository's ub-agents.yaml, and ROLES maps the common role names 
 import argparse
 import base64
 import datetime as dt
+import functools
 import hashlib
 import html
 import json
@@ -865,16 +866,64 @@ def values(collection):
     return {r["id"]: r["value"] for r in rows}
 
 
+# #n, repo#n or owner/repo#n in prose, not inside a word, a path or an address's fragment.
+REFERENCE = re.compile(r"(?<![\w./#-])(?:(?:([\w-]+)/)?([\w.-]+))?#(\d+)\b")
+
+
+@functools.cache
+def item_url(repo, number):
+    """An issue's or pull request's GitHub address, /issues/ or /pull/, so its pill shows the right kind; None when
+    GitHub cannot say."""
+    try:
+        return gh(f"repos/{repo}/issues/{number}").get("html_url")
+    except (RuntimeError, OSError, ValueError):
+        return None
+
+
+def references(text, repo):
+    """Prose as inline runs, each reference GitHub knows linked with its text kept, so it shows as a GitHub pill. A
+    bare #n is in `repo` and repo#n in `repo`'s owner."""
+    runs, at = [], 0
+    for found in REFERENCE.finditer(text):
+        owner, name, number = found.groups()
+        target = (f"{owner}/{name}" if owner else f"{repo.split('/')[0]}/{name}" if name and repo else
+                  None if name else repo)
+        url = target and item_url(target, number)
+        if url:
+            runs += [{"text": text[at:found.start()], "marks": {}}, {"text": found.group(0), "marks": {"link": url}}]
+            at = found.end()
+    runs.append({"text": text[at:], "marks": {}})
+    merged = []
+    for run in (r for r in runs if r["text"]):
+        if merged and not merged[-1]["marks"] and not run["marks"]:
+            merged[-1] = {"text": merged[-1]["text"] + run["text"], "marks": {}}
+        else:
+            merged.append(run)
+    return merged
+
+
 def changelog(changes, limit=5):
-    """The latest changes as list items: the day, the change linked, and why it was made."""
+    """The latest changes as list items: the day, the title, the issue or PR as a GitHub pill (or the title linked to
+    its commit), and why it was made, its references as pills too. A pill needs a link whose text is the reference."""
     blocks = []
     for ref, c in sorted(changes.items(), key=lambda kv: (kv[1]["day"], kv[0]), reverse=True)[:limit]:
-        url = c.get("url") or link(ref)
-        name = ref.split("/", 1)[1] if "/" in ref else ref
         day = dt.date.fromisoformat(c["day"]).strftime("%-d %b")
-        title = {"text": c["title"], "marks": {"link": url} if url else {}}
-        blocks.append({"type": "list-item", "inline": [{"text": f"{day}: ", "marks": {}}, title,
-                                                       {"text": f" ({name}). {c['why']}", "marks": {}}]})
+        found = re.fullmatch(r"([\w.-]+/[\w.-]+)#(\d+)", ref)
+        if found:
+            repo = found.group(1)
+            url = item_url(repo, found.group(2)) or c.get("url") or link(ref)
+            inline = [{"text": f"{day}: {c['title']} (", "marks": {}},
+                      {"text": ref.split("/", 1)[1], "marks": {"link": url}}, {"text": "). ", "marks": {}}]
+        else:
+            url = c.get("url")
+            commit = re.match(r"https://github\.com/([\w.-]+/[\w.-]+)/", url or "")
+            repo = commit.group(1) if commit else None
+            inline = [{"text": f"{day}: ", "marks": {}}, {"text": c["title"], "marks": {"link": url} if url else {}},
+                      {"text": f" ({ref}). ", "marks": {}}]
+        why = references(c["why"], repo)
+        if why and not why[0]["marks"]:
+            inline[-1] = {"text": inline[-1]["text"] + why.pop(0)["text"], "marks": {}}
+        blocks.append({"type": "list-item", "inline": inline + why})
     return blocks
 
 

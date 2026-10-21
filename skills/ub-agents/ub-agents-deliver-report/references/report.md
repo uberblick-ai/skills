@@ -316,8 +316,18 @@ bottom:
    `addressed_by` and `addressed_as`, so later reports keep it struck
    through.
 4. **Changelog.** A bullet list of the five latest `changes`, newest first:
-   the day, the change linked to its issue, PR or commit in ub-agents or the
-   project, and why it was made.
+   the day, the change's title, its issue or PR in ub-agents or the project,
+   and why it was made, such as `20 Oct: Quarantine six flaky tests
+   ([uberblick-2#2004](https://github.com/uberblick-ai/uberblick-2/pull/2004)).
+   Six tests turned main red;
+   [#2003](https://github.com/uberblick-ai/uberblick-2/issues/2003) tracks
+   them.` The reference is the link, not the title, so Uberblick shows it as
+   a GitHub pill, which it draws only for a link whose text names the item.
+   Its address is the one GitHub gives, `/pull/` or `/issues/`, so the pill
+   shows the right kind. A change that is a commit keeps its title linked to
+   the commit. In `why`, each `#n` (the change's repository), `name#n` (the
+   same owner) or `owner/name#n` that GitHub knows is linked the same way;
+   any other text stays plain.
 
 After each stored day the skill brings the "Recommended Actions" and
 "Changelog" sections up to date from `document`'s output, one block at a time:
