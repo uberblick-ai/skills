@@ -982,16 +982,6 @@ def document(dataset, data, doc=None, button=True, first=None):
                                  or bool(first and changes[ref]["day"] >= first) for ref in latest)}
 
 
-KPIS = [("Autonomous deliveries", "up", "autonomous_pct", "Loop deliveries the integrator merged with no wasted run, "
-         "no stop and no action-needed notice; a reviewer send-back still counts."),
-        ("Wasted runs", "down", "wasted_pct", "Runs started on the day that ended without an accepted outcome."),
-        ("Human stops", "down", None, "Action-needed notices on loop deliveries, and the hours from each to the next run on "
-         "the item."),
-        ("Cycle", "down", None, "First run to delivery, without the human wait."),
-        ("Run time", "down", None, "Run minutes summed per delivery, the touch time."),
-        ("Runs with denials", "down", "denial_pct", "Claude runs on the day with a permission denial.")]
-
-
 def chart(mapping):
     """A chart block: a version-1 line or table mapping bound to a collection of the document's data."""
     return {"type": "chart", "text": json.dumps(mapping, indent=1)}
@@ -1002,7 +992,7 @@ def column(field, label, fmt="number", **extra):
 
 
 def create_document(data, button=True):
-    """create_doc arguments for a new dataset document, laid out as references/report.md describes: intro, KPIs,
+    """create_doc arguments for a new dataset document, laid out as references/report.md describes: intro,
     charts and a Recent days table bound to `days`, this day's Recommended Actions, and the Changelog."""
     repo, sections = data["repo"], document({}, data, button=button)
     percent = {"unit": "%", "decimals": 0}
@@ -1015,10 +1005,6 @@ def create_document(data, button=True):
         {"type": "paragraph", "text": "The ub-agents-deliver-report skill (npx skills@latest add uberblick-ai/skills) "
          "stores one record per day in this document's data. The charts and tables below follow that data; the "
          "Recommended Actions are rewritten after each stored day."},
-        {"type": "heading", "level": 2, "text": "KPIs"},
-        {"type": "table", "text": "| KPI | Goal | Target | Definition |\n| --- | --- | --- | --- |\n" + "\n".join(
-            f"| {kpi} | {goal} | {TARGETS[field][1] if field else ''} | {definition} |"
-            for kpi, goal, field, definition in KPIS)},
         {"type": "heading", "level": 2, "text": "Data"},
         chart({"version": 1, "type": "line", "collection": "days", "title": "Autonomy and waste",
                "x": {"field": "day", "type": "date", "label": "Day"},
