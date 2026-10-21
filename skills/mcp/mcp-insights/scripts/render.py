@@ -92,6 +92,12 @@ CATALOG = [
     ("G01", "guidance", 4, "auto", "Ships startup instructions",
      "Instructions are the one text a client shows the model before any tool: the cross-tool workflow belongs there.",
      "Add short instructions: the workflow that spans tools, and where help lives.", ["transport"], "/basic/lifecycle#initialization", False),
+    ("G07", "guidance", 3, "auto", "Startup instructions fit what clients show",
+     "Claude Code shows only about the first 2 KB of the instructions; anything after that never reaches the model.",
+     "Keep instructions under 2 KB, with the workflow and the help topic names first.", ["transport"], "", False),
+    ("G08", "guidance", 2, "auto", "No code leftovers in tool text",
+     "Docstring sections (Args:, Returns:, ctx:), type hints and TODOs describe the implementation, not the tool, and cost context on every turn.",
+     "Write descriptions for the model: drop docstring sections, internal arguments the client never sends, and notes for developers.", ["tools"], "", False),
     ("G02", "guidance", 6, "auto", "Every tool has a real description",
      "The description is how a model picks a tool; a missing or one-line one leads to wrong calls.",
      "Describe each tool in at least two plain sentences: what it does and what it returns.", ["tools"], "/server/tools#tool", False),
@@ -163,9 +169,9 @@ CATALOG = [
     ("E11", "errors", 4, "judged", "Errors state the real cause",
      "A wrong cause sends the agent to fix the wrong thing.",
      "Report each failure by what actually went wrong.", ["errors"], "", False),
-    ("E12", "errors", 8, "judged", "Writes refuse input they cannot store",
+    ("E12", "errors", 8, "judged", "Writes never store something else silently",
      "A write that silently drops or mangles input is the worst failure: every call reports success.",
-     "Refuse writes whose content would be stored differently, and say which part.", ["tools", "errors"], "", True),
+     "Return the checker's diagnostics with the write result, naming the part that will not round-trip; refuse only when nothing sensible can be stored.", ["tools", "errors"], "", True),
     ("E13", "errors", 3, "trial", "Agents recover from errors in one step",
      "In trials, an error should tell the agent enough to get the next call right.",
      "Put the valid values or the corrected call in the error text.", ["tools", "errors"], "", False),
@@ -206,6 +212,9 @@ CATALOG = [
     ("C11", "context", 3, "waste", "Help topics earn their size",
      "Topics are read on demand, but every wasted paragraph is read in full each time.",
      "Cut the quoted spans from the help topics.", ["resources", "prompts"], "", False),
+    ("C12", "context", 3, "metric", "Help does not paste JSON schemas",
+     "The client already has every tool's schema; a schema pasted into help is paid again each time the topic is read and drifts from the real one.",
+     "Replace pasted schemas with one example call, the fields that need explaining, and a pointer to the tool.", ["resources", "prompts"], "", False),
     # Safety and trust
     ("S01", "safety", 6, "auto", "Risk annotations match what tools do",
      "A write tool marked read-only can be auto-approved; a read tool without the hint asks for needless approval. (Heuristic on tool names.)",
@@ -251,7 +260,11 @@ BUDGETS = {
     "C09": (0.05, 0.20, "%"),
     "C10": (0.05, 0.25, "%"),
     "C11": (0.10, 0.35, "%"),
+    "C12": (0.05, 0.25, "%"),
 }
+LEFTOVERS = (r"^\s*(Args|Arguments|Parameters|Returns|Raises|Yields|Example usage):\s*$|\bctx\s*:\s*\w|\bself\b\.|"
+             r"\b(TODO|FIXME|XXX)\b|\bOptional\[|\bList\[|->\s*(dict|str|list|None)\b|:param \w+:|@param\b|:returns?:")
+INSTRUCTIONS_SHOWN = 2048  # bytes of instructions Claude Code shows (Uberblick's help review, 2026-10-21)
 
 READ_VERBS = r"^(get|list|search|read|find|fetch|query|describe|show|export|lookup|view|count|status|sync_status|backlinks)"
 WRITE_VERBS = r"(create|update|delete|remove|set|edit|insert|write|archive|restore|pin|unpin|move|send|post|add|annotate|link|upload|merge|close|toggle|trigger|run|execute)"
@@ -273,6 +286,24 @@ NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 
 def size(obj) -> int:
     return len(json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def schema_bytes(text: str) -> int:
+    """Bytes of JSON Schema pasted into a help text: fenced blocks or bare objects that declare properties or types."""
+    total, seen = 0, []
+    for mt in re.finditer(r"```(?:json|jsonc)?\s*\n(.*?)```", text, re.S):
+        body = mt.group(1)
+        if re.search(r'"(properties|additionalProperties|\$schema|inputSchema|outputSchema)"\s*:', body) or \
+                len(re.findall(r'"type"\s*:\s*"(object|string|integer|number|boolean|array)"', body)) >= 3:
+            total += len(body.encode("utf-8"))
+            seen.append(mt.span())
+    rest = text
+    for a, b in reversed(seen):
+        rest = rest[:a] + rest[b:]
+    # Unfenced schema: a run of lines dense with "type"/"properties" keys.
+    for mt in re.finditer(r'(?:^.*"(?:type|properties|required|items|enum|description)"\s*:.*\n){6,}', rest, re.M):
+        total += len(mt.group(0).encode("utf-8"))
+    return total
 
 
 def looks_like_error(text: str) -> bool:
@@ -657,6 +688,22 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     # --- guidance
     res("G01", 1 if instr.strip() else 0, fmt_bytes(m["instructions_bytes"]) if instr else "none")
     if tools:
+        leftovers = []
+        for t in tools:
+            mt = re.search(LEFTOVERS, t.get("description") or "", re.M)
+            if mt:
+                a = max(0, mt.start() - 40)
+                leftovers.append({"item": t.get("name"), "score": 0, "evidence": (t.get("description") or "")[a:mt.end() + 60].replace("\n", " ")})
+        res("G08", 1 - len(leftovers) / len(tools), f"{len(leftovers)} of {len(tools)} tools" if leftovers else "none", items=leftovers[:12])
+    else:
+        res("G08", 0, na=True)
+    if instr.strip():
+        cut = max(0, m["instructions_bytes"] - INSTRUCTIONS_SHOWN)
+        res("G07", 1 if not cut else max(0.0, 1 - cut / INSTRUCTIONS_SHOWN), "all shown" if not cut else f"{fmt_bytes(cut)} cut",
+            note="" if not cut else "Cut off in Claude Code: " + json.dumps(instr.encode("utf-8")[INSTRUCTIONS_SHOWN:].decode("utf-8", "ignore")[:200]))
+    else:
+        res("G07", 0, na=True, note="no instructions")
+    if tools:
         weak = [p for p in per_tool if p["description_chars"] < 40]
         res("G02", 1 - len(weak) / len(tools), f"{len(tools) - len(weak)} of {len(tools)}",
             items=[{"item": p["name"], "score": 0, "evidence": f"{p['description_chars']} characters"} for p in weak])
@@ -742,6 +789,17 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     metric("C04", (m.get("max_field_desc") or {}).get("value"), (m.get("max_field_desc") or {}).get("where", ""), (m.get("max_field_desc") or {}).get("effective"))
     metric("C05", (m.get("max_topic") or {}).get("value"), (m.get("max_topic") or {}).get("where", ""), (m.get("max_topic") or {}).get("effective"))
     metric("C06", m.get("total_topics"), effective=(m.get("total_topics") or 0) + m.get("total_topics_waste", 0) if topics else None)
+    if topics:
+        pasted = [(x["uri"], schema_bytes(x.get("text") or "")) for x in topics]
+        total_schema = sum(b for _, b in pasted)
+        share = total_schema / max(1, sum(x["text_bytes"] for x in topics))
+        res("C12", lognormal_score(max(share, 1e-6), *BUDGETS["C12"][:2]),
+            f"{fmt_bytes(total_schema)} of {fmt_bytes(sum(x['text_bytes'] for x in topics))} ({share * 100:.0f}%)",
+            items=[{"item": uri, "score": 0, "evidence": f"{fmt_bytes(b)} of pasted schema"}
+                   for uri, b in sorted(pasted, key=lambda kv: -kv[1]) if b > 1024][:10])
+        r["C12"]["value"] = share
+    else:
+        res("C12", 0, na=True, note="no help topics")
     always = {k: v for k, v in waste.items() if k == "instructions" or k.startswith("tool:") or k.startswith("field:")}
     on_demand = {k: v for k, v in waste.items() if k.startswith("topic:")}
     field_bytes = sum(len(v.encode("utf-8")) for k, v in text_index(probe).items() if k.startswith("field:"))

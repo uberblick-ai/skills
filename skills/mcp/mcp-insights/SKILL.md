@@ -104,6 +104,11 @@ the default Haiku; add a `"model": "sonnet"` copy of a trial to compare.
 Write tools are blocked, and the blocked call is recorded as what the agent
 would have sent. In a sandbox, add `--allow-writes` and `--before-each` with a
 command that restores the sandbox, so every trial starts from the same state.
+Then read what the agent wrote back through the server and check it with the
+server's own reads; that is how silent truncation and Markdown stored as
+literal text show up (E12). With a sandbox, also send a few deliberately
+malformed writes yourself (a table row with an extra cell, an unknown key) and
+read them back.
 
 ## 5. Judge
 
@@ -114,7 +119,12 @@ error messages under `probes`. Score the judged audits with the anchors in
 in the shape described there. Every score below 1 needs quoted evidence or it
 is not counted. Write concrete fixes: for a description, the rewritten text
 ready to paste. Quote wasted spans under `density`, so context cost counts
-waste rather than length. Read each trial's transcript in `DIR/trials/` and
+waste rather than length. For a server with many formats or a large help
+surface, judge one content family at a time (a syntax, a block type, a
+workflow), one sub-agent per family when you can start them: each reads the
+help and, when the server's repository is at hand, the implementation, and
+reports the copies that drift, editing that is not taught, writes that should
+fail, and internals that leak. Read each trial's transcript in `DIR/trials/` and
 record whether it succeeded under `trials`.
 
 ## 6. Render

@@ -96,7 +96,7 @@ def summarize(lines: list[dict], server: str, trial: dict, help_spec: dict) -> d
     needs = set(trial.get("needs") or [])
     first_use = next((e["i"] for e in events if e["tool"] in needs), None)
     help_events = [e for e in events if e["kind"] == "help"]
-    errors = [e for e in events if e.get("is_error")]
+    errors = [e for e in events if e.get("is_error") and e["kind"] in ("tool", "help")]
     recovered = 0
     for e in errors:
         nxt = next((x for x in events[e["i"] + 1:] if x["tool"] == e["tool"]), None)
@@ -106,10 +106,18 @@ def summarize(lines: list[dict], server: str, trial: dict, help_spec: dict) -> d
         key = (e["tool"], e["input"])
         repeats += key in seen
         seen.add(key)
+    def matches(e, spec):
+        if spec == "help":
+            return e["kind"] == "help"
+        name, _, pattern = spec.partition(":")
+        if e["tool"] != name:
+            return False
+        return not pattern or fnmatch.fnmatch(str(e.get("uri") or ""), pattern) or pattern in e.get("input", "")
+
     rules = []
     for rule in trial.get("rules") or []:
-        first = next((e["i"] for e in events if e["tool"] in rule.get("first", [])), None)
-        before = [e for e in events if e["tool"] in rule.get("before", []) or ("help" in rule.get("before", []) and e["kind"] == "help")]
+        first = next((e["i"] for e in events if any(matches(e, f) for f in rule.get("first", []))), None)
+        before = [e for e in events if any(matches(e, b) for b in rule.get("before", []))]
         rules.append({"label": rule.get("label", ""), "applies": first is not None,
                       "followed": None if first is None else any(e["i"] < first for e in before)})
     usage = final.get("usage") or {}
@@ -209,7 +217,7 @@ def run(args) -> int:
         model = trial.get("model") or args.model
         cmd = [claude, "-p", trial["task"], "--output-format", "stream-json", "--verbose", "--model", model,
                "--no-session-persistence", "--strict-mcp-config", "--mcp-config", str(Path(args.mcp_config).resolve()),
-               "--setting-sources", "project", "--tools", ",".join(CLIENT_TOOLS),
+               "--setting-sources", "", "--tools", ",".join(CLIENT_TOOLS),
                "--allowedTools", ",".join(allowed), "--max-budget-usd", str(args.max_budget)]
         if not args.allow_writes:
             cmd += ["--append-system-prompt", NOTE_BLOCKED]
