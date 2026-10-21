@@ -105,6 +105,22 @@ class Tests(unittest.TestCase):
         self.assertLess(page.index('name="viewport"'), page.index("<title>"))
         self.assertIn("Prüfung — schneller…", page)
 
+    def test_page_cards_link_a_proposed_lesson_to_claude_code(self):
+        lessons = [{"id": "x", "lever": "wording", "title": "Shorter brief", "change": "Drop step 3.",
+                    "where": "AGENTS.md", "cost": "5 runs on 11 October", "evidence": [7], "state": "proposed"},
+                   {"id": "y", "lever": "autonomy", "title": "Merge green PRs", "change": "Let the loop merge.",
+                    "state": "tracked", "addressed_by": "o/n#9"}]
+        day = data(lessons=lessons, actions=["x"])
+        day["summary"] |= dict.fromkeys(["loop_cycle_h_median", "cycle_h_median", "run_h_median", "run_h",
+                                         "additions", "deletions", "files"], 0) | {"headline": "A day."}
+        page = review.report(day | {"retrospective_groups": []})
+        links = re.findall(r'<a class="discuss" href="([^"]+)">Discuss in Claude Code</a>', page)
+        self.assertEqual(len(links), 1, "only the proposed lesson, not one already being handled")
+        prompt = unquote(links[0].replace("&amp;", "&").split("q=", 1)[1])
+        for part in ("From the delivery report for o/n, evidence as of 2026-10-14", "Recommendation: Shorter brief.",
+                     "Where: AGENTS.md", "5 runs on 11 October", "items: #7", "wait for my go-ahead"):
+            self.assertIn(part, prompt)
+
     def test_a_day_is_a_utc_day_in_any_local_zone(self):
         with mock.patch.dict(os.environ, {"TZ": "Asia/Bangkok"}):
             time.tzset()

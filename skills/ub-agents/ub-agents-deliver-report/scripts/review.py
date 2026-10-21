@@ -610,6 +610,8 @@ section { display: grid; gap: 12px; min-width: 0; }
 .scroll { overflow-x: auto; } table { border-collapse: collapse; width: 100%; font-size: 14px; }
 th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 td.r { text-align: right; white-space: nowrap; }
+.discuss { display: inline-block; margin-top: 10px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px;
+  color: var(--fg); text-decoration: none; font-weight: 600; } .discuss:hover { border-color: var(--accent); }
 """
 TONE = {"forward": "ok", "back": "back", "stop": "fail", "waste": "fail", "pending": "wait"}
 
@@ -674,7 +676,9 @@ def report(data):
     out.append("</section><section><h2>What to change</h2>")
     out += [f'<div class="box"><div class="label">{esc(LEVERS[l["lever"]])}</div><h3>{esc(l["title"])}</h3>'
             f'<p>{esc(l["change"])}</p><div class="label">{esc(l.get("where", ""))} · {esc(l.get("cost", ""))} · '
-            f'{esc(", ".join(l.get("causes", [])))} · {refs(repo, l.get("evidence", []))}</div></div>' for l in data["lessons"]]
+            f'{esc(", ".join(l.get("causes", [])))} · {refs(repo, l.get("evidence", []))}</div>'
+            + (f'<a class="discuss" href="{esc(discuss_link(data, l))}">Discuss in Claude Code</a>'
+               if l.get("state", "proposed") == "proposed" else "") + '</div>' for l in data["lessons"]]
     out.append('</section><section><h2>Where extra runs went</h2>')
     out += [f'<div class="box"><div class="label">{esc(f["cost"])} · {esc(f["class"])}</div><p>{esc(f["example"])}</p>'
             f'<p class="muted">{esc(f["cause"])}: {esc(f["mechanism"])} {esc(f["state"].capitalize())}'

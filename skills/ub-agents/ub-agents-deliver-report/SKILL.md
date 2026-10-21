@@ -17,7 +17,7 @@ compatibility: >-
   the page.
 metadata:
   author: uberblick-ai
-  version: "1.7"
+  version: "1.8"
 ---
 
 # Deliver report
@@ -101,11 +101,13 @@ classes, the page and the records are defined in
    count it only where the records agree. Group the day's retrospectives by
    cause, one summary sentence per group.
 
-4. Propose at most four changes, each giving clearer authority, better wording,
-   fewer instructions or more autonomy. Quote any line you would change. Never
-   add a role, label, gate, review round or checklist, and prefer deleting text
-   or moving a step into config or tooling over adding prose. Reuse a lesson id
-   the registry already has. Then search the repositories' issues and PRs for
+4. Propose at most four lessons: changes that give clearer authority,
+   better wording, fewer instructions or more autonomy. Quote any line you
+   would change. Never add a role, label, gate, review round or checklist,
+   and prefer deleting text or moving a step into config or tooling over
+   adding prose. Reuse a lesson id the registry already has. Write `cost`
+   with dates ("5 runs on 11 October"), never "today": a lesson can stay a
+   recommended action for 14 days. Then search the repositories' issues and PRs for
    one that addresses each proposed lesson, new or registered: mark it
    `tracked` with `addressed_by` when an open one does, `applied` when a merged
    one did. Keep `addressed_as` (`implemented` or `planned`) from the registry;
