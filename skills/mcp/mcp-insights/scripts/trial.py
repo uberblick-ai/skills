@@ -121,6 +121,11 @@ def summarize(lines: list[dict], server: str, trial: dict, help_spec: dict) -> d
         rules.append({"label": rule.get("label", ""), "applies": first is not None,
                       "followed": None if first is None else any(e["i"] < first for e in before)})
     usage = final.get("usage") or {}
+    # Context per API call: what the model holds at that step, cached or not.
+    context = [sum(int((m["message"].get("usage") or {}).get(k) or 0)
+                   for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+               for m in lines if m.get("type") == "assistant" and isinstance(m.get("message"), dict)]
+    context = [c for c in context if c]
     return {
         "id": trial["id"], "question": trial.get("question", ""), "task": trial["task"],
         "expects_help": trial.get("expects_help"), "needs": sorted(needs),
@@ -136,6 +141,9 @@ def summarize(lines: list[dict], server: str, trial: dict, help_spec: dict) -> d
         "drafts": [e for e in events if e["denied"]],
         "tokens": sum(int(usage.get(k) or 0) for k in ("input_tokens", "output_tokens", "cache_read_input_tokens",
                                                          "cache_creation_input_tokens")),
+        "context_start": context[0] if context else None,
+        "context_peak": max(context) if context else None,
+        "server_bytes": sum(e.get("bytes", 0) for e in events if e["kind"] in ("tool", "help")),
         "cost_usd": final.get("total_cost_usd") or sum(float(v.get("costUSD") or 0) for v in (final.get("modelUsage") or {}).values()
                                                        if isinstance(v, dict)) or None,
         "turns": final.get("num_turns"), "ms": final.get("duration_ms"),
@@ -255,6 +263,7 @@ def run(args) -> int:
         hb = "-" if summary["help_before_use"] is None else "yes" if summary["help_before_use"] else "NO"
         print(f"{trial['id']}: {summary['calls']} calls, {summary['help_reads']} help reads "
               f"({summary['help_bytes'] / 1024:.0f} KB), help before use: {hb}, errors {summary['errors']}, "
+              f"context {summary.get('context_start') or 0:,} -> {summary.get('context_peak') or 0:,} tokens, "
               f"${summary['cost_usd'] or 0:.3f}", file=sys.stderr)
     record["trials"] = {"server": server, "writes": "allowed (sandbox)" if args.allow_writes else "blocked",
                         "runs": sorted(runs, key=lambda r: r["id"])}
