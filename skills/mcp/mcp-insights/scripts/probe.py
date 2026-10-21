@@ -6,6 +6,10 @@ Subcommands:
            probes, write DIR/probe.json and DIR/transcript.jsonl
   call     run the read-only calls in a calls.json file and add the results
            to DIR/probe.json
+  import   build DIR/probe.json from the tool definitions a client shows the
+           model, for a hosted server the probe cannot reach itself (a
+           connector behind the client's own sign-in); optionally add calls
+           made through that client
 
 Standard library only. Talks stdio (newline-delimited JSON-RPC) or
 Streamable HTTP (JSON or SSE responses).
@@ -98,6 +102,10 @@ def scrub_text(text: str, found: list | None = None, where: str = "") -> str:
     return SECRET_ASSIGN.sub(assign, text)
 
 
+# The probe's own fields, written by us rather than the server; "token_estimator" looks like a secret by name.
+OWN_KEYS = {"probe_version", "token_estimator", "collected_at"}
+
+
 def scrub(obj, found: list | None = None, path: str = ""):
     if isinstance(obj, str):
         return scrub_text(obj, found, path)
@@ -107,7 +115,7 @@ def scrub(obj, found: list | None = None, path: str = ""):
         out = {}
         for k, v in obj.items():
             sub = f"{path}.{k}" if path else k
-            if k == "secrets":
+            if k == "secrets" or (not path and k in OWN_KEYS):
                 out[k] = v
             elif isinstance(v, str) and SECRET_KEY.fullmatch(k) and not re.search(r"(?i)page|cursor|next|max|count|limit|usage", k) \
                     and len(v) >= 8 and not PLACEHOLDER.match(v) and not v.startswith("[REDACTED"):
@@ -841,6 +849,69 @@ def validate(value, schema, path="$"):
     return problems
 
 
+ERROR_HEAD = re.compile(r"(?i)(error\b|http \d{3}\b(?<!http 200)|failed\b|exception\b|unauthorized|forbidden|not found)")
+
+
+def load_lines(path: Path) -> list:
+    """A JSON array, an object with "tools" or "calls", or one JSON object per line."""
+    text = path.read_text(encoding="utf-8").strip()
+    if text.startswith("["):
+        return json.loads(text)
+    if text.startswith("{") and "\n" not in text:
+        obj = json.loads(text)
+        return obj.get("tools") or obj.get("calls") or [obj]
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+
+def import_catalog(args) -> int:
+    """Record what a client shows the model. Everything on the wire (handshake, versions,
+    annotations, output schemas, error codes) stays unknown and the report says so."""
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    tools = []
+    for d in load_lines(Path(args.tools)):
+        name = str(d.get("name", ""))
+        if args.strip_prefix and name.startswith(args.strip_prefix):
+            name = name[len(args.strip_prefix):]
+        tool = {"name": name, "description": d.get("description") or "",
+                "inputSchema": d.get("inputSchema") or d.get("parameters") or d.get("input_schema") or {}}
+        for key in ("title", "annotations", "outputSchema"):
+            if key in d:
+                tool[key] = d[key]
+        tools.append(tool)
+    record: dict = {
+        "probe_version": PROBE_VERSION, "token_estimator": TOKEN_ESTIMATOR,
+        "collected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "target": {"transport": "client", "label": args.label, "via": args.via},
+        "initialize": {"ok": True, "seen_through_client": True, "serverInfo": {"name": args.label},
+                       "instructions": Path(args.instructions).read_text(encoding="utf-8").strip() if args.instructions else None},
+        "tools": tools, "resources": [], "resourceTemplates": [], "prompts": [], "probes": {},
+    }
+    calls, invalid = [], []
+    for c in load_lines(Path(args.calls)) if args.calls else []:
+        text = str(c.get("text") or "")
+        is_error = bool(c.get("is_error"))
+        if c.get("why"):
+            # An argument the schema forbids: did the server refuse it, and say which field?
+            invalid.append({"tool": c["tool"], "arguments": c.get("arguments") or {}, "why": c["why"],
+                            "response": {"kind": "client" if is_error else "success", "message": text[:600] if is_error else ""}})
+            continue
+        entry = {"tool": c["tool"], "arguments": c.get("arguments") or {}, "purpose": c.get("purpose"),
+                 "bytes": len(text.encode("utf-8")), "text_bytes": len(text.encode("utf-8")),
+                 "tokens": estimate_tokens(text), "isError": is_error, "via_client": True}
+        # Keep the body only when it is an error: a read's content is the user's data, not the server's text.
+        if is_error or ERROR_HEAD.match(text[:120]):
+            entry["text_head"] = text[:600]
+        calls.append(entry)
+    if calls:
+        record["calls"] = calls
+    if invalid:
+        record["probes"]["invalid_arguments"] = invalid
+    write_record(out, record)
+    print(f"{args.label}: {len(tools)} tools from the client, {len(calls)} calls, {len(invalid)} invalid-argument probes")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -858,8 +929,19 @@ def main(argv=None) -> int:
             p.add_argument("--label", help="a short name for the server in the report")
         else:
             p.add_argument("--calls", required=True, help="calls.json written by the agent")
+    p = sub.add_parser("import")
+    p.add_argument("--tools", required=True, help="tool definitions as the client shows them (JSON array or JSON lines)")
+    p.add_argument("--label", required=True, help="a short name for the server in the report")
+    p.add_argument("--via", default="the client", help="how the tools were seen, e.g. 'Claude connector'")
+    p.add_argument("--strip-prefix", help="client prefix to drop from tool names, e.g. mcp__Gmail__")
+    p.add_argument("--instructions", help="file with the server instructions the client showed, if any")
+    p.add_argument("--calls", help="calls made through the client: JSON lines with tool, arguments, text, is_error, "
+                                   "and why for an invalid-argument probe")
+    p.add_argument("--out", required=True, help="directory for probe.json")
     args = parser.parse_args(argv)
     try:
+        if args.cmd == "import":
+            return import_catalog(args)
         return collect(args) if args.cmd == "collect" else call(args)
     except ProbeError as exc:
         print(f"error: {exc}", file=sys.stderr)

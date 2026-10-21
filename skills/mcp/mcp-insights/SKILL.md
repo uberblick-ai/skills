@@ -57,6 +57,20 @@ server returns are redacted before they reach disk; `probe.json` keeps only
 their names, places and lengths under `secrets`, and the report fails Safety
 when a likely real one turns up. Tell the user at once when that happens.
 
+A server you can only reach through a client, such as a connector in
+Claude's app, cannot be collected. Save the tool definitions the client shows
+you as JSON lines, make the read calls through the client, and save each
+call as a line with `tool`, `arguments`, `text`, `is_error` and `purpose` (or
+`why` for an argument the schema forbids). Then:
+
+```sh
+python3 scripts/probe.py import --tools DIR/tools.jsonl --calls DIR/calls.jsonl --label NAME \
+  --via "Claude's Gmail connector" --strip-prefix mcp__Gmail__ --instructions DIR/instructions.txt --out DIR
+```
+
+Only the error text of a call is kept, never a read's content. The report
+marks the handshake, annotations and error codes as not visible.
+
 ## 3. Plan and run read calls
 
 Read the tool list in `probe.json` and write `DIR/calls.json` with one

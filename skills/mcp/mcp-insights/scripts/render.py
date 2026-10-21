@@ -251,7 +251,8 @@ BIG_READ, HUGE_READ = 8000, 32_000  # tokens: a read worth bounding, and one tha
 NARROW_WORDS = {"limit", "max", "page", "cursor", "offset", "after", "before", "top", "first", "last", "count", "size",
                 "field", "fields", "select", "column", "columns", "properties", "include", "exclude", "range", "since",
                 "until", "from", "to", "start", "end", "filter", "filters", "query", "where", "depth", "summary",
-                "truncate", "names", "ids", "keys", "types", "metrics", "bytes", "lines", "window", "period", "section"}
+                "truncate", "names", "ids", "keys", "types", "metrics", "bytes", "lines", "window", "period", "section",
+                "format", "view", "detail", "verbosity"}
 HELP_WORDS = re.compile(r"help|guide|docs?\b|documentation|manual|readme|instruction|tutorial|how-?to|syntax|reference|faq|usage|example|cheat", re.I)
 PROVISIONAL = 0.8  # categories with less of their applicable weight checked are marked provisional
 
@@ -870,7 +871,7 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     # --- errors
     inv = probes.get("invalid_arguments") or []
     if inv:
-        rejected = [x for x in inv if (x.get("response") or {}).get("kind") in ("tool", "protocol")]
+        rejected = [x for x in inv if (x.get("response") or {}).get("kind") in ("tool", "protocol", "client")]
         res("E01", len(rejected) / len(inv), f"{len(rejected)} of {len(inv)}",
             items=[{"item": x["tool"], "score": 1 if x in rejected else 0,
                     "evidence": f"{x['why']}: " + ((x.get("response") or {}).get("message") or (x.get("response") or {}).get("kind", ""))[:300]}
@@ -879,7 +880,10 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
         for x in rejected:
             msg = (x["response"].get("message") or "")
             fields = list((x.get("arguments") or {}).keys()) or ((x.get("why") or "").replace("missing required ", "").split(", "))
-            named.append({"item": x["tool"], "score": 1 if any(f and f in msg for f in fields) else 0, "evidence": msg[:300]})
+            # page_size names pageSize as well as pageSize does.
+            flat = re.sub(r"[_\W]", "", msg.lower())
+            named.append({"item": x["tool"], "score": 1 if any(f and re.sub(r"[_\W]", "", f.lower()) in flat for f in fields) else 0,
+                          "evidence": msg[:300]})
         if named:
             res("E02", sum(n["score"] for n in named) / len(named), f"{sum(n['score'] for n in named)} of {len(named)}", items=named)
         else:
@@ -984,7 +988,15 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             narrow = narrowing_params(by_name.get(name) or {})
             used = [a for a in narrow if a in (c.get("arguments") or {})]
             size_ = fmt_tokens(c["tokens_est"]) + (" (whole result)" if "tokens" not in c else "")
-            if narrow and c["tokens_est"] >= HUGE_READ:
+            # The same read narrowed: the largest one, so a headers-only view does not flatter the default.
+            narrowed = [o for o in calls if o["tool"] == name and o is not c and not o.get("isError")
+                        and any(a in (o.get("arguments") or {}) for a in narrow)]
+            alt = max(narrowed, key=lambda o: o["tokens_est"]) if narrowed and not used else None
+            if alt and c["tokens_est"] >= 4 * max(alt["tokens_est"], 1) and c["tokens_est"] < HUGE_READ:
+                args_ = ", ".join(f"{a}={alt['arguments'][a]}" for a in narrow if a in alt["arguments"])
+                score, why = 0.5, (f"{size_} by default, {fmt_tokens(alt['tokens_est'])} with {args_}: "
+                                   "the default is the heavy read")
+            elif narrow and c["tokens_est"] >= HUGE_READ:
                 score, why = 0.5, (f"{size_} even with {', '.join(used)}" if used else
                                    f"{size_} by default; {', '.join(narrow)} can narrow it, but the default returns everything")
             elif narrow:
@@ -1138,6 +1150,12 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             res("S04", 1 if st in (400, 401, 403) else 0, f"HTTP {st}")
     else:
         res("S04", 0, na=True, untested=not stdio, note="stdio transport" if stdio else "not probed")
+    if (probe.get("target") or {}).get("transport") == "client":
+        # Seen through a client: the tool text is what the model gets, the wire is out of sight.
+        via = (probe.get("target") or {}).get("via") or "the client"
+        res("P01", 1, "the client connected", note=f"Collected through {via}; the handshake itself was not visible.")
+        for code in CLIENT_UNSEEN:
+            res(code, 0, untested=True, note=f"Not visible through {via}.")
     return m, r
 
 
@@ -1241,25 +1259,40 @@ def passed(code: str, res: dict, item: str | None = None) -> dict:
     return new
 
 
-def apply_fix(results: dict, targets: list[str]) -> dict:
-    """The results as they would be if the targets passed. Targets are audit ids or 'AUDIT:item'."""
+PER_TURN = {"C01", "C02"}  # size metrics paid on every turn, where a suggestion's "saves" can be subtracted
+
+
+def per_turn_saving(text: str | None) -> int | None:
+    """'about 2.7k tokens per turn' -> 2700."""
+    mt = re.search(r"([\d.,]+)\s*(k)?\s*tokens per turn", text or "")
+    return round(float(mt.group(1).replace(",", "")) * (1000 if mt.group(2) else 1)) if mt else None
+
+
+def apply_fix(results: dict, targets: list[str], saves: int | None = None) -> dict:
+    """The results as they would be if the targets passed. Targets are audit ids or 'AUDIT:item'.
+    A per-turn size target with a stated saving shrinks by that saving instead of passing outright."""
     changed = dict(results)
     for t in targets:
         code, _, item = t.partition(":")
         res = changed.get(code)
         if res and not res["na"] and res["score"] is not None:
-            changed[code] = passed(code, res, item or None)
+            if saves and code in PER_TURN and not item and res.get("effective") is not None:
+                eff = max(0, res["effective"] - saves)
+                changed[code] = {**res, "score": round(lognormal_score(eff, *BUDGETS[code][:2]), 2),
+                                 "value": max(0, res["value"] - saves), "effective": eff}
+            else:
+                changed[code] = passed(code, res, item or None)
     return changed
 
 
-def caps_after(results: dict, targets: list[str]) -> set:
-    changed = apply_fix(results, targets)
+def caps_after(results: dict, targets: list[str], saves: int | None = None) -> set:
+    changed = apply_fix(results, targets, saves)
     return {code for key, _, _ in CATEGORIES for code in category_score(key, changed)["capped_by"]}
 
 
-def fix_effects(results: dict, cats: dict, targets: list[str]) -> dict:
+def fix_effects(results: dict, cats: dict, targets: list[str], saves: int | None = None) -> dict:
     """Points each category gains if the targets pass."""
-    changed = apply_fix(results, targets)
+    changed = apply_fix(results, targets, saves)
     effects = {}
     for key in {row[1] for row in CATALOG if row[0] in {t.partition(":")[0] for t in targets}}:
         before = (cats.get(key) or {}).get("score")
@@ -1270,6 +1303,9 @@ def fix_effects(results: dict, cats: dict, targets: list[str]) -> dict:
 
 
 EFFORT = {"S": 1, "M": 2, "L": 3}
+# What a client hides when it hands tools to the model: the wire, server metadata, annotations and output schemas.
+CLIENT_UNSEEN = ["P02", "P03", "P04", "P05", "P06", "P07", "P08", "P09", "P10", "P13", "P14", "P15", "P16", "P17", "P18",
+                 "G04", "G05", "G06", "S01", "S04", "C08", "E03"]
 ALIASES = {"C07": "C13"}  # audits renamed since older findings were written
 
 
@@ -1292,7 +1328,8 @@ def recommendations(results: dict, findings: dict, cats: dict) -> list[dict]:
         covered.update(targets)
         cat = rec.get("category") or (by_code[audits[0]][1] if audits else "guidance")
         recs.append({**rec, "audits": audits, "targets_audits": targets, "category": cat,
-                     "effects": fix_effects(results, cats, targets), "effort": rec.get("effort", "M"), "source": "agent"})
+                     "effects": fix_effects(results, cats, targets, per_turn_saving(rec.get("saves"))),
+                     "effort": rec.get("effort", "M"), "source": "agent"})
     for row in CATALOG:
         code = row[0]
         res = results.get(code)
@@ -1311,7 +1348,7 @@ def recommendations(results: dict, findings: dict, cats: dict) -> list[dict]:
                      "effects": fix_effects(results, cats, targets), "source": "catalog"})
     for rec in recs:
         touched = capped & set(rec["audits"])
-        rec["lifts_cap"] = bool(touched) and not touched & caps_after(results, rec["targets_audits"])
+        rec["lifts_cap"] = bool(touched) and not touched & caps_after(results, rec["targets_audits"], per_turn_saving(rec.get("saves")))
     # A cap held by two failing items lifts only when both are fixed: say so instead of showing no effect.
     for code in capped:
         group = [r for r in recs if code in r["audits"] and r["source"] == "agent"]
@@ -1579,7 +1616,7 @@ def render_html(report: dict) -> str:
         ann = p["annotations"]
         flags = " ".join(f'<span class="flag">{esc(lbl)}</span>' for k, lbl in
                          (("readOnlyHint", "read-only"), ("destructiveHint", "destructive"), ("idempotentHint", "idempotent"), ("openWorldHint", "open world"))
-                         if ann.get(k))
+                         if ann.get(k)) or ('<span class="sub">not visible</span>' if meta.get("via") else "")
         fd = f'{p["fields_described"]}/{p["fields"]}' if p["fields"] else "–"
         grade = tool_grade(p, results)
         inventory_rows.append(
@@ -1606,7 +1643,7 @@ def render_html(report: dict) -> str:
     if report.get("warnings"):
         warn = '<div class="warnings"><strong>Run warnings</strong><ul>' + "".join(f"<li>{esc(w)}</li>" for w in report["warnings"]) + "</ul></div>"
 
-    badges = [meta["transport"], meta.get("review_mode") or ("reviewed" if meta.get("judged") else "automatic checks only")]
+    badges = ["seen through a client" if meta.get("via") else meta["transport"], meta.get("review_mode") or ("reviewed" if meta.get("judged") else "automatic checks only")]
     if meta.get("trial_count"):
         badges.append(f'{meta["trial_count"]} agent trials')
     if meta.get("calls"):
@@ -1617,8 +1654,9 @@ def render_html(report: dict) -> str:
     fill = {
         "TITLE": esc(f"MCP Insights: {meta['server_title']}"),
         "SERVER_TITLE": esc(meta["server_title"]),
-        "SERVER_META": esc(" · ".join(x for x in (meta.get("server_name"), meta.get("server_version"),
-                                                       meta.get("protocol") and f"protocol {meta['protocol']}", meta.get("target")) if x)),
+        "SERVER_META": esc(" · ".join(dict.fromkeys(x for x in (
+            meta.get("server_name"), meta.get("server_version"), meta.get("protocol") and f"protocol {meta['protocol']}",
+            meta.get("target"), meta.get("via") and f"seen through {meta['via']}") if x))),
         "BADGES": "".join(f'<span class="badge">{esc(b)}</span>' for b in badges),
         "DATE": esc(pretty_date(meta["collected_at"])),
         "GAUGES": "".join(gauges),
@@ -1630,8 +1668,9 @@ def render_html(report: dict) -> str:
                              "Made from the outside, without the source: they describe what the agent saw and what it should see instead, "
                              "so check them against the code before acting.")),
         "TREEMAP": treemap_svg(m.get("tools") or []) if m.get("tools") else '<p class="empty">No tools.</p>',
-        "TREEMAP_NOTE": esc(f"{fmt_tokens(m.get('tool_list_model_tokens'))} reach the model (name, title, description and input schema of every tool). "
-                            f"The full tools/list is {fmt_tokens(m.get('tool_list_wire_tokens'))}; output schemas and annotations stay with the client."),
+        "TREEMAP_NOTE": esc(f"{fmt_tokens(m.get('tool_list_model_tokens'))} reach the model (name, title, description and input schema of every tool"
+                            + ("), as the client shows them; the server's own tools/list was not visible." if meta.get("via") else
+                               f"). The full tools/list is {fmt_tokens(m.get('tool_list_wire_tokens'))}; output schemas and annotations stay with the client.")),
         "SECTIONS": "".join(sections),
         "INVENTORY": "".join(inventory_rows),
         "NOTES": notes_html,
@@ -1939,6 +1978,7 @@ def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) ->
             "server_title": info.get("title") or target.get("label") or info.get("name") or "MCP server",
             "server_name": info.get("name"), "server_version": info.get("version"),
             "protocol": init.get("protocolVersion"), "transport": target.get("transport"),
+            "via": target.get("via") if target.get("transport") == "client" else None,
             "target": target.get("label") or target.get("url") or "",
             "collected_at": probe.get("collected_at"), "probe_version": probe.get("probe_version"),
             "render_version": RENDER_VERSION, "catalog_version": CATALOG_VERSION,
