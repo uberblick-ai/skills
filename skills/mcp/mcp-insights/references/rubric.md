@@ -37,7 +37,7 @@ E12 and S12 are critical: one item scored 0 caps the category at 49.
   "recommendations": [
     {"title": "Imperative, specific title", "category": "guidance", "audits": ["G10", "C03"],
      "effort": "S", "why": "One or two sentences.", "fix": "Paste-ready text or concrete steps.",
-     "saves": "-9 KB per turn", "evidence": "optional quote"}
+     "saves": "-2.5k tokens per turn", "evidence": "optional quote"}
   ],
   "density": {"texts": [
     {"text_id": "tool:create_doc", "clarity": 0.5,

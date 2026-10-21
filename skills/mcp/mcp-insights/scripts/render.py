@@ -23,6 +23,8 @@ RENDER_VERSION = "0.1"
 CATALOG_VERSION = "0.1"
 HERE = Path(__file__).resolve().parent
 TEMPLATE = HERE.parent / "assets" / "report.html"
+sys.path.insert(0, str(HERE))
+from probe import estimate_tokens  # noqa: E402
 
 CATEGORIES = [
     ("protocol", "Protocol", "Does it speak MCP correctly?"),
@@ -247,15 +249,16 @@ DATA_DEPENDENT = {"C07": "Measured on the data this server returned during the r
 # Metric thresholds: (good, poor, unit). Good scores 0.9, poor 0.5 (Lighthouse-style log-normal).
 # Calibrated 2026-10-21 on 15 servers (13 public, the reference server, Uberblick):
 # good is about the 75th percentile, poor about the 90th. Sizes are effective
-# sizes: bytes the reviewer quoted as waste count twice.
+# sizes: text the reviewer quoted as waste counts twice. Context sizes are in
+# Claude tokens (probe.estimate_tokens); single texts are in characters.
 BUDGETS = {
-    "C01": (25 * 1024, 50 * 1024, "B"),
-    "C02": (1500, 3000, "B"),
+    "C01": (10_000, 20_000, "tok"),
+    "C02": (500, 1000, "tok"),
     "C03": (1000, 2000, "ch"),
     "C04": (300, 600, "ch"),
-    "C05": (8 * 1024, 16 * 1024, "B"),
-    "C06": (150 * 1024, 300 * 1024, "B"),
-    "C07": (25 * 1024, 100 * 1024, "B"),
+    "C05": (2500, 5000, "tok"),
+    "C06": (50_000, 100_000, "tok"),
+    "C07": (8000, 32_000, "tok"),
     "C08": (1000, 3500, "ms"),
     "C09": (0.05, 0.20, "%"),
     "C10": (0.05, 0.25, "%"),
@@ -358,9 +361,34 @@ def fmt_bytes(n) -> str:
     return f"{n / 1024:,.1f} KB"
 
 
+def fmt_tokens(n) -> str:
+    if n is None:
+        return "n/a"
+    if n < 1000:
+        return f"{round(n):,} tokens"
+    if n < 100_000:
+        return f"{n / 1000:,.1f}k tokens"
+    return f"{n / 1000:,.0f}k tokens"
+
+
+def short_tokens(n) -> str:
+    return fmt_tokens(n).replace(" tokens", "")
+
+
+def value_html(value, unit) -> str:
+    """A vital's number large and its unit small, so long units don't wrap."""
+    text = fmt_value(value, unit)
+    num, _, rest = text.partition(" ")
+    if value is None or unit not in ("tok", "ch") or not rest:
+        return esc(text)
+    return f'{esc(num)}<span class="unit">{esc(rest)}</span>'
+
+
 def fmt_value(value, unit) -> str:
     if value is None:
         return "not measured"
+    if unit == "tok":
+        return fmt_tokens(value)
     if unit == "B":
         return fmt_bytes(value)
     if unit == "ch":
@@ -370,6 +398,32 @@ def fmt_value(value, unit) -> str:
     if unit == "%":
         return f"{value * 100:.0f}%"
     return str(value)
+
+
+# The context vitals: (audit, label, what the (i) explains).
+VITALS = [
+    ("C01", "Tool list",
+     "Name, title, description and input schema of every tool: what a client that loads all tools sends with every request. "
+     "Output schemas are left out because clients don't pass them to the model. Clients with tool search, like Claude Code, "
+     "load the names first and a tool's full definition once the agent picks it. Effective size counts text quoted as waste twice."),
+    ("C10", "Filler",
+     "Share of the always-loaded text (startup instructions, tool and field descriptions) that the review quoted as waste: "
+     "repetition, internals, history, schema restated in prose, and filler. It measures waste, not length, so a long dense text scores well."),
+    ("C02", "Startup instructions",
+     "Text the server sends at startup. Clients keep it in the system prompt for the whole session; Claude Code shows only about the first 2 KB."),
+    ("C03", "Largest tool description",
+     "The longest tool description, in characters. A long description usually carries syntax that belongs in a help topic."),
+    ("C07", "Largest read response",
+     "The biggest answer to a read call during the review, as the model receives it. It depends on the data: a busier workspace returns more."),
+    ("C08", "Cold start",
+     "Time from starting the server to its first answer. Slow starts delay every session, and some clients give up."),
+]
+
+
+def info_html(label: str, text: str, budget: str = "") -> str:
+    tail = f"<p>{esc(budget)}</p>" if budget else ""
+    return (f'<details class="info"><summary aria-label="About {esc(label)}" title="About {esc(label)}">i</summary>'
+            f'<div class="info-pop"><p>{esc(text)}</p>{tail}</div></details>')
 
 
 def fmt_budget(code) -> str:
@@ -440,6 +494,7 @@ def waste_index(probe: dict, findings: dict) -> tuple[dict, list]:
                 merged.append((a, b))
         wasted = sum(len(hay[a:b].encode("utf-8")) for a, b in merged)
         out[tid] = {"bytes": wasted, "chars": sum(b - a for a, b in merged), "total": len(text.encode("utf-8")),
+                    "tokens": sum(estimate_tokens(hay[a:b]) for a, b in merged), "total_tokens": estimate_tokens(text),
                     "waste": kept, "clarity": entry.get("clarity"), "note": entry.get("note", "")}
     return out, problems
 
@@ -472,6 +527,10 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             "input_schema_bytes": size(t.get("inputSchema") or {}),
             "output_schema_bytes": size(t["outputSchema"]) if t.get("outputSchema") else 0,
             "model_bytes": size(mf),
+            "model_tokens": estimate_tokens(json.dumps(mf, ensure_ascii=False, separators=(",", ":"))),
+            "description_tokens": estimate_tokens(t.get("description") or ""),
+            "output_schema_tokens": estimate_tokens(json.dumps(t["outputSchema"], ensure_ascii=False, separators=(",", ":")))
+                                    if t.get("outputSchema") else 0,
             "fields": len(fields),
             "fields_described": sum(1 for _, p in fields if (p.get("description") or "").strip()),
             "max_field_desc": max([len(p.get("description") or "") for _, p in fields] or [0]),
@@ -479,17 +538,24 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             "waste_bytes": (waste.get(f"tool:{t.get('name')}") or {}).get("bytes", 0)
                            + sum(v["bytes"] for k, v in waste.items() if k.startswith(f"field:{t.get('name')}.")),
             "desc_waste_chars": (waste.get(f"tool:{t.get('name')}") or {}).get("chars", 0),
+            "waste_tokens": (waste.get(f"tool:{t.get('name')}") or {}).get("tokens", 0)
+                            + sum(v["tokens"] for k, v in waste.items() if k.startswith(f"field:{t.get('name')}.")),
         })
     m["tools"] = per_tool
     m["tool_count"] = len(tools)
     m["tool_list_model_bytes"] = sum(p["model_bytes"] for p in per_tool) if tools else 0
     m["tool_list_waste_bytes"] = sum(p["waste_bytes"] for p in per_tool)
+    m["tool_list_model_tokens"] = sum(p["model_tokens"] for p in per_tool) if tools else 0
+    m["tool_list_waste_tokens"] = sum(p["waste_tokens"] for p in per_tool)
+    m["tool_list_wire_tokens"] = estimate_tokens(json.dumps(tools, ensure_ascii=False, separators=(",", ":")))
     m["waste_judged"] = judged_waste
     m["waste_problems"] = waste_problems
     m["tool_list_wire_bytes"] = size(tools)
     instr = init.get("instructions") or ""
     m["instructions_bytes"] = len(instr.encode("utf-8")) if instr else None
     m["instructions_waste_bytes"] = (waste.get("instructions") or {}).get("bytes", 0)
+    m["instructions_tokens"] = estimate_tokens(instr) if instr else None
+    m["instructions_waste_tokens"] = (waste.get("instructions") or {}).get("tokens", 0)
     if per_tool:
         top_desc = max(per_tool, key=lambda p: p["description_chars"] + p["desc_waste_chars"])
         m["max_tool_desc"] = {"value": top_desc["description_chars"], "where": top_desc["name"],
@@ -502,21 +568,27 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
                 if eff > best_field[2]:
                     best_field = (n, f"{t.get('name')}.{path}", eff)
         m["max_field_desc"] = {"value": best_field[0], "where": best_field[1], "effective": best_field[2]}
-    topics = [x for x in probe.get("resource_reads") or [] if x.get("text_bytes")]
-    topics += [{"uri": f"prompt:{x['name']}", "text_bytes": len((x.get("text") or "").encode("utf-8"))}
+    topics = [dict(x) for x in probe.get("resource_reads") or [] if x.get("text_bytes")]
+    topics += [{"uri": f"prompt:{x['name']}", "text_bytes": len((x.get("text") or "").encode("utf-8")), "text": x.get("text")}
                for x in probe.get("prompt_gets") or [] if x.get("text")]
+    for x in topics:
+        # Probes keep the text; without it, assume the help average of 3 bytes per token.
+        x["tokens"] = estimate_tokens(x["text"]) if x.get("text") else round(x["text_bytes"] / 3)
     def topic_waste(x):
-        return (waste.get(f"topic:{x['uri']}") or {}).get("bytes", 0)
-    m["topics"] = [{"uri": x["uri"], "bytes": x["text_bytes"], "waste": topic_waste(x)} for x in topics]
+        return (waste.get(f"topic:{x['uri']}") or {}).get("tokens", 0)
+    m["topics"] = [{"uri": x["uri"], "bytes": x["text_bytes"], "tokens": x["tokens"], "waste": topic_waste(x)} for x in topics]
     if topics:
-        big = max(topics, key=lambda x: x["text_bytes"] + topic_waste(x))
-        m["max_topic"] = {"value": big["text_bytes"], "where": big["uri"], "effective": big["text_bytes"] + topic_waste(big)}
-        m["total_topics"] = sum(x["text_bytes"] for x in topics)
+        big = max(topics, key=lambda x: x["tokens"] + topic_waste(x))
+        m["max_topic"] = {"value": big["tokens"], "where": big["uri"], "effective": big["tokens"] + topic_waste(big)}
+        m["total_topics"] = sum(x["tokens"] for x in topics)
         m["total_topics_waste"] = sum(topic_waste(x) for x in topics)
     calls = [c for c in probe.get("calls") or [] if "bytes" in c]
+    for c in calls:
+        # Older probes measured the whole result, structuredContent included; JSON averages 2.7 bytes per token.
+        c["tokens_est"] = c["tokens"] if "tokens" in c else round(c["bytes"] / 2.7)
     if calls:
-        big = max(calls, key=lambda c: c["bytes"])
-        m["max_response"] = {"value": big["bytes"], "where": big["tool"]}
+        big = max(calls, key=lambda c: c["tokens_est"])
+        m["max_response"] = {"value": big["tokens_est"], "where": big["tool"], "bytes": big.get("text_bytes", big["bytes"])}
     m["cold_start_ms"] = probe.get("cold_start_ms")
     seen: dict = {}
     total_text = 0
@@ -783,8 +855,8 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
         r[code]["value"] = value
         r[code]["effective"] = eff
         r[code]["unit"] = unit
-    metric("C01", m["tool_list_model_bytes"] if tools else None, effective=(m["tool_list_model_bytes"] + m["tool_list_waste_bytes"]) if tools else None)
-    metric("C02", m["instructions_bytes"], effective=(m["instructions_bytes"] or 0) + m["instructions_waste_bytes"] if instr else None)
+    metric("C01", m["tool_list_model_tokens"] if tools else None, effective=(m["tool_list_model_tokens"] + m["tool_list_waste_tokens"]) if tools else None)
+    metric("C02", m["instructions_tokens"], effective=(m["instructions_tokens"] or 0) + m["instructions_waste_tokens"] if instr else None)
     metric("C03", (m.get("max_tool_desc") or {}).get("value"), (m.get("max_tool_desc") or {}).get("where", ""), (m.get("max_tool_desc") or {}).get("effective"))
     metric("C04", (m.get("max_field_desc") or {}).get("value"), (m.get("max_field_desc") or {}).get("where", ""), (m.get("max_field_desc") or {}).get("effective"))
     metric("C05", (m.get("max_topic") or {}).get("value"), (m.get("max_topic") or {}).get("where", ""), (m.get("max_topic") or {}).get("effective"))
@@ -794,32 +866,33 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
         total_schema = sum(b for _, b in pasted)
         share = total_schema / max(1, sum(x["text_bytes"] for x in topics))
         res("C12", lognormal_score(max(share, 1e-6), *BUDGETS["C12"][:2]),
-            f"{fmt_bytes(total_schema)} of {fmt_bytes(sum(x['text_bytes'] for x in topics))} ({share * 100:.0f}%)",
-            items=[{"item": uri, "score": 0, "evidence": f"{fmt_bytes(b)} of pasted schema"}
+            f"{fmt_tokens(share * m['total_topics'])} of {fmt_tokens(m['total_topics'])} ({share * 100:.0f}%)",
+            items=[{"item": uri, "score": 0, "evidence": f"{fmt_tokens(b / 2.7)} of pasted schema"}
                    for uri, b in sorted(pasted, key=lambda kv: -kv[1]) if b > 1024][:10])
         r["C12"]["value"] = share
     else:
         res("C12", 0, na=True, note="no help topics")
     always = {k: v for k, v in waste.items() if k == "instructions" or k.startswith("tool:") or k.startswith("field:")}
     on_demand = {k: v for k, v in waste.items() if k.startswith("topic:")}
-    field_bytes = sum(len(v.encode("utf-8")) for k, v in text_index(probe).items() if k.startswith("field:"))
-    for code, group, total in (("C10", always, (m["instructions_bytes"] or 0) + sum(p["description_bytes"] for p in per_tool) + field_bytes),
-                               ("C11", on_demand, sum(v["total"] for v in on_demand.values()))):
+    field_tokens = sum(estimate_tokens(v) for k, v in text_index(probe).items() if k.startswith("field:"))
+    always_total = (m["instructions_tokens"] or 0) + sum(p["description_tokens"] for p in per_tool) + field_tokens
+    for code, group, total in (("C10", always, always_total),
+                               ("C11", on_demand, sum(v["total_tokens"] for v in on_demand.values()))):
         if not group or not total:
             res(code, 0, na=True, note="waste not judged" if not group else "no text")
             continue
-        wasted = sum(v["bytes"] for v in group.values())
+        wasted = sum(v["tokens"] for v in group.values())
         ratio = wasted / total
         good, poor, _ = BUDGETS[code]
         items = []
-        for tid, v in sorted(group.items(), key=lambda kv: -kv[1]["bytes"]):
+        for tid, v in sorted(group.items(), key=lambda kv: -kv[1]["tokens"]):
             for w in v["waste"]:
                 items.append({"item": tid, "score": 0, "evidence": f"\u201c{norm(w['quote'])[:260]}\u201d \u2014 {w['why']}"})
-        res(code, lognormal_score(max(ratio, 1e-6), good, poor), f"{fmt_bytes(wasted)} of {fmt_bytes(total)} ({ratio * 100:.0f}%)",
+        res(code, lognormal_score(max(ratio, 1e-6), good, poor), f"{fmt_tokens(wasted)} of {fmt_tokens(total)} ({ratio * 100:.0f}%)",
             items=items, note=f"Share of reviewed text quoted as waste; good \u2264 {good * 100:.0f}%, poor \u2265 {poor * 100:.0f}%.")
         r[code]["value"] = wasted
         r[code]["ratio"] = ratio
-    m["waste_per_turn"] = {"bytes": sum(v["bytes"] for v in always.values()), "total": (m["instructions_bytes"] or 0) + sum(p["description_bytes"] for p in per_tool) + field_bytes,
+    m["waste_per_turn"] = {"tokens": sum(v["tokens"] for v in always.values()), "total": always_total,
                            "ratio": (r.get("C10") or {}).get("ratio")}
     metric("C07", (m.get("max_response") or {}).get("value"), (m.get("max_response") or {}).get("where", ""))
     if "C07" in r and not r["C07"].get("na"):
@@ -832,12 +905,12 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     else:
         res("C09", 0, na=True)
     if tools:
-        r["C01"]["items"] = [{"item": p["name"], "score": None, "evidence": fmt_bytes(p["model_bytes"])}
-                             for p in sorted(per_tool, key=lambda p: -p["model_bytes"])[:8]]
+        r["C01"]["items"] = [{"item": p["name"], "score": None, "evidence": fmt_tokens(p["model_tokens"])}
+                             for p in sorted(per_tool, key=lambda p: -p["model_tokens"])[:8]]
     if topics:
-        r["C05"]["items"] = [{"item": x["uri"], "score": round(lognormal_score(x["text_bytes"], *BUDGETS["C05"][:2]), 2),
-                              "evidence": fmt_bytes(x["text_bytes"])}
-                             for x in sorted(topics, key=lambda x: -x["text_bytes"])[:10]]
+        r["C05"]["items"] = [{"item": x["uri"], "score": round(lognormal_score(x["tokens"], *BUDGETS["C05"][:2]), 2),
+                              "evidence": fmt_tokens(x["tokens"])}
+                             for x in sorted(topics, key=lambda x: -x["tokens"])[:10]]
 
     # --- agent trials
     runs = [t for t in (probe.get("trials") or {}).get("runs") or [] if not t.get("invalid")]
@@ -848,7 +921,7 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             res("G17", sum(1 for t in helpy if t["help_before_use"]) / len(helpy),
                 f"{sum(1 for t in helpy if t['help_before_use'])} of {len(helpy)} trials",
                 items=[{"item": t["id"], "score": 1 if t["help_before_use"] else 0,
-                        "evidence": f"{t['help_reads']} help reads ({fmt_bytes(t['help_bytes'])}) "
+                        "evidence": f"{t['help_reads']} help reads ({help_size(t)}) "
                                     + ("before" if t["help_before_use"] else "none before") + f" the first {'/'.join(t['needs'])} call"}
                        for t in helpy])
         else:
@@ -858,7 +931,7 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             res("G18", sum(1 for t in plain if not t["help_reads"]) / len(plain),
                 f"{sum(1 for t in plain if not t['help_reads'])} of {len(plain)} without help",
                 items=[{"item": t["id"], "score": 0 if t["help_reads"] else 1,
-                        "evidence": f"{t['calls']} calls, {t['help_reads']} help reads ({fmt_bytes(t['help_bytes'])})"} for t in plain])
+                        "evidence": f"{t['calls']} calls, {t['help_reads']} help reads ({help_size(t)})"} for t in plain])
         else:
             res("G18", 0, na=True, note="no plain-task trial")
         judged_runs = [(t, verdicts[t["id"]]) for t in runs if isinstance(verdicts.get(t["id"]), dict)
@@ -1134,15 +1207,16 @@ def shape(b) -> str:
 
 def treemap_svg(per_tool) -> str:
     W, H = 960, 360
-    items = sorted(((p["name"], p["model_bytes"]) for p in per_tool), key=lambda kv: -kv[1])
+    items = sorted(((p["name"], p["model_tokens"]) for p in per_tool), key=lambda kv: -kv[1])
     rects = squarify(items, 0, 0, W, H)
     by = {p["name"]: p for p in per_tool}
-    parts = [f'<svg class="treemap" viewBox="0 0 {W} {H}" role="img" aria-label="Model-facing tool list bytes by tool">']
+    parts = [f'<svg class="treemap" viewBox="0 0 {W} {H}" role="img" aria-label="Model-facing tool list tokens by tool">']
     for name, x, y, w, h in rects:
         p = by[name]
-        desc_share = p["description_bytes"] / p["model_bytes"] if p["model_bytes"] else 0
+        desc_share = p["description_tokens"] / p["model_tokens"] if p["model_tokens"] else 0
         dh = h * desc_share
-        tip = f"{name}: {fmt_bytes(p['model_bytes'])} (description {fmt_bytes(p['description_bytes'])}, input schema {fmt_bytes(p['input_schema_bytes'])})"
+        tip = (f"{name}: {fmt_tokens(p['model_tokens'])} (description {fmt_tokens(p['description_tokens'])}, "
+               f"input schema and name {fmt_tokens(p['model_tokens'] - p['description_tokens'])})")
         parts.append(f'<g><title>{esc(tip)}</title>'
                      f'<rect class="tm-desc" x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{dh:.1f}"/>'
                      f'<rect class="tm-schema" x="{x:.1f}" y="{y + dh:.1f}" width="{w:.1f}" height="{h - dh:.1f}"/>'
@@ -1151,9 +1225,9 @@ def treemap_svg(per_tool) -> str:
             fit = max(3, int((w - 14) / 7.9))
             label = name if len(name) <= fit else name[:fit - 1] + "\u2026"
             parts.append(f'<text x="{x + 8:.1f}" y="{y + 18:.1f}" class="tm-name">{esc(label)}</text>'
-                         f'<text x="{x + 8:.1f}" y="{y + 34:.1f}" class="tm-size">{esc(fmt_bytes(p["model_bytes"]))}</text>')
+                         f'<text x="{x + 8:.1f}" y="{y + 34:.1f}" class="tm-size">{esc(fmt_tokens(p["model_tokens"]))}</text>')
         elif w > 44 and h > 20:
-            parts.append(f'<text x="{x + 5:.1f}" y="{y + 15:.1f}" class="tm-size">{esc(fmt_bytes(p["model_bytes"]))}</text>')
+            parts.append(f'<text x="{x + 5:.1f}" y="{y + 15:.1f}" class="tm-size">{esc(fmt_tokens(p["model_tokens"]))}</text>')
         parts.append("</g>")
     parts.append("</svg>")
     return "".join(parts)
@@ -1176,16 +1250,8 @@ def render_html(report: dict) -> str:
             delta = f'<span class="delta {"up" if d > 0 else "down" if d < 0 else ""}">{"+" if d > 0 else ""}{d}</span>'
         gauges.append(f'<a class="gauge-link" href="#{key}">{gauge_svg(c["score"])}<span class="gauge-name">{esc(name)}</span>{delta}</a>')
 
-    vitals_spec = [
-        ("C01", "Tool list", "model-facing"),
-        ("C10", "Waste per turn", ""),
-        ("C02", "Startup instructions", ""),
-        ("C03", "Largest tool description", "C03"),
-        ("C07", "Largest read response", "C07"),
-        ("C08", "Cold start", "to first answer"),
-    ]
     vitals = []
-    for code, label, _ in vitals_spec:
+    for code, label, info in VITALS:
         res = results.get(code) or {}
         good, poor, unit = BUDGETS[code]
         value = res.get("value")
@@ -1201,13 +1267,13 @@ def render_html(report: dict) -> str:
         elif code == "C01":
             where = f"{m.get('tool_count', 0)} tools"
             if res.get("effective") and res.get("effective") != value:
-                where += f" \u00b7 {fmt_bytes(res['effective'])} effective"
+                where += f" \u00b7 {short_tokens(res['effective'])} effective"
         elif code == "C02" and res.get("effective") and res.get("effective") != value:
-            where = f"{fmt_bytes(res['effective'])} effective"
+            where = f"{short_tokens(res['effective'])} effective"
         elif code == "C10":
             wpt = m.get("waste_per_turn") or {}
             value = wpt.get("ratio")
-            where = f"{fmt_bytes(wpt.get('bytes'))} of {fmt_bytes(wpt.get('total'))} always loaded" if value is not None else "waste not judged"
+            where = f"{short_tokens(wpt.get('tokens'))} of {short_tokens(wpt.get('total'))} tokens" if value is not None else "waste not judged"
         pos = 0
         if value is not None and code == "C10":
             value = max(value, 1e-4)
@@ -1220,8 +1286,9 @@ def render_html(report: dict) -> str:
         bar = (f'<div class="scale" aria-hidden="true"><span class="seg good" style="width:{g_at:.1f}%"></span>'
                f'<span class="seg avg" style="width:{p_at - g_at:.1f}%"></span><span class="seg poor" style="width:{100 - p_at:.1f}%"></span>'
                + (f'<span class="pin" style="left:{pos:.1f}%"></span>' if value is not None else "") + "</div>")
-        vitals.append(f'<div class="vital {b}"><div class="vital-label">{shape(b)}{esc(label)}</div>'
-                      f'<div class="vital-value">{esc(fmt_value(value, unit))}</div>'
+        vitals.append(f'<div class="vital {b}"><div class="vital-label">{shape(b)}<span class="grow">{esc(label)}</span>'
+                      f'{info_html(label, info, fmt_budget(code))}</div>'
+                      f'<div class="vital-value">{value_html(value, unit)}</div>'
                       f'<div class="vital-where">{esc(where)}</div>{bar}'
                       f'<div class="vital-budget">{esc(fmt_budget(code))}</div></div>')
 
@@ -1283,9 +1350,9 @@ def render_html(report: dict) -> str:
             f'<tr><td><code>{esc(p["name"])}</code>' + (f'<div class="sub">{esc(p["title"])}</div>' if p["title"] else "") + "</td>"
             f'<td class="grade g-{grade}" data-v="{"ABCDF".index(grade)}">{grade}</td>'
             f'<td data-v="{p["description_chars"]}">{p["description_chars"]:,}</td>'
-            f'<td data-v="{p["input_schema_bytes"]}">{esc(fmt_bytes(p["input_schema_bytes"]))}</td>'
-            f'<td data-v="{p["model_bytes"]}">{esc(fmt_bytes(p["model_bytes"]))}</td>'
-            f'<td data-v="{p["output_schema_bytes"]}">{esc(fmt_bytes(p["output_schema_bytes"]) if p["output_schema_bytes"] else "–")}</td>'
+            f'<td data-v="{p["description_tokens"]}">{p["description_tokens"]:,}</td>'
+            f'<td data-v="{p["model_tokens"]}">{p["model_tokens"]:,}</td>'
+            f'<td data-v="{p["output_schema_tokens"]}">{f"{p[chr(111) + "utput_schema_tokens"]:,}" if p["output_schema_tokens"] else "–"}</td>'
             f'<td data-v="{p["fields_described"] / p["fields"] if p["fields"] else 1}">{fd}</td><td>{flags}</td></tr>')
 
     notes = report.get("notes") or {}
@@ -1323,8 +1390,8 @@ def render_html(report: dict) -> str:
         "TRIALS": trials_html(report.get("trials"), results),
         "FIXES": "".join(fixes) or '<p class="empty">Nothing to fix above the noise.</p>',
         "TREEMAP": treemap_svg(m.get("tools") or []) if m.get("tools") else '<p class="empty">No tools.</p>',
-        "TREEMAP_NOTE": esc(f"{fmt_bytes(m.get('tool_list_model_bytes'))} model-facing (name, title, description, input schema); "
-                            f"{fmt_bytes(m.get('tool_list_wire_bytes'))} on the wire with output schemas and annotations."),
+        "TREEMAP_NOTE": esc(f"{fmt_tokens(m.get('tool_list_model_tokens'))} reach the model (name, title, description and input schema of every tool). "
+                            f"The full tools/list is {fmt_tokens(m.get('tool_list_wire_tokens'))}; output schemas and annotations stay with the client."),
         "SECTIONS": "".join(sections),
         "INVENTORY": "".join(inventory_rows),
         "NOTES": notes_html,
@@ -1414,6 +1481,10 @@ def trials_report(probe: dict, findings: dict) -> dict | None:
     return {**t, "runs": runs}
 
 
+def help_size(t: dict) -> str:
+    return fmt_tokens(t["help_tokens"]) if "help_tokens" in t else fmt_bytes(t.get("help_bytes", 0))
+
+
 def median(xs):
     xs = sorted(xs)
     return None if not xs else xs[len(xs) // 2] if len(xs) % 2 else (xs[len(xs) // 2 - 1] + xs[len(xs) // 2]) / 2
@@ -1434,14 +1505,18 @@ def trials_html(trials: dict | None, results: dict) -> str:
         b = band(res.get("score"))
         mt = re.match(r"\d+ of \d+", res.get("display", ""))
         short = mt.group(0) if mt else res.get("display", "")
-        stats.append(f'<div class="vital {b}"><div class="vital-label">{shape(b)}{esc(label)}</div>'
+        why = next((row[5] for row in CATALOG if row[0] == code), "")
+        stats.append(f'<div class="vital {b}"><div class="vital-label">{shape(b)}<span class="grow">{esc(label)}</span>'
+                     f'{info_html(label, why)}</div>'
                      f'<div class="vital-value">{esc(short)}</div>'
                      f'<div class="vital-where">{esc(code)}</div></div>')
-    helpy = [r["help_bytes"] for r in runs if r.get("help_reads")]
+    peaks = [r["context_peak"] for r in runs if r.get("context_peak")]
     cost = sum(r.get("cost_usd") or 0 for r in runs)
-    stats.append(f'<div class="vital na"><div class="vital-label">Help read per task</div>'
-                 f'<div class="vital-value plain">{esc(fmt_bytes(median(helpy)) if helpy else "none")}</div>'
-                 f'<div class="vital-where">median, tasks that read help</div></div>')
+    if peaks:
+        stats.append(f'<div class="vital na"><div class="vital-label"><span class="grow">Context at the end</span>'
+                     f'{info_html("Context at the end", "Tokens the agent held at its last step: the client and its system prompt, this server, the tool definitions it loaded, and every answer it got. Median over the trials.")}</div>'
+                     f'<div class="vital-value plain">{value_html(median(peaks), "tok")}</div>'
+                     f'<div class="vital-where">median; {esc(short_tokens(min(peaks)))} to {esc(short_tokens(max(peaks)))}</div></div>')
     stats.append(f'<div class="vital na"><div class="vital-label">Trial cost</div>'
                  f'<div class="vital-value plain">${cost:.2f}</div><div class="vital-where">{len(runs)} trials</div></div>')
     groups: dict = {}
@@ -1463,8 +1538,9 @@ def trials_html(trials: dict | None, results: dict) -> str:
                         label = f'get_help({json.loads(e["input"]).get("topic")})'
                     except ValueError:
                         pass
-                steps.append(f'<li class="step {cls}" title="{esc(e["tool"])}: {esc(fmt_bytes(e.get("bytes")))}">'
-                             f'<span>{esc(label)}</span><small>{esc(fmt_bytes(e.get("bytes")))}</small></li>')
+                size_ = fmt_tokens(e["tokens"]) if "tokens" in e else fmt_bytes(e.get("bytes"))
+                steps.append(f'<li class="step {cls}" title="{esc(e["tool"])}: {esc(size_)}">'
+                             f'<span>{esc(label)}</span><small>{esc(size_.replace(" tokens", ""))}</small></li>')
             v = r.get("verdict") or {}
             if r.get("invalid"):
                 verdict = f'<p class="trial-verdict na">{shape("na")}{esc(r.get("status"))}</p>'
@@ -1475,7 +1551,7 @@ def trials_html(trials: dict | None, results: dict) -> str:
             else:
                 verdict = f'<p class="trial-verdict na">{shape("na")}<span>Outcome not judged.</span></p>'
             hb = r.get("help_before_use")
-            facts = [f'{r.get("calls", 0)} calls', f'{r.get("help_reads", 0)} help reads ({fmt_bytes(r.get("help_bytes", 0))})']
+            facts = [f'{r.get("calls", 0)} calls', f'{r.get("help_reads", 0)} help reads ({help_size(r)})']
             if hb is not None and r.get("expects_help"):
                 facts.append(("help before" if hb else "no help before") + f' the first {"/".join(r.get("needs") or [])}')
             for rule in r.get("rules") or []:
@@ -1483,7 +1559,9 @@ def trials_html(trials: dict | None, results: dict) -> str:
                     facts.append(("\u2713 " if rule["followed"] else "\u2717 ") + rule["label"])
             if r.get("errors"):
                 facts.append(f'{r["errors"]} errors, {r.get("recovered", 0)} recovered')
-            facts.append(f'{(r.get("tokens") or 0) / 1000:,.0f}k tokens, ${r.get("cost_usd") or 0:.3f}')
+            if r.get("context_peak"):
+                facts.append(f'context {fmt_tokens(r.get("context_start"))} \u2192 {fmt_tokens(r["context_peak"])}')
+            facts.append(f'{fmt_tokens(r.get("tokens") or 0)} billed, ${r.get("cost_usd") or 0:.3f}')
             model = str(r.get("model") or "").replace("claude-", "")
             facts_html = " \u00b7 ".join(esc(f) for f in facts)
             steps_html = "".join(steps) or '<li class="step">no calls</li>'
@@ -1499,8 +1577,23 @@ def trials_html(trials: dict | None, results: dict) -> str:
     legend = ('<div class="tm-legend steps-legend"><span><i class="k help"></i>help read</span><span><i class="k read"></i>other call</span>'
               '<span><i class="k write"></i>the task\u2019s main call</span><span><i class="k denied"></i>blocked write</span>'
               '<span><i class="k err"></i>error</span></div>')
+    judged = [r for r in runs if (r.get("verdict") or {}).get("success") is not None]
+    done = sum(1 for r in judged if r["verdict"]["success"] >= 1)
+    helpy = [r for r in runs if r.get("expects_help") is True and r.get("help_before_use") is not None]
+    plain = [r for r in runs if r.get("expects_help") is False]
+    parts = [f"{done} of {len(judged)} tasks done" if judged else f"{len(runs)} trials, outcomes not judged"]
+    if helpy:
+        parts.append(f"help read first in {sum(1 for r in helpy if r['help_before_use'])} of {len(helpy)} that needed it")
+    if plain:
+        parts.append(f"{sum(1 for r in plain if not r.get('help_reads'))} of {len(plain)} plain tasks without help")
+    blocked = sum(len(r.get("drafts") or []) for r in runs)
+    if blocked:
+        parts.append(f"{blocked} blocked writes recorded as drafts")
+    summary = "; ".join(parts) + "."
     return (f'<p class="section-lead">{lead}</p><div class="vitals trial-stats">{"".join(stats)}</div>'
-            f'<div class="trials">{"".join(cards)}</div>{legend}')
+            f'<p class="trials-summary">{esc(summary[0].upper() + summary[1:])}</p>'
+            f'<details class="trials-more"><summary>Show the {len(groups)} trials step by step</summary>'
+            f'<div class="trials">{"".join(cards)}</div>{legend}</details>')
 
 
 def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) -> dict:

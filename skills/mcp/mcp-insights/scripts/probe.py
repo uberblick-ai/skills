@@ -432,6 +432,24 @@ def size(obj) -> int:
     return len(json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
 
+def estimate_tokens(text: str) -> int:
+    """Claude input tokens for a text, from its character classes.
+
+    Fitted 2026-10-21 on 33 texts (tool lists, descriptions, instructions, help
+    topics; 360 to 31,000 tokens) counted by Claude Haiku and Sonnet, which
+    share a tokenizer (Opus too): mean error 5%, worst 13%. Bytes alone miss by up to 30%,
+    because JSON and indented text cost more tokens per byte than prose.
+    """
+    if not text:
+        return 0
+    letters = sum(1 for c in text if c.isascii() and c.isalpha())
+    digits = sum(1 for c in text if c.isascii() and c.isdigit())
+    other = sum(1 for c in text if not c.isascii())
+    breaks = text.count("\n")
+    punct = sum(1 for c in text if c.isascii() and not c.isalnum() and not c.isspace() and c != "_")
+    return round(0.35 * letters + 0.57 * punct + 0.68 * digits + 1.8 * breaks + other)
+
+
 def minimal_invalid_args(tool: dict):
     """Arguments that break the tool's schema: drop every required field."""
     schema = tool.get("inputSchema") or {}
@@ -741,7 +759,11 @@ def call(args) -> int:
                 entry["isError"] = bool(res.get("isError"))
                 entry["content_types"] = sorted({str(x.get("type")) for x in res.get("content") or [] if isinstance(x, dict)})
                 entry["has_structured"] = "structuredContent" in res
-                entry["text_head"] = content_text(res)[:1500]
+                text = content_text(res)
+                entry["text_head"] = text[:1500]
+                # What the model receives is the content text; structuredContent mirrors it for programs.
+                entry["text_bytes"] = len(text.encode("utf-8"))
+                entry["tokens"] = estimate_tokens(text)
                 if tool.get("outputSchema") and "structuredContent" in res:
                     entry["schema_problems"] = validate(res["structuredContent"], tool["outputSchema"])[:10]
             results.append(entry)

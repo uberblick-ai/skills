@@ -58,7 +58,9 @@ when a likely real one turns up. Tell the user at once when that happens.
 
 Read the tool list in `probe.json` and write `DIR/calls.json` with one
 realistic call per read-only tool, so the report can measure response sizes
-and check structured output:
+and check structured output. Response size depends on the data, so prefer a
+workspace with real content (read-only) over an empty sandbox, and read its
+largest items:
 
 ```json
 {"calls": [

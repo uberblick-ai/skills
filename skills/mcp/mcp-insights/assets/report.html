@@ -84,12 +84,28 @@ p.section-lead { margin: 0 0 16px; color: var(--muted); }
 .vital-label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
 .vital-value { font-size: 24px; font-weight: 650; letter-spacing: -.02em; margin-top: 4px; }
 .vital.good .vital-value { color: var(--good); } .vital.avg .vital-value { color: var(--avg); } .vital.poor .vital-value { color: var(--poor); } .vital.na .vital-value { color: var(--faint); font-size: 18px; }
-.vital-where { color: var(--faint); font-size: 12px; font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 18px; }
+.vital-where { color: var(--faint); font-size: 12px; font-family: var(--mono); min-height: 18px; overflow-wrap: anywhere; }
 .scale { position: relative; display: flex; height: 6px; border-radius: 3px; overflow: visible; margin: 10px 0 8px; }
 .scale .seg { height: 100%; opacity: .55; }
 .scale .seg.good { background: var(--good); border-radius: 3px 0 0 3px; } .scale .seg.avg { background: var(--avg); } .scale .seg.poor { background: var(--poor); border-radius: 0 3px 3px 0; }
 .scale .pin { position: absolute; top: -4px; width: 4px; height: 14px; margin-left: -2px; background: var(--ink); border-radius: 2px; box-shadow: 0 0 0 2px var(--surface); }
 .vital-budget { color: var(--faint); font-size: 11.5px; }
+.vital { position: relative; }
+.vital-label .grow { flex: 1; min-width: 0; }
+details.info { flex: none; margin-left: auto; }
+details.info > summary { list-style: none; cursor: pointer; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); color: var(--muted); font: italic 600 11.5px/16px Georgia, serif; text-align: center; user-select: none; }
+details.info > summary::-webkit-details-marker { display: none; }
+details.info > summary:hover, details.info[open] > summary { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+details.info > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.vital-value .unit { font-size: 14px; font-weight: 500; letter-spacing: 0; margin-left: 4px; color: var(--muted); }
+.info-pop { position: absolute; z-index: 5; left: 8px; top: 38px; width: min(320px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.18); padding: 10px 12px; font-size: 12.5px; line-height: 1.45; color: var(--ink); }
+.info-pop p { margin: 0 0 6px; } .info-pop p:last-child { margin-bottom: 0; color: var(--muted); }
+details.trials-more { margin-top: 14px; }
+details.trials-more > summary { cursor: pointer; color: var(--accent); font-weight: 600; font-size: 14px; list-style: none; }
+details.trials-more > summary::-webkit-details-marker { display: none; }
+details.trials-more > summary::before { content: "\25B8"; display: inline-block; width: 16px; transition: transform .15s; }
+details.trials-more[open] > summary::before { transform: rotate(90deg); }
+.trials-summary { margin: 12px 0 0; font-size: 14.5px; }
 .vital-value.plain { color: var(--ink) !important; font-size: 24px !important; }
 .trials { display: grid; gap: 12px; margin-top: 12px; }
 .trial { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; box-shadow: var(--shadow); min-width: 0; }
@@ -237,21 +253,14 @@ footer { margin-top: 40px; color: var(--faint); font-size: 12.5px; text-align: c
   {{WARNINGS}}
 
   <h2 class="section-title">Context vitals</h2>
-  <p class="section-lead">What the server costs an agent before it does anything useful. The bar runs from well inside budget to twice the poor mark.</p>
+  <p class="section-lead">What the server costs an agent before it does anything useful, in tokens as current Claude models count them (estimated from the text). The bar runs from well inside budget to twice the poor mark.</p>
   <div class="vitals">{{VITALS}}</div>
-
-  <h2 class="section-title">Agent trials</h2>
-  {{TRIALS}}
-
-  <h2 class="section-title">Top fixes</h2>
-  <p class="section-lead">The five changes with the best estimated gain for the effort. Copy a fix as text, or as a ready-to-file issue.</p>
-  <div class="fixes">{{FIXES}}</div>
 
   <h2 class="section-title">Where the context goes</h2>
   <p class="section-lead">{{TREEMAP_NOTE}}</p>
   <div class="card">
     {{TREEMAP}}
-    <div class="tm-legend"><span><i style="background:var(--tm-desc)"></i>description</span><span><i style="background:var(--tm-schema)"></i>input schema and name</span><span>Box area is proportional to bytes.</span></div>
+    <div class="tm-legend"><span><i style="background:var(--tm-desc)"></i>description</span><span><i style="background:var(--tm-schema)"></i>input schema and name</span><span>Box area is proportional to tokens.</span></div>
   </div>
 
   <div class="filters" role="toolbar" aria-label="Filter audits">
@@ -275,6 +284,13 @@ footer { margin-top: 40px; color: var(--faint); font-size: 12.5px; text-align: c
     </table>
   </div>
 
+  <h2 class="section-title">Agent trials</h2>
+  {{TRIALS}}
+
+  <h2 class="section-title">Top fixes</h2>
+  <p class="section-lead">The five changes with the best estimated gain for the effort. Copy a fix as text, or as a ready-to-file issue.</p>
+  <div class="fixes">{{FIXES}}</div>
+
   {{NOTES}}
 
   <footer>{{FOOTER}}</footer>
@@ -294,6 +310,21 @@ footer { margin-top: 40px; color: var(--faint); font-size: 12.5px; text-align: c
     if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done, fallback); } else { fallback(); }
     function fallback() { var ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); done(); } catch (e) {} document.body.removeChild(ta); }
   }
+  document.addEventListener("click", function (ev) {
+    document.querySelectorAll("details.info[open]").forEach(function (d) { if (!d.contains(ev.target)) d.removeAttribute("open"); });
+  });
+  document.querySelectorAll("details.info").forEach(function (d) {
+    d.addEventListener("toggle", function () {
+      var pop = d.querySelector(".info-pop");
+      if (!d.open || !pop) return;
+      pop.style.left = "";
+      var r = pop.getBoundingClientRect(), over = r.right - (document.documentElement.clientWidth - 16);
+      if (over > 0) pop.style.left = (8 - over) + "px";
+    });
+  });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape") document.querySelectorAll("details.info[open]").forEach(function (d) { d.removeAttribute("open"); });
+  });
   document.querySelectorAll("button[data-copy]").forEach(function (b) { b.addEventListener("click", function () { copy(b.getAttribute("data-copy"), b); }); });
   var chips = document.querySelectorAll(".chip");
   chips.forEach(function (c) {
@@ -325,7 +356,7 @@ footer { margin-top: 40px; color: var(--faint); font-size: 12.5px; text-align: c
       });
     });
   }
-  window.addEventListener("beforeprint", function () { document.querySelectorAll("details").forEach(function (d) { d.setAttribute("open", ""); }); });
+  window.addEventListener("beforeprint", function () { document.querySelectorAll("details:not(.info)").forEach(function (d) { d.setAttribute("open", ""); }); });
 })();
 </script>
 </body>

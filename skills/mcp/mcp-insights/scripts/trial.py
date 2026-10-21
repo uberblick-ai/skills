@@ -90,6 +90,7 @@ def summarize(lines: list[dict], server: str, trial: dict, help_spec: dict) -> d
                 if ev is not None:
                     body = result_text(c.get("content"))
                     ev["bytes"] = len(body.encode("utf-8"))
+                    ev["tokens"] = probe.estimate_tokens(body)
                     ev["is_error"] = bool(c.get("is_error")) and not ev["denied"]
                     if ev["is_error"]:
                         ev["error"] = body[:400]
@@ -134,6 +135,7 @@ def summarize(lines: list[dict], server: str, trial: dict, help_spec: dict) -> d
         "events": events,
         "calls": sum(1 for e in events if e["kind"] in ("tool", "help")),
         "help_reads": len(help_events), "help_bytes": sum(e.get("bytes", 0) for e in help_events),
+        "help_tokens": sum(e.get("tokens", 0) for e in help_events),
         "first_use": first_use,
         "help_before_use": None if first_use is None or not needs else any(e["i"] < first_use for e in help_events),
         "rules": rules,
@@ -143,7 +145,7 @@ def summarize(lines: list[dict], server: str, trial: dict, help_spec: dict) -> d
                                                          "cache_creation_input_tokens")),
         "context_start": context[0] if context else None,
         "context_peak": max(context) if context else None,
-        "server_bytes": sum(e.get("bytes", 0) for e in events if e["kind"] in ("tool", "help")),
+        "server_tokens": sum(e.get("tokens", 0) for e in events if e["kind"] in ("tool", "help")),
         "cost_usd": final.get("total_cost_usd") or sum(float(v.get("costUSD") or 0) for v in (final.get("modelUsage") or {}).values()
                                                        if isinstance(v, dict)) or None,
         "turns": final.get("num_turns"), "ms": final.get("duration_ms"),
@@ -262,7 +264,7 @@ def run(args) -> int:
         probe.write_record(out, record)
         hb = "-" if summary["help_before_use"] is None else "yes" if summary["help_before_use"] else "NO"
         print(f"{trial['id']}: {summary['calls']} calls, {summary['help_reads']} help reads "
-              f"({summary['help_bytes'] / 1024:.0f} KB), help before use: {hb}, errors {summary['errors']}, "
+              f"({summary['help_tokens']:,} tokens), help before use: {hb}, errors {summary['errors']}, "
               f"context {summary.get('context_start') or 0:,} -> {summary.get('context_peak') or 0:,} tokens, "
               f"${summary['cost_usd'] or 0:.3f}", file=sys.stderr)
     record["trials"] = {"server": server, "writes": "allowed (sandbox)" if args.allow_writes else "blocked",
