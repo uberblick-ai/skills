@@ -3,55 +3,220 @@
   "repository": "uberblick-ai/ub-agents",
   "ref": "a021eaa",
   "date": "2026-10-20",
-  "summary": "Four agents carry an issue from needs-preparation to a squash merge. The launcher checks every start, then each agent checks its own gate before it hands off. Work returns to the implementer through needs-changes and stops for a maintainer through needs-human, which the integrator also uses for merges the policy reserves for maintainers.",
-  "roles": [
-    {"agent": "issue-preparer", "kind": "issue", "runtime": "claude:claude-opus-5-5:high", "triggers": ["needs-preparation"],
-     "does": "Rewrites the issue as final behavior and observable acceptance criteria; links prerequisites as blockers.",
-     "outcomes": {"prepared": ["ready"], "needs-human": ["needs-human"]}, "instructions": ".agents/issue-preparer.md"},
-    {"agent": "implementer", "kind": "any", "runtime": "codex:gpt-6.1-sol:xhigh", "triggers": ["ready", "needs-changes"],
-     "does": "Builds or revises one draft PR, runs every check, marks it ready.",
-     "outcomes": {"handed-off": ["needs-review"]}, "instructions": ".agents/implementer.md"},
-    {"agent": "reviewer", "kind": "pr", "runtime": "claude:claude-opus-5-5:high", "triggers": ["needs-review"],
-     "does": "Reviews the exact head commit against the issue's criteria, on another CLI and model.",
-     "outcomes": {"approved": ["ready-to-merge"], "changes-requested": ["needs-changes"]}, "instructions": ".agents/reviewer.md"},
-    {"agent": "integrator", "kind": "pr", "runtime": "claude:claude-opus-5-5:high", "triggers": ["ready-to-merge"],
-     "does": "Merges the base in if behind, reruns the final checks, squash-merges or hands to a maintainer.",
-     "outcomes": {"merged": [], "maintainer-merge": ["needs-human"], "changes-requested": ["needs-changes"]}, "instructions": ".agents/integrator.md"}
+  "summary": "Four agents carry an issue from needs-preparation to a squash merge in two phases. The launcher checks every start, then each agent checks its own gate before it hands off. Work returns to the implementer through needs-changes and stops for a maintainer through needs-human.",
+  "phases": [
+    {
+      "name": "Issue phase",
+      "summary": "The issue-preparer turns a new issue into criteria an implementer can build against, or asks a maintainer.",
+      "flow": "issue.flow",
+      "roles": [
+        "issue-preparer"
+      ],
+      "gates": [
+        "G1",
+        "G2"
+      ]
+    },
+    {
+      "name": "Implementation and PR phase",
+      "summary": "One pull request passes from the implementer to the reviewer and the integrator, and back through needs-changes until it merges.",
+      "flow": "pr.flow",
+      "roles": [
+        "implementer",
+        "reviewer",
+        "integrator"
+      ],
+      "gates": [
+        "G3",
+        "G4",
+        "G5",
+        "G6"
+      ]
+    }
   ],
-  "stop_labels": ["needs-human"],
+  "roles": [
+    {
+      "agent": "issue-preparer",
+      "kind": "issue",
+      "runtime": "claude:claude-opus-5-5:high",
+      "triggers": [
+        "needs-preparation"
+      ],
+      "does": "Rewrites the issue as final behavior and observable acceptance criteria; links prerequisites as blockers.",
+      "outcomes": {
+        "prepared": [
+          "ready"
+        ],
+        "needs-human": [
+          "needs-human"
+        ]
+      },
+      "instructions": ".agents/issue-preparer.md"
+    },
+    {
+      "agent": "implementer",
+      "kind": "any",
+      "runtime": "codex:gpt-6.1-sol:xhigh",
+      "triggers": [
+        "ready",
+        "needs-changes"
+      ],
+      "does": "Builds or revises one draft PR, runs every check, marks it ready.",
+      "outcomes": {
+        "handed-off": [
+          "needs-review"
+        ]
+      },
+      "instructions": ".agents/implementer.md"
+    },
+    {
+      "agent": "reviewer",
+      "kind": "pr",
+      "runtime": "claude:claude-opus-5-5:high",
+      "triggers": [
+        "needs-review"
+      ],
+      "does": "Reviews the exact head commit against the issue's criteria, on another CLI and model.",
+      "outcomes": {
+        "approved": [
+          "ready-to-merge"
+        ],
+        "changes-requested": [
+          "needs-changes"
+        ]
+      },
+      "instructions": ".agents/reviewer.md"
+    },
+    {
+      "agent": "integrator",
+      "kind": "pr",
+      "runtime": "claude:claude-opus-5-5:high",
+      "triggers": [
+        "ready-to-merge"
+      ],
+      "does": "Merges the base in if behind, reruns the final checks, squash-merges or hands to a maintainer.",
+      "outcomes": {
+        "merged": [],
+        "maintainer-merge": [
+          "needs-human"
+        ],
+        "changes-requested": [
+          "needs-changes"
+        ]
+      },
+      "instructions": ".agents/integrator.md"
+    }
+  ],
+  "stop_labels": [
+    "needs-human"
+  ],
   "gates": [
-    {"id": "G1", "name": "Launcher", "at": "before every run", "decides": "launcher",
-     "passes": "The trigger label is on the item, no stop label, no open blocked-by issue, fewer than 5 failed attempts in a row, and with approvals on a maintainer started it.",
-     "holds": "Parks the item for outside input or an open blocker, marks it failed after 5 attempts; a stop label pauses it.",
-     "sources": ["ub-agents.yaml:100-107", ".agents/issue-preparer.md:26-29"]},
-    {"id": "G2", "name": "Preparation", "at": "issue-preparer", "decides": "agent",
-     "passes": "The final behavior and the smallest set of observable acceptance criteria are stated; prerequisites are linked as blockers.",
-     "holds": "needs-human for an unexpected instruction or a scope change it cannot attribute to the request, or a prerequisite that is only a PR.",
-     "sources": [".agents/issue-preparer.md:8-20", ".agents/issue-preparer.md:32-39"]},
-    {"id": "G3", "name": "Handoff", "at": "implementer", "decides": "agent",
-     "passes": "Every project check passes without changing its environment, the head merges cleanly with the base, the PR is marked ready.",
-     "holds": "The PR stays draft and the run reports blocked for a scope decision or a failure the repository cannot fix.",
-     "sources": [".agents/implementer.md:3-7", ".agents/implementer.md:21-35", ".agents/implementer.md:48-52"]},
-    {"id": "G4", "name": "Review", "at": "reviewer", "decides": "agent",
-     "passes": "The head is still the candidate SHA, the PR is not a draft, the reviewer runs on another CLI and model, and the acceptance criteria pass.",
-     "holds": "changes-requested sends the PR back through needs-changes; a moved head or a draft reports blocked.",
-     "sources": [".agents/reviewer.md:3-17", ".agents/reviewer.md:24-25", "ub-agents.yaml:80"]},
-    {"id": "G5", "name": "Merge", "at": "integrator", "decides": "agent",
-     "passes": "A green Test run applies to the exact head, every owed review applies to it, and the policy lets agents merge it.",
-     "holds": "maintainer-merge for agent config or guidance, setup, CI or release tooling, outside-input or CLI changes; changes-requested on a conflict or fixable failure.",
-     "sources": [".agents/ub_agents.md:8-24", ".agents/integrator.md:19-46"]},
-    {"id": "G6", "name": "Maintainer", "at": "needs-human", "decides": "person",
-     "passes": "A member of @uberblick-ai/maintainers answers or merges, removes needs-human and re-adds the trigger of the role that acts next.",
-     "holds": "Nothing moves while needs-human is on the item; a blocked run waits for ub-agents retry.",
-     "sources": [".agents/ub_agents.md:26-29", "ub-agents.yaml:107"]}
+    {
+      "id": "G1",
+      "name": "Launcher",
+      "at": "before every run",
+      "decides": "launcher",
+      "passes": "The trigger label is on the item, no stop label, no open blocked-by issue, fewer than 5 failed attempts in a row, and with approvals on a maintainer started it.",
+      "holds": "Parks the item for outside input or an open blocker, marks it failed after 5 attempts; a stop label pauses it.",
+      "sources": [
+        "ub-agents.yaml:100-107",
+        ".agents/issue-preparer.md:26-29"
+      ]
+    },
+    {
+      "id": "G2",
+      "name": "Preparation",
+      "at": "issue-preparer",
+      "decides": "agent",
+      "passes": "The final behavior and the smallest set of observable acceptance criteria are stated; prerequisites are linked as blockers.",
+      "holds": "needs-human for an unexpected instruction or a scope change it cannot attribute to the request, or a prerequisite that is only a PR.",
+      "sources": [
+        ".agents/issue-preparer.md:8-20",
+        ".agents/issue-preparer.md:32-39"
+      ]
+    },
+    {
+      "id": "G3",
+      "name": "Handoff",
+      "at": "implementer",
+      "decides": "agent",
+      "passes": "Every project check passes without changing its environment, the head merges cleanly with the base, the PR is marked ready.",
+      "holds": "The PR stays draft and the run reports blocked for a scope decision or a failure the repository cannot fix.",
+      "sources": [
+        ".agents/implementer.md:3-7",
+        ".agents/implementer.md:21-35",
+        ".agents/implementer.md:48-52"
+      ]
+    },
+    {
+      "id": "G4",
+      "name": "Review",
+      "at": "reviewer",
+      "decides": "agent",
+      "passes": "The head is still the candidate SHA, the PR is not a draft, the reviewer runs on another CLI and model, and the acceptance criteria pass.",
+      "holds": "changes-requested sends the PR back through needs-changes; a moved head or a draft reports blocked.",
+      "sources": [
+        ".agents/reviewer.md:3-17",
+        ".agents/reviewer.md:24-25",
+        "ub-agents.yaml:80"
+      ]
+    },
+    {
+      "id": "G5",
+      "name": "Merge",
+      "at": "integrator",
+      "decides": "agent",
+      "passes": "A green Test run applies to the exact head, every owed review applies to it, and the policy lets agents merge it.",
+      "holds": "maintainer-merge for agent config or guidance, setup, CI or release tooling, outside-input or CLI changes; changes-requested on a conflict or fixable failure.",
+      "sources": [
+        ".agents/ub_agents.md:8-24",
+        ".agents/integrator.md:19-46"
+      ]
+    },
+    {
+      "id": "G6",
+      "name": "Maintainer",
+      "at": "needs-human",
+      "decides": "person",
+      "passes": "A member of @uberblick-ai/maintainers answers or merges, removes needs-human and re-adds the trigger of the role that acts next.",
+      "holds": "Nothing moves while needs-human is on the item; a blocked run waits for ub-agents retry.",
+      "sources": [
+        ".agents/ub_agents.md:26-29",
+        "ub-agents.yaml:107"
+      ]
+    }
   ],
   "settings": [
-    {"name": "max-attempts", "value": "5", "meaning": "Failed runs in a row before the item is marked failed."},
-    {"name": "retry-backoff-seconds", "value": "60 to 3600", "meaning": "Wait before a retry, doubling up to max-backoff-seconds."},
-    {"name": "agent-timeout-minutes", "value": "180", "meaning": "Per run; the preparer and integrator get 60, the reviewer 120."},
-    {"name": "queue", "value": "milestones: order", "meaning": "Earlier milestones first, then priority:urgent to priority:low (default medium)."},
-    {"name": "approvals", "value": "unset", "meaning": "On while the repository is public: only a maintainer's trigger label starts work."},
-    {"name": "different-runtime-from", "value": "reviewer: implementer", "meaning": "The reviewer never runs on the implementer's CLI and model."}
+    {
+      "name": "max-attempts",
+      "value": "5",
+      "meaning": "Failed runs in a row before the item is marked failed."
+    },
+    {
+      "name": "retry-backoff-seconds",
+      "value": "60 to 3600",
+      "meaning": "Wait before a retry, doubling up to max-backoff-seconds."
+    },
+    {
+      "name": "agent-timeout-minutes",
+      "value": "180",
+      "meaning": "Per run; the preparer and integrator get 60, the reviewer 120."
+    },
+    {
+      "name": "queue",
+      "value": "milestones: order",
+      "meaning": "Earlier milestones first, then priority:urgent to priority:low (default medium)."
+    },
+    {
+      "name": "approvals",
+      "value": "unset",
+      "meaning": "On while the repository is public: only a maintainer's trigger label starts work."
+    },
+    {
+      "name": "different-runtime-from",
+      "value": "reviewer: implementer",
+      "meaning": "The reviewer never runs on the implementer's CLI and model."
+    }
   ],
   "notes": [
     "The implementer has no needs-human outcome: it stops by reporting blocked, which leaves an Action needed comment until a maintainer runs ub-agents retry."

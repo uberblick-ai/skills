@@ -1,9 +1,13 @@
 # flow.json
 
-`scripts/page.py` reads this file and the SVG `render.mjs` drew, and builds a
-page that prints on two A4 pages: the flow with the roles beside it on the
-first, the gates, limits and notes on the second. The example in
-[../assets/example.json](../assets/example.json) is uberblick-ai/ub-agents.
+`scripts/page.py` reads this file, each phase's `.flow` and the `.svg`
+`render.mjs` drew next to it, and writes the report twice from the same
+blocks: `flow.md` in Uberblick Markdown and `flow.html` styled like an
+Uberblick document. The report is the title and summary, then per phase a
+heading, its sentence, its drawing as an `ablauf` fence, a table of its roles
+and a card per gate, then a table of limits and policy and the notes as a
+list. The example in [../assets/example.json](../assets/example.json) is
+uberblick-ai/ub-agents.
 
 ```json
 {
@@ -12,6 +16,22 @@ first, the gates, limits and notes on the second. The example in
   "ref": "a021eaa",
   "date": "2026-10-20",
   "summary": "Three sentences, at most 60 words: how work enters, where it is checked, where it returns and where it stops.",
+  "phases": [
+    {
+      "name": "Issue phase",
+      "summary": "One sentence, at most 30 words.",
+      "flow": "issue.flow",
+      "roles": ["issue-preparer"],
+      "gates": ["G1", "G2"]
+    },
+    {
+      "name": "Implementation and PR phase",
+      "summary": "One sentence, at most 30 words.",
+      "flow": "pr.flow",
+      "roles": ["implementer", "reviewer", "integrator"],
+      "gates": ["G3", "G4", "G5", "G6"]
+    }
+  ],
   "roles": [
     {
       "agent": "reviewer",
@@ -44,6 +64,11 @@ first, the gates, limits and notes on the second. The example in
 
 - `ref` is the commit the files were read at, so every source links to the
   lines as they were. `date` is today.
+- `phases` are the issue phase and the implementation and PR phase, in that
+  order. `flow` names the phase's ablauf source next to `flow.json`; its
+  drawing is the `.svg` beside it. Every role and every gate belongs to
+  exactly one phase: a gate drawn in both, such as a maintainer's decision,
+  is listed where an item last meets it.
 - `roles` lists every agent in `ub-agents.yaml`, in the order work passes
   through them. `kind` is the agent's `kind` (`issue`, `pr`) or `any` when
   unset. `runtime` is optional. `outcomes` maps every declared outcome to the
@@ -57,8 +82,13 @@ first, the gates, limits and notes on the second. The example in
 - `settings` and `notes` are optional. Settings are the config values that
   change how work moves: limits, queue order, approvals, runtime rules.
 
-`page.py` stops with an error on a missing or malformed field. It warns,
-without stopping, when an outcome adds a label that starts no agent and is no
-stop label, when a gate number is missing from the flow or the flow shows one
-that is not a gate, and when a text runs past the word budgets above or there
-are more than eight gates; past those the report no longer fits two pages.
+Text fields are inline Markdown as Uberblick reads it: `code`, **bold**,
+*italic* and https links.
+
+`page.py` stops with an error on a missing or malformed field, a role or gate
+in no phase or in two, or a drawing not yet rendered. It warns, without
+stopping, when an outcome adds a label that starts no agent and is no stop
+label, when a gate number is missing from its phase's drawing or a drawing
+shows one that is not a gate, and when a text runs past the word budgets above
+or there are more than eight gates; past those each phase no longer fits its
+printed page.

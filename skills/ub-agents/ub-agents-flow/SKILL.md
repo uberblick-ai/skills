@@ -1,12 +1,14 @@
 ---
 name: ub-agents-flow
 description: >-
-  Explain how the ub-agents loop runs in a GitHub repository as a one or two
-  page report: the workflow from ub-agents.yaml drawn with ablauf, every gate
-  that holds work back (from the config and the agents' instruction files)
-  numbered and highlighted, the roles with their labels, limits and policy. Use when a
-  maintainer asks how their loop works, what the flow or the gates look like,
-  or wants an overview of the agents. Reads only. Not for a loop role.
+  Explain how the ub-agents loop runs in a GitHub repository as a short
+  report in two phases, the issue phase and the implementation and PR phase:
+  each drawn with ablauf, every gate that holds work back (from the config and
+  the agents' instruction files) numbered and highlighted, with the roles,
+  limits and policy. Writes Uberblick Markdown and a matching page to read or
+  print. Use when a maintainer asks how their loop works, what the flow or the
+  gates look like, or wants an overview of the agents. Reads only. Not for a
+  loop role.
 license: MIT
 compatibility: >-
   Requires python3 and Node.js 22.18 or newer with npm, to install the
@@ -19,11 +21,15 @@ metadata:
 
 # Loop flow
 
-A maintainer should be able to see on two pages how work moves through their
+A maintainer should be able to see in a few pages how work moves through their
 loop: which agent picks up which label, what each one checks before it lets an
 item move on, where work goes back and where it waits for a person. The config
 says who runs when; the instruction files say what each agent checks. The
-report puts both in one drawing.
+report puts both in two drawings, one per phase: the issue phase, from a new
+issue to `ready`, and the implementation and PR phase, from `ready` to the
+merge. It uses only what an Uberblick document holds (headings, paragraphs,
+`ablauf` fences, tables, cards and lists), so the Markdown it writes is the
+document and the page shows it the way Uberblick would.
 
 `scripts/render.mjs` and `scripts/page.py` live next to this file; call them
 by their path inside this skill's directory. `REPO` is the `OWNER/NAME` of the
@@ -63,42 +69,51 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
      merges of certain paths or scope decisions.
 
    Merge what one agent checks into one gate, so the report has at most eight.
-   Note anything that does not fit: an outcome label no agent picks up, an
+   Sort every agent and gate into a phase: issue agents (`kind: issue`, such
+   as the issue-preparer and an optional issue-reviewer) up to the label the
+   implementer starts on, the rest after it. Note anything that does not fit: an outcome label no agent picks up, an
    agent no outcome reaches, a rule in the instructions the config cannot
    route, a role that can only stop by reporting blocked.
 
 3. Write `DIR/flow.json` as [references/page.md](references/page.md)
-   describes: a three-sentence summary, every role, the gates in the order an
-   item meets them, the settings that change how work moves, and the notes
-   from step 2.
+   describes: a three-sentence summary, the two phases with a sentence each
+   and their roles and gates, every role, the gates in the order an item
+   meets them, the settings that change how work moves, and the notes from
+   step 2.
 
-4. Draw `DIR/flow.flow` as [references/flow.md](references/flow.md)
-   describes, starting from [assets/example.flow](assets/example.flow): the
-   path an item takes when every gate passes down the middle, rework on the
-   left, the stop panel on the right, every gate numbered as in `flow.json`.
+4. Draw `DIR/issue.flow` and `DIR/pr.flow` as
+   [references/flow.md](references/flow.md) describes, starting from
+   [assets/issue.flow](assets/issue.flow) and [assets/pr.flow](assets/pr.flow):
+   the path an item takes when every gate passes down the middle, rework on
+   the left, the stop panel on the right, every gate numbered as in
+   `flow.json`.
 
-5. Render it, installing the renderer once per scratch directory:
+5. Render both, installing the renderer once per scratch directory:
 
    ```sh
    npm install --prefix DIR/ablauf @uberblick/ablauf@0.2.0
-   node scripts/render.mjs DIR/ablauf DIR/flow.flow DIR/flow.svg
+   node scripts/render.mjs DIR/ablauf DIR/issue.flow DIR/pr.flow
    ```
 
-   It fails on any diagnostic and names the line; fix it and render again
-   until it prints `clean`.
+   Each `.svg` lands next to its `.flow`. It fails on any diagnostic and
+   names the line; fix it and render again until both print `clean`.
 
-6. Build the page and open it:
+6. Build the report and open it:
 
    ```sh
-   python3 scripts/page.py DIR/flow.json --svg DIR/flow.svg --flow DIR/flow.flow --out DIR/flow.html --open
+   python3 scripts/page.py DIR/flow.json --out DIR/flow.html --open
    ```
 
-   Fix every warning it prints (an outcome label that starts nothing, a gate
-   missing from the drawing, a text over its word budget) unless it is a real
-   finding about the loop, which belongs in `notes`. The page prints on two
-   A4 pages, light even from a dark screen.
+   It writes `DIR/flow.md`, the report as Uberblick Markdown, and
+   `DIR/flow.html`, the same blocks styled like an Uberblick document with
+   each `ablauf` fence drawn. Fix every warning it prints (an outcome label
+   that starts nothing, a gate missing from the drawings, a text over its word
+   budget) unless it is a real finding about the loop, which belongs in
+   `notes`. Printed, each phase starts a new A4 page, light even from a dark
+   screen.
 
-7. Tell the maintainer where the page is, then in a few sentences: the path
-   an item takes, the gates where a person decides, and anything from the
-   notes that looks like a mistake in the config or the instructions. Change
-   nothing on GitHub; offer to open an issue only if they ask.
+7. Tell the maintainer where the page and the Markdown are, then in a few
+   sentences: the path an item takes in each phase, the gates where a person
+   decides, and anything from the notes that looks like a mistake in the
+   config or the instructions. Change nothing on GitHub; offer to open an
+   issue only if they ask.

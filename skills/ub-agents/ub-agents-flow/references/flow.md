@@ -3,8 +3,10 @@
 [ablauf](https://ablauf.uberblick.ai) draws a flow from text. The author
 places every node; the renderer sizes the grid, routes the edges and reports
 every problem with its line number. It never moves anything, so the drawing is
-what you wrote. The worked example is
-[../assets/example.flow](../assets/example.flow).
+what you wrote. The report has one flow per phase; the worked examples are
+[../assets/issue.flow](../assets/issue.flow) and
+[../assets/pr.flow](../assets/pr.flow). Uberblick draws the same source from
+an `ablauf` fence.
 
 ## The lines you need
 
@@ -30,7 +32,7 @@ g4 --> needs-changes tone=rework : changes-requested
 needs-changes --> implementer tone=rework from=top to=left label=end : revise the same PR
 
 legend
-  decision tone=system "gate, numbered as on page 2"
+  decision tone=system "gate, numbered as in the cards"
   pill tone=done "GitHub label"
   panel tone=stop "a person decides"
 ```
@@ -49,6 +51,12 @@ legend
 
 ## Conventions for a loop flow
 
+- Two flows. `issue.flow` runs from the entry label (`needs-preparation`) to
+  the label the implementer starts on, ending in an `end` node such as
+  "Implementation picks it up". `pr.flow` starts from that label and ends at
+  the merge. Leave launcher gates in the issue flow and mention them in the PR
+  flow's first edge label.
+
 - Three columns: `rework` on the left for labels that send work back, `main`
   for the path an item takes when every gate passes, `stop` on the right for
   where a person steps in. Leave out a column the loop does not need.
@@ -66,9 +74,44 @@ legend
 - Rework edges `tone=rework`, edges into the stop panel `tone=stop`. Route a
   loop back with `from=top to=left label=end` so it does not cross the main
   column.
-- Keep captions to a few words; the detail belongs on page 2. A flow with more
+- Keep captions to a few words; the detail belongs in the gate cards. A flow with more
   than about 20 nodes no longer fits a page: merge labels into edge text before
   dropping a gate.
+
+## An issue-reviewer
+
+`ub-agents init` writes an optional issue-reviewer: the preparer's `review`
+outcome adds `needs-review`, and the issue-reviewer approves to `ready` or
+sends it back with `needs-preparation`. When the config has it, draw it in a
+second column of the issue flow, beside the preparer, with its own gate
+(renders clean with ablauf 0.2.0):
+
+```
+columns main review
+
+pill needs-preparation col=main tone=muted
+box issue-preparer "states behavior and acceptance criteria"
+decision g2 tone=system "G2 Small and clear?"
+pill ready tone=done
+end delivery "Implementation picks it up"
+
+pill needs-review col=review row=g2 tone=agent
+box issue-reviewer row=ready "second opinion on scope and criteria"
+decision g3 row=delivery tone=system "G3 Scope and criteria hold?"
+
+needs-preparation --> issue-preparer
+issue-preparer --> g2
+g2 --> ready : prepared
+ready --> delivery
+g2 --> needs-review : review
+needs-review --> issue-reviewer
+issue-reviewer --> g3
+g3 --> ready from=left to=right : approved
+g3 --> needs-preparation tone=rework from=right to=right label=end : changes-requested
+```
+
+`needs-review` then starts both the issue-reviewer (`kind: issue`) and the PR
+reviewer (`kind: pr`); say so in the roles, since one label serves both.
 
 `render.mjs` fails on any diagnostic, warnings included (`edge a → b crosses
 c → d`, an unknown column or key). Fix the line it names, usually by moving a
