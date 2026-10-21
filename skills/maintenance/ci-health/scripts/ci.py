@@ -640,9 +640,11 @@ INCIDENTS = {"version": 1, "schema": {"type": "object", "required": ["day", "rep
 ACTIONS = {"version": 1, "schema": {"type": "object", "required": ["repo", "rank", "area", "title", "why", "since",
                                                                   "updated"],
            "properties": {"repo": TEXT, "rank": {"type": "integer", "minimum": 1, "maximum": 3}, "area": TEXT,
-                          "title": TEXT, "why": TEXT, "check": TEXT, "impact_min_per_day": NUM, "since": DAY,
-                          "updated": DAY}}}
-TOP = 3  # actions on the document at a time
+                          "title": TEXT, "why": TEXT, "where": TEXT, "cost": TEXT,
+                          "evidence": {"type": "array", "items": TEXT}, "check": TEXT, "impact_min_per_day": NUM,
+                          "since": DAY, "updated": DAY}}}
+TOP = 3  # actions on the document at most; the Recommended Actions intro says "Up to three"
+REF = re.compile(r"(?:[\w.-]+/[\w.-]+)?#\d+")  # an issue or PR: #12 in the repository, or owner/name#12
 # Applying an action is a person's decision, so it lives apart from `actions`, which every run replaces: one record
 # per action id, written by the session that discussed it.
 APPLIED = {"version": 1, "schema": {"type": "object", "required": ["status", "ref", "url"],
@@ -701,8 +703,12 @@ def action_rows(data, actions):
             sys.exit(f"action {rank}: missing {', '.join(missing)}")
         if a.get("repo") not in (None, data["repo"]):
             sys.exit(f"actions: every action must be for {data['repo']}, the repository of this document")
+        evidence = [f"#{e}" if isinstance(e, int) else e for e in a.get("evidence") or []]
+        if any(not isinstance(e, str) or not REF.fullmatch(e) for e in evidence):
+            sys.exit(f"action {rank}: evidence takes issues and PRs, as 12, \"#12\" or \"owner/name#12\"")
         value = {"repo": data["repo"], "rank": rank, "since": a.get("since") or data["last"], "updated": data["last"],
-                 **{k: a[k] for k in ("area", "title", "why", "check", "impact_min_per_day") if a.get(k) is not None}}
+                 **{k: a[k] for k in ("area", "title", "why", "where", "cost", "check", "impact_min_per_day")
+                    if a.get(k) is not None}, **({"evidence": evidence} if evidence else {})}
         rows.append({"id": a.get("id") or slug(a["title"]).replace("_", "-"), "value": value})
     ids = [r["id"] for r in rows]
     if len(ids) != len(set(ids)):
@@ -791,6 +797,28 @@ def card_label(a):
     return f"{one_line(a['area'])} · since {dt.date.fromisoformat(a['since']).strftime('%-d %b %Y')}"
 
 
+def qualified(repo, ref):
+    """owner/name#12 for an issue or PR, from #12 in the repository or owner/name#12."""
+    return repo + ref if ref.startswith("#") else ref
+
+
+def cost(a):
+    """What the action costs in a few words: the agent's `cost`, else the minutes of waiting a day it accounts for."""
+    if a.get("cost"):
+        return one_line(a["cost"])
+    if a.get("impact_min_per_day", 0) >= 1:
+        return f"about {a['impact_min_per_day']:.0f} min of waiting a day"
+    return ""
+
+
+def card_footer(data, a):
+    """The evidence: where the action applies, what it costs and the issues and PRs behind it, linked as written
+    so they show as GitHub pills. Empty without any."""
+    refs = " ".join(f"[{r}](https://github.com/{qualified(data['repo'], r).replace('#', '/issues/')})"
+                    for r in a.get("evidence", []))
+    return " · ".join(x for x in (one_line(a.get("where") or ""), cost(a), refs) if x)
+
+
 def applied_card(a, status, ref, url):
     """An action being applied: the title and why struck through, the button gone, and a footer, not struck, naming
     the pull request or issue. A link whose text is the reference and whose target its GitHub URL shows as a pill."""
@@ -805,10 +833,13 @@ def discuss_link(data, action, doc=None):
     source = f"the CI Health Report for {data['repo']}" + (f" (Uberblick document {doc})" if doc else "")
     where = f"Uberblick document {doc}" if doc else f'the "CI Health Report" document for {data["repo"]} in Uberblick'
     card = applied_card(action, "STATUS", "REF", "URL")
+    details = "".join(f"{k}: {v}\n" for k, v in (
+        ("Where", one_line(action.get("where") or "")), ("Cost", cost(action)),
+        ("Issues and PRs", ", ".join(qualified(data["repo"], r) for r in action.get("evidence", [])))) if v)
     record = {"id": action.get("id") or slug(action["title"]).replace("_", "-"),
               "value": {"status": "implemented or planned", "ref": "REF", "url": "URL", "day": "YYYY-MM-DD"}}
     prompt = (f"From {source}, data as of {action.get('updated') or data['last']}:\n\n"
-              f"Recommendation: {action['title'].rstrip('.')}.\nEvidence: {action['why']}\n\n"
+              f"Recommendation: {action['title'].rstrip('.')}.\nEvidence: {action['why']}\n{details}\n"
               f"Let's discuss this before changing anything. {action.get('check') or CHECK} "
               "Then propose a plan and wait for my go-ahead.\n\n"
               "If we decide to apply it, mark the card once a pull request implements it or an issue plans it, so the "
@@ -829,9 +860,10 @@ def applied_marks(applied):
 
 
 def cards(data, actions, doc=None, button=True, applied=()):
-    """The actions as cards in rank order: the area and since when, the action, why with its numbers, and a button
-    to discuss it in Claude Code. An action being applied is struck through, with its pull request or issue below.
-    Takes the agent's actions or the stored records."""
+    """The actions as cards in rank order: the area and since when, the action, a footer with the evidence (where
+    it applies, what it costs, the issues and PRs behind it), why with its numbers, and a button to discuss it in
+    Claude Code. An action being applied is struck through, with its pull request or issue below instead. Takes the
+    agent's actions or the stored records."""
     rows = actions.get("records", actions) if isinstance(actions, dict) else actions
     stored = {r["id"]: r["value"] for r in rows if "value" in r}
     pairs = (sorted(stored.items(), key=lambda kv: kv[1]["rank"]) if stored
@@ -843,8 +875,10 @@ def cards(data, actions, doc=None, button=True, applied=()):
             m = marks[key]
             blocks.append({"type": "card", "text": applied_card(a, m["status"].capitalize(), m["ref"], m["url"])})
             continue
+        footer = card_footer(data, a)
         blocks.append({"type": "card", "text": f"label: {card_label(a)}\n"
                                                f"title: {one_line(a['title'])}\n"
+                                               + (f"footer: {footer}\n" if footer else "")
                                                + (f"button: [Discuss in Claude Code]({discuss_link(data, a | {'id': key}, doc)})\n"
                                                   if button else "")
                                                + f"\n{a['why']}"})
@@ -870,7 +904,7 @@ def create_document(data, incidents=(), actions=(), button=True):
             {"text": ".", "marks": {}}]},
         *charts(data),
         {"type": "heading", "level": 2, "text": "Recommended Actions"},
-        {"type": "paragraph", "text": f"The {TOP} changes that would most cut the time pushes wait for a green "
+        {"type": "paragraph", "text": "Up to three changes that would most cut the time pushes wait for a green "
          f"{data['branch']}, from the last days of CI, kept until done or outranked."},
         *cards(data, list(actions), button=button),
         {"type": "heading", "level": 2, "text": "Incidents"},
