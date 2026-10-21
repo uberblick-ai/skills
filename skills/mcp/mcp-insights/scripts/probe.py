@@ -27,9 +27,12 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-PROBE_VERSION = "0.1"
+PROBE_VERSION = "0.2"
 CLIENT_INFO = {"name": "mcp-insights", "version": PROBE_VERSION}
 REQUESTED_VERSION = "2025-11-25"
+MODERN_VERSION = "2026-07-28"
+META_VERSION = "io.modelcontextprotocol/protocolVersion"
+META_CAPS = "io.modelcontextprotocol/clientCapabilities"
 KNOWN_VERSIONS = ["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
 LIST_PAGE_LIMIT = 50
 RESOURCE_READ_LIMIT = 200
@@ -39,6 +42,83 @@ class ProbeError(Exception):
     pass
 
 
+# Secrets never reach disk. Every string is scrubbed before probe.json or a
+# transcript is written; probe.json keeps only the name, place and length.
+SECRET_FORMATS = [
+    ("aws-access-key", r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
+    ("github-token", r"\bgh[pousr]_[A-Za-z0-9]{30,}|\bgithub_pat_[A-Za-z0-9_]{40,}"),
+    ("slack-token", r"\bxox[abposr]-[A-Za-z0-9-]{10,}"),
+    ("api-key", r"\bsk-(?:ant-|proj-|lf-)?[A-Za-z0-9_-]{20,}|\b[sr]k_live_[A-Za-z0-9]{20,}|\bNRAK-[A-Z0-9]{20,}"),
+    ("google-api-key", r"\bAIza[0-9A-Za-z_-]{35}"),
+    ("private-key", r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)"),
+    ("jwt", r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+    ("bearer-token", r"(?<=Bearer )[A-Za-z0-9._~+/-]{20,}=*"),
+    ("url-password", r"(?<=://)[^/\s:@]+:[^@\s/]{3,}(?=@)"),
+]
+SECRET_ASSIGN = re.compile(
+    r"""(?ix)(["']?)\b([A-Z0-9_.-]*(?:SECRET|PASSWORD|PASSWD|PASSPHRASE|TOKEN|API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIALS?|AUTH[_-]?KEY|DSN)[A-Z0-9_.-]*)\1
+        (\s*[=:]\s*)(["']?)(?!\[REDACTED)([^\s"'`,;]{8,})\4""")
+SECRET_KEY = re.compile(r"(?i)[A-Z0-9_.-]*(?:SECRET|PASSWORD|PASSWD|PASSPHRASE|TOKEN|API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIALS?|AUTH[_-]?KEY|DSN)[A-Z0-9_.-]*")
+PLACEHOLDER = re.compile(r"(?i)^(?:x+|\*+|\.+|<[^>]*>|\$\{[^}]*\}|\$[A-Z_]+|\{\{[^}]*\}\}|(?:your|my|example|dummy|fake|test|sample)[-_].*"
+                         r"|changeme|change_me|placeholder|redacted.*|null|none|true|false|string|number|integer|boolean)$")
+
+
+def entropy(s: str) -> float:
+    import math
+    counts: dict = {}
+    for ch in s:
+        counts[ch] = counts.get(ch, 0) + 1
+    return -sum(n / len(s) * math.log2(n / len(s)) for n in counts.values()) if s else 0.0
+
+
+def likely_real(value: str) -> bool:
+    return len(value) >= 12 and entropy(value) >= 3.0 and bool(re.search(r"[A-Za-z]", value)) and bool(re.search(r"\d", value))
+
+
+def scrub_text(text: str, found: list | None = None, where: str = "") -> str:
+    def note(name, kind, value):
+        if found is not None:
+            found.append({"where": where, "name": name, "kind": kind, "length": len(value), "likely_real": likely_real(value)})
+
+    for kind, pat in SECRET_FORMATS:
+        def repl(mt, kind=kind):
+            if PLACEHOLDER.match(mt.group(0)) or entropy(mt.group(0)) < 2.5:
+                return mt.group(0)
+            note(kind, kind, mt.group(0))
+            return f"[REDACTED:{kind}]"
+        text = re.sub(pat, repl, text)
+
+    def assign(mt):
+        quote, name, sep, vq, value = mt.groups()
+        if PLACEHOLDER.match(value) or re.fullmatch(r"\d+", value) or re.search(r"(?i)page|cursor|next|max|count|limit|usage", name):
+            return mt.group(0)
+        note(name, "assignment", value)
+        return f"{quote}{name}{quote}{sep}{vq}[REDACTED:{name} len={len(value)}]{vq}"
+    return SECRET_ASSIGN.sub(assign, text)
+
+
+def scrub(obj, found: list | None = None, path: str = ""):
+    if isinstance(obj, str):
+        return scrub_text(obj, found, path)
+    if isinstance(obj, list):
+        return [scrub(v, found, f"{path}[{i}]") for i, v in enumerate(obj)]
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            sub = f"{path}.{k}" if path else k
+            if k == "secrets":
+                out[k] = v
+            elif isinstance(v, str) and SECRET_KEY.fullmatch(k) and not re.search(r"(?i)page|cursor|next|max|count|limit|usage", k) \
+                    and len(v) >= 8 and not PLACEHOLDER.match(v) and not v.startswith("[REDACTED"):
+                if found is not None:
+                    found.append({"where": sub, "name": k, "kind": "field", "length": len(v), "likely_real": likely_real(v)})
+                out[k] = f"[REDACTED:{k} len={len(v)}]"
+            else:
+                out[k] = scrub(v, found, sub)
+        return out
+    return obj
+
+
 class Transcript:
     def __init__(self, path: Path | None):
         self.fh = path.open("a", encoding="utf-8") if path else None
@@ -46,7 +126,7 @@ class Transcript:
     def write(self, direction: str, payload) -> None:
         if not self.fh:
             return
-        self.fh.write(json.dumps({"t": round(time.time(), 3), "dir": direction, "msg": payload}) + "\n")
+        self.fh.write(json.dumps(scrub({"t": round(time.time(), 3), "dir": direction, "msg": payload})) + "\n")
         self.fh.flush()
 
 
@@ -113,6 +193,9 @@ class StdioConnection:
         req_id = raw_id if raw_id is not None else self.next_id
         self.next_id += 1
         msg = {"jsonrpc": "2.0", "id": req_id, "method": method}
+        if getattr(self, "meta", None):
+            params = dict(params or {})
+            params["_meta"] = {**self.meta, **(params.get("_meta") or {})}
         if params is not None:
             msg["params"] = params
         self.transcript.write("out", msg)
@@ -237,6 +320,9 @@ class HttpConnection:
         req_id = raw_id if raw_id is not None else self.next_id
         self.next_id += 1
         msg = {"jsonrpc": "2.0", "id": req_id, "method": method}
+        if getattr(self, "meta", None):
+            params = dict(params or {})
+            params["_meta"] = {**self.meta, **(params.get("_meta") or {})}
         if params is not None:
             msg["params"] = params
         self.transcript.write("out", msg)
@@ -323,6 +409,7 @@ def content_text(result) -> str:
 def list_all(conn, method: str, key: str):
     items, pages, cursors_seen, error = [], 0, set(), None
     cursor = None
+    cache = None
     while pages < LIST_PAGE_LIMIT:
         params = {"cursor": cursor} if cursor else {}
         msg, ms = conn.request(method, params)
@@ -331,12 +418,14 @@ def list_all(conn, method: str, key: str):
             error = error_of(msg)
             break
         res = msg.get("result") or {}
+        if cache is None:
+            cache = {"ttlMs": res.get("ttlMs"), "cacheScope": res.get("cacheScope")}
         items.extend(res.get(key) or [])
         cursor = res.get("nextCursor")
         if not cursor or cursor in cursors_seen:
             break
         cursors_seen.add(cursor)
-    return {"items": items, "pages": pages, "error": error}
+    return {"items": items, "pages": pages, "error": error, "cache": cache}
 
 
 def size(obj) -> int:
@@ -373,11 +462,29 @@ def collect(args) -> int:
     }
     probes = record["probes"]
 
+    # 2026-07-28 servers are stateless: no initialize, every request carries
+    # its version in _meta, and server/discover MUST work. Ask that first on a
+    # fresh connection, as the spec suggests, then try the legacy handshake.
+    discover = discover_first(args, out)
+    probes["discover_first"] = discover
+
     conn = open_connection(args, transcript)
     try:
         init, init_ms = initialize(conn, timeout=args.start_timeout)
         record["cold_start_ms"] = int((time.monotonic() - conn.started) * 1000)
         record["initialize_ms"] = init_ms
+        legacy_ok = bool(init and "result" in init)
+        modern_ok = bool(discover.get("ok"))
+        record["lifecycle"] = "dual" if legacy_ok and modern_ok else "legacy" if legacy_ok else "modern" if modern_ok else "none"
+        if not legacy_ok and modern_ok:
+            conn.close()
+            conn = open_connection(args, transcript)
+            conn.meta = {META_VERSION: MODERN_VERSION, META_CAPS: {}}
+            if isinstance(conn, HttpConnection):
+                conn.protocol_version = MODERN_VERSION
+            dres = discover.get("result") or {}
+            init = {"result": {"protocolVersion": MODERN_VERSION, "capabilities": dres.get("capabilities") or {},
+                               "serverInfo": dres.get("serverInfo") or {}, "instructions": dres.get("instructions")}}
         if init is None or "error" in init:
             failure = error_of(init)
             if init is None and not conn.alive():
@@ -397,9 +504,10 @@ def collect(args) -> int:
             "instructions": res.get("instructions"),
             "raw_bytes": size(res),
         }
-        if isinstance(conn, HttpConnection):
+        if isinstance(conn, HttpConnection) and not getattr(conn, "meta", None):
             conn.protocol_version = res.get("protocolVersion")
-        conn.notify("notifications/initialized")
+        if not getattr(conn, "meta", None):
+            conn.notify("notifications/initialized")
         caps = record["initialize"]["capabilities"]
 
         msg, ms = conn.request("ping", {})
@@ -410,7 +518,7 @@ def collect(args) -> int:
         again = list_all(conn, "tools/list", "tools")
         record["tools_list_ms"] = int((time.monotonic() - t0) * 1000)
         record["tools"] = tools["items"]
-        probes["tools_list"] = {"declared": "tools" in caps, "pages": tools["pages"], "error": tools["error"],
+        probes["tools_list"] = {"declared": "tools" in caps, "pages": tools["pages"], "error": tools["error"], "cache": tools["cache"],
                                 "stable_order": [t.get("name") for t in tools["items"]] == [t.get("name") for t in again["items"]]}
 
         for method, key, cap in (("resources/list", "resources", "resources"),
@@ -418,7 +526,8 @@ def collect(args) -> int:
                                  ("prompts/list", "prompts", "prompts")):
             got = list_all(conn, method, key)
             record[key] = got["items"]
-            probes[method] = {"declared": cap in caps, "pages": got["pages"], "error": got["error"], "count": len(got["items"])}
+            probes[method] = {"declared": cap in caps, "pages": got["pages"], "error": got["error"], "count": len(got["items"]),
+                              "cache": got["cache"]}
 
         reads = []
         for r in record["resources"][:RESOURCE_READ_LIMIT]:
@@ -472,8 +581,8 @@ def collect(args) -> int:
                             "response": error_of(msg) or {"kind": "success", "text": content_text((msg or {}).get("result"))[:1000]}})
         probes["invalid_arguments"] = invalid
 
-        msg, ms = conn.request("server/discover", {})
-        probes["server_discover"] = {"response": error_of(msg) or {"kind": "success"}}
+        msg, ms = conn.request("resources/read", {"uri": "mcp-insights://no-such-resource"})
+        probes["resource_not_found"] = {"response": error_of(msg) or {"kind": "success"}}
 
         if isinstance(conn, StdioConnection):
             conn.send_raw('{"jsonrpc": "2.0", "id": "mcp-insights-parse", "method": ')
@@ -488,13 +597,14 @@ def collect(args) -> int:
 
     # A second start with a version nobody supports: the server should answer
     # with one it does support (stdio only; HTTP reuses the URL).
-    conn2 = open_connection(args, Transcript(out / "transcript-version.jsonl"))
-    try:
-        msg, ms = initialize(conn2, "1999-01-01", timeout=args.start_timeout)
-        probes["unknown_version"] = {"response": error_of(msg) or {"kind": "success",
-                                                                   "protocolVersion": (msg.get("result") or {}).get("protocolVersion")}}
-    finally:
-        conn2.close()
+    if record.get("lifecycle") in ("legacy", "dual"):
+        conn2 = open_connection(args, Transcript(out / "transcript-version.jsonl"))
+        try:
+            msg, ms = initialize(conn2, "1999-01-01", timeout=args.start_timeout)
+            probes["unknown_version"] = {"response": error_of(msg) or {"kind": "success",
+                                                                       "protocolVersion": (msg.get("result") or {}).get("protocolVersion")}}
+        finally:
+            conn2.close()
 
     if args.url:
         probes["origin"] = probe_origin(args)
@@ -502,6 +612,30 @@ def collect(args) -> int:
     write_record(out, record)
     print(summary_line(record))
     return 0
+
+
+def discover_first(args, out: Path) -> dict:
+    conn = open_connection(args, Transcript(out / "transcript-discover.jsonl"))
+    found: dict = {"ok": False}
+    try:
+        meta = {META_VERSION: MODERN_VERSION, META_CAPS: {}}
+        if isinstance(conn, HttpConnection):
+            conn.protocol_version = MODERN_VERSION
+        msg, ms = conn.request("server/discover", {"_meta": meta}, timeout=args.start_timeout)
+        res = (msg or {}).get("result")
+        if isinstance(res, dict) and (res.get("supportedVersions") or res.get("capabilities") is not None):
+            found = {"ok": True, "ms": ms, "result": res,
+                     "supportedVersions": res.get("supportedVersions"),
+                     "cache": {"ttlMs": res.get("ttlMs"), "cacheScope": res.get("cacheScope")}}
+            bad, _ = conn.request("tools/list", {"_meta": {META_VERSION: "1999-01-01", META_CAPS: {}}})
+            found["unknown_version"] = error_of(bad) or {"kind": "success"}
+        else:
+            found["response"] = error_of(msg) or {"kind": "success", "note": "result without supportedVersions"}
+    except (OSError, ValueError) as exc:
+        found["response"] = {"kind": "error", "message": str(exc)[:300]}
+    finally:
+        conn.close()
+    return found
 
 
 def probe_origin(args):
@@ -528,8 +662,33 @@ def summary_line(record) -> str:
             f"{len(record.get('prompts') or [])} prompts, tool list {size(record.get('tools') or []) / 1024:.1f} KB")
 
 
+def surface_of(record: dict, path: str) -> str:
+    """Turn a JSON path like resource_reads[3].text into 'resource mise://env'."""
+    mt = re.match(r"(resource_reads|prompt_gets|calls|tools|resources|prompts)\[(\d+)\]", path)
+    if not mt:
+        return path.split(".")[0].split("[")[0]
+    item = (record.get(mt.group(1)) or [{}])[int(mt.group(2))]
+    label = {"resource_reads": "resource", "prompt_gets": "prompt", "calls": "response of",
+             "tools": "tool", "resources": "resource list", "prompts": "prompt list"}[mt.group(1)]
+    return f"{label} {item.get('uri') or item.get('name') or item.get('tool') or mt.group(2)}"
+
+
 def write_record(out: Path, record: dict) -> None:
+    found: list = []
+    clean = scrub(record, found)
+    known = {(s["where"], s["name"]) for s in record.get("secrets") or []}
+    for s in found:
+        s["where"] = surface_of(record, s["where"])
+        if (s["where"], s["name"]) not in known:
+            known.add((s["where"], s["name"]))
+            clean.setdefault("secrets", []).append(s)
+    record.clear()
+    record.update(clean)
     (out / "probe.json").write_text(json.dumps(record, indent=1, ensure_ascii=False), encoding="utf-8")
+    real = [s for s in record.get("secrets") or [] if s["likely_real"]]
+    if real:
+        print(f"warning: {len(real)} likely secrets redacted from what the server returned: "
+              + ", ".join(sorted({f"{s['name']} ({s['where']})" for s in real})), file=sys.stderr)
 
 
 def call(args) -> int:

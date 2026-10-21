@@ -34,18 +34,18 @@ CATEGORIES = [
 
 SPEC = "https://modelcontextprotocol.io/specification/2025-11-25"
 
-# id, category, weight, kind (auto|metric|judged), title, why, fix, surfaces, spec link, critical
+# id, category, weight, kind (auto|metric|judged|waste|trial), title, why, fix, surfaces, spec link, critical
 CATALOG = [
     # Protocol
-    ("P01", "protocol", 10, "auto", "Completes the initialize handshake",
-     "Without a valid initialize result no client can use the server at all.",
-     "Return protocolVersion, capabilities and serverInfo from initialize.", ["transport"], "/basic/lifecycle", True),
+    ("P01", "protocol", 10, "auto", "Completes a handshake clients understand",
+     "Without a valid initialize result (up to 2025-11-25) or server/discover result (2026-07-28) no client can use the server at all.",
+     "Return protocolVersion, capabilities and serverInfo from initialize, or implement server/discover.", ["transport"], "/basic/lifecycle", True),
     ("P02", "protocol", 3, "auto", "Speaks a current protocol revision",
-     "Older revisions miss structured output, tool annotations and elicitation that clients now rely on.",
-     "Upgrade the SDK and negotiate 2025-11-25 (or 2026-07-28 for stateless servers).", ["transport"], "/basic/lifecycle#version-negotiation", False),
+     "2025-11-25 is the most widely adopted revision and 2026-07-28 the newest; older ones miss structured output, annotations and elicitation.",
+     "Upgrade the SDK and negotiate 2025-11-25; add 2026-07-28 (stateless) when your SDK supports it.", ["transport"], "/basic/lifecycle#version-negotiation", False),
     ("P03", "protocol", 4, "auto", "Answers an unknown protocol version with one it supports",
-     "The spec requires a counter-offer, so newer clients can fall back instead of failing.",
-     "On an unsupported protocolVersion, reply with the newest version the server supports.", ["transport"], "/basic/lifecycle#version-negotiation", False),
+     "Up to 2025-11-25 the server must counter-offer a version in initialize; under 2026-07-28 it must reply UnsupportedProtocolVersionError (-32022) listing data.supported.",
+     "On an unsupported version, counter-offer in initialize, or return -32022 with the supported versions.", ["transport"], "/basic/lifecycle#version-negotiation", False),
     ("P04", "protocol", 8, "auto", "Writes only JSON-RPC to stdout",
      "Any other line on stdout corrupts the stdio stream; clients drop the connection or misparse frames.",
      "Send logs and warnings to stderr; keep stdout for MCP frames only.", ["transport"], "/basic/transports#stdio", True),
@@ -58,8 +58,8 @@ CATALOG = [
     ("P07", "protocol", 6, "auto", "Declared capabilities match what is served",
      "Clients decide what to call from the capabilities; a mismatch hides features or causes failed calls.",
      "Declare exactly the capabilities whose list methods work.", ["tools", "resources", "prompts"], "/basic/lifecycle#capability-negotiation", False),
-    ("P08", "protocol", 2, "auto", "Answers ping",
-     "Clients use ping for health checks and keep-alive.",
+    ("P08", "protocol", 1, "auto", "Answers ping",
+     "Clients up to 2025-11-25 use ping for health checks. 2026-07-28 deprecates ping, so it is not checked there.",
      "Answer ping with an empty result.", ["transport"], "/basic/utilities/ping", False),
     ("P09", "protocol", 2, "auto", "Lists tools in a stable order",
      "A stable order keeps prompt caches warm and diffs readable.",
@@ -79,6 +79,15 @@ CATALOG = [
     ("P14", "protocol", 3, "auto", "Unknown tools get a clear error",
      "An agent that guessed a tool name needs to learn the name is wrong, not wait for a timeout.",
      "Reject unknown tool names with an error that names the tool.", ["tools", "errors"], "/server/tools#error-handling", False),
+    ("P15", "protocol", 3, "auto", "Missing resources get the right error code",
+     "Clients branch on the code: -32002 Resource not found up to 2025-11-25, -32602 under 2026-07-28 (SEP-2164).",
+     "Answer resources/read for an unknown URI with the code of the negotiated revision.", ["resources", "errors"], "/server/resources#error-handling", False),
+    ("P16", "protocol", 3, "auto", "List results carry cache hints (2026-07-28)",
+     "Stateless servers must say how long list and read results stay valid (ttlMs, cacheScope) so clients can cache them.",
+     "Return ttlMs and cacheScope on server/discover, list and read results.", ["tools", "resources", "prompts"], "", False),
+    ("P17", "protocol", 1, "auto", "Avoids features deprecated in 2026-07-28",
+     "Logging, sampling, roots and ping are deprecated in 2026-07-28; servers should log to stderr and not depend on them.",
+     "Drop the logging capability and log to stderr; avoid depending on sampling and roots.", ["transport"], "", False),
     # Agent guidance
     ("G01", "guidance", 4, "auto", "Ships startup instructions",
      "Instructions are the one text a client shows the model before any tool: the cross-tool workflow belongs there.",
@@ -119,6 +128,19 @@ CATALOG = [
     ("G16", "guidance", 5, "judged", "Guidance does not contradict itself or the server",
      "A rule the server does not follow is worse than no rule.",
      "Remove or fix advice that the server's behaviour contradicts.", ["tools", "resources", "prompts"], "", False),
+    # Agent trials: a fresh headless agent with only this server, one trial per open question
+    ("G17", "guidance", 6, "trial", "Agents read help before the tools that need it",
+     "In trials that need the server's syntax, a fresh agent should find the right help on its own before the first call that depends on it.",
+     "Name the topic to read first in the instructions and in each syntax-heavy tool's description.", ["tools", "resources", "transport"], "", False),
+    ("G18", "guidance", 2, "trial", "Plain tasks need no help",
+     "Most tools should work from their description alone; reading help for a simple read costs context every time.",
+     "Put what a simple call needs into its description and keep help for syntax and workflows.", ["tools"], "", False),
+    ("G19", "guidance", 5, "trial", "Fresh agents complete the tasks",
+     "The end-to-end test of guidance: a new agent with only this server finishes a realistic task correctly. Judged from the transcript.",
+     "Read the failed trial's transcript and fix the description, help or error that misled the agent.", ["tools", "resources"], "", False),
+    ("G20", "guidance", 3, "trial", "Agents follow the server's written rules",
+     "Rules like 'read before you edit' only help if a fresh agent actually follows them.",
+     "Move the rule into the description of the tool it guards, as a precondition.", ["tools", "transport"], "", False),
     # Error recovery
     ("E01", "errors", 6, "auto", "Invalid arguments are rejected",
      "A call that breaks the schema must fail, or the server acts on input it does not understand.",
@@ -141,23 +163,29 @@ CATALOG = [
     ("E12", "errors", 8, "judged", "Writes refuse input they cannot store",
      "A write that silently drops or mangles input is the worst failure: every call reports success.",
      "Refuse writes whose content would be stored differently, and say which part.", ["tools", "errors"], "", True),
+    ("E13", "errors", 3, "trial", "Agents recover from errors in one step",
+     "In trials, an error should tell the agent enough to get the next call right.",
+     "Put the valid values or the corrected call in the error text.", ["tools", "errors"], "", False),
     # Context cost
-    ("C01", "context", 10, "metric", "Tool list fits the budget",
+    ("P18", "protocol", 1, "auto", "Schemas use the default JSON Schema dialect",
+     "Since 2025-11-25 tool schemas default to JSON Schema 2020-12; an explicit older $schema still works but some clients validate it differently.",
+     "Emit 2020-12 schemas, or drop the $schema line.", ["tools"], "/server/tools#tool", False),
+    ("C01", "context", 7, "metric", "Tool list fits the budget",
      "Every tool's name, description and input schema is sent to the model on every turn.",
      "Move syntax and examples into help topics and keep descriptions to plain sentences.", ["tools"], "", False),
-    ("C02", "context", 4, "metric", "Startup instructions fit the budget",
+    ("C02", "context", 3, "metric", "Startup instructions fit the budget",
      "Instructions are always in context; long ones crowd out the task.",
      "Keep instructions to the cross-tool workflow and a pointer to help.", ["transport"], "", False),
-    ("C03", "context", 5, "metric", "Largest tool description fits the budget",
+    ("C03", "context", 3, "metric", "Largest tool description fits the budget",
      "A long description usually carries syntax that belongs in a help topic.",
      "Cut the description to what, returns, when not, main failure, and a pointer.", ["tools"], "", False),
-    ("C04", "context", 4, "metric", "Largest field description fits the budget",
+    ("C04", "context", 2, "metric", "Largest field description fits the budget",
      "Field descriptions are read on every turn too; long ones are usually tutorials.",
      "Keep field descriptions to meaning, format and one example.", ["tools"], "", False),
-    ("C05", "context", 4, "metric", "Largest help topic fits the budget",
+    ("C05", "context", 3, "metric", "Largest help topic fits the budget",
      "A topic is read in full when the agent asks; oversized topics push the task out of context.",
      "Split large topics by job and drop pasted schemas.", ["resources", "prompts"], "", False),
-    ("C06", "context", 2, "metric", "All help together fits the budget",
+    ("C06", "context", 1, "metric", "All help together fits the budget",
      "Total help size is a proxy for duplication and drift.",
      "Remove duplicated syntax and history from help.", ["resources", "prompts"], "", False),
     ("C07", "context", 5, "metric", "Largest read response fits the budget",
@@ -169,6 +197,12 @@ CATALOG = [
     ("C09", "context", 3, "metric", "Little text is repeated across tools",
      "The same sentence in many descriptions is paid for many times.",
      "Say shared rules once, in instructions or a help topic.", ["tools"], "", False),
+    ("C10", "context", 8, "waste", "Always-loaded text earns its place",
+     "Instructions, tool and field descriptions are paid for on every turn. A long text that is all signal beats a short one full of filler, so this measures waste, not length.",
+     "Cut the quoted spans: repetition, internals, history, restated schema and filler.", ["tools", "transport"], "", False),
+    ("C11", "context", 3, "waste", "Help topics earn their size",
+     "Topics are read on demand, but every wasted paragraph is read in full each time.",
+     "Cut the quoted spans from the help topics.", ["resources", "prompts"], "", False),
     # Safety and trust
     ("S01", "safety", 6, "auto", "Risk annotations match what tools do",
      "A write tool marked read-only can be auto-approved; a read tool without the hint asks for needless approval. (Heuristic on tool names.)",
@@ -176,9 +210,9 @@ CATALOG = [
     ("S02", "safety", 6, "auto", "No instructions aimed at hijacking the model",
      "Text like 'ignore previous instructions' or 'do not tell the user' is how tool poisoning works, and clients flag it.",
      "Remove instructions that reach beyond the tool's own use.", ["tools", "resources", "prompts"], "/server/tools#security-considerations", False),
-    ("S03", "safety", 5, "auto", "No secrets in model-facing text",
-     "Anything in descriptions or help is sent to the model and its logs.",
-     "Remove tokens and keys from descriptions, help and examples.", ["tools", "resources", "prompts"], "", False),
+    ("S03", "safety", 8, "auto", "No secrets in anything the model reads",
+     "Descriptions, help, resources and tool results are sent to the model, its logs and every agent session that loads the server. The probe redacts what it finds before writing to disk and keeps only names and lengths.",
+     "Stop returning the value: mask it in the resource or response, or drop the resource. Rotate any key that was exposed.", ["tools", "resources", "prompts"], "", True),
     ("S04", "safety", 5, "auto", "Refuses requests from foreign origins",
      "Local HTTP servers must check Origin, or any web page can drive them (DNS rebinding).",
      "Validate the Origin header and refuse unknown origins with 403.", ["transport"], "/basic/transports#security-warning", False),
@@ -191,18 +225,26 @@ CATALOG = [
 ]
 
 CRITICAL = {row[0] for row in CATALOG if row[9]}
+# Audits measured on the data the server returned during the review, not on
+# the server alone: the same server scores differently on a busier workspace.
+DATA_DEPENDENT = {"C07": "Measured on the data this server returned during the review; a workspace with more data returns more."}
 
 # Metric thresholds: (good, poor, unit). Good scores 0.9, poor 0.5 (Lighthouse-style log-normal).
+# Calibrated 2026-10-21 on 15 servers (13 public, the reference server, Uberblick):
+# good is about the 75th percentile, poor about the 90th. Sizes are effective
+# sizes: bytes the reviewer quoted as waste count twice.
 BUDGETS = {
-    "C01": (50 * 1024, 100 * 1024, "B"),
+    "C01": (25 * 1024, 50 * 1024, "B"),
     "C02": (1500, 3000, "B"),
     "C03": (1000, 2000, "ch"),
-    "C04": (400, 800, "ch"),
+    "C04": (300, 600, "ch"),
     "C05": (8 * 1024, 16 * 1024, "B"),
     "C06": (150 * 1024, 300 * 1024, "B"),
     "C07": (25 * 1024, 100 * 1024, "B"),
-    "C08": (1500, 6000, "ms"),
+    "C08": (1000, 3500, "ms"),
     "C09": (0.05, 0.20, "%"),
+    "C10": (0.05, 0.25, "%"),
+    "C11": (0.10, 0.35, "%"),
 }
 
 READ_VERBS = r"^(get|list|search|read|find|fetch|query|describe|show|export|lookup|view|count|status|sync_status|backlinks)"
@@ -293,8 +335,70 @@ def sentences(text: str):
             yield s
 
 
-def compute(probe: dict) -> tuple[dict, dict]:
+def norm(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def text_index(probe: dict) -> dict:
+    """Every model-facing text by the id findings.json uses for it."""
+    init = probe.get("initialize") or {}
+    idx = {}
+    if init.get("instructions"):
+        idx["instructions"] = init["instructions"]
+    for t in probe.get("tools") or []:
+        idx[f"tool:{t.get('name')}"] = t.get("description") or ""
+        for path, prop in walk_fields(t.get("inputSchema") or {}):
+            if prop.get("description"):
+                idx[f"field:{t.get('name')}.{path}"] = prop["description"]
+    for x in probe.get("resource_reads") or []:
+        if x.get("text"):
+            idx[f"topic:{x['uri']}"] = x["text"]
+    for x in probe.get("prompt_gets") or []:
+        if x.get("text"):
+            idx[f"topic:prompt:{x['name']}"] = x["text"]
+    return idx
+
+
+def waste_index(probe: dict, findings: dict) -> tuple[dict, list]:
+    """Bytes quoted as waste per text id. Quotes must appear in the text."""
+    idx = text_index(probe)
+    out, problems = {}, []
+    for entry in ((findings or {}).get("density") or {}).get("texts") or []:
+        tid = entry.get("text_id")
+        text = idx.get(tid)
+        if text is None:
+            problems.append(f"density: unknown text_id {tid}")
+            continue
+        hay = norm(text)
+        spans = []
+        kept = []
+        for w in entry.get("waste") or []:
+            q = norm(w.get("quote"))
+            if not q:
+                continue
+            at = hay.find(q)
+            if at < 0:
+                problems.append(f"density: quote not found in {tid}: {q[:60]}")
+                continue
+            spans.append((at, at + len(q)))
+            kept.append({"quote": w.get("quote"), "why": w.get("why", "")})
+        spans.sort()
+        merged = []
+        for a, b in spans:
+            if merged and a <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+            else:
+                merged.append((a, b))
+        wasted = sum(len(hay[a:b].encode("utf-8")) for a, b in merged)
+        out[tid] = {"bytes": wasted, "chars": sum(b - a for a, b in merged), "total": len(text.encode("utf-8")),
+                    "waste": kept, "clarity": entry.get("clarity"), "note": entry.get("note", "")}
+    return out, problems
+
+
+def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     """Return (metrics, auto audit results) from probe.json."""
+    waste, waste_problems = waste_index(probe, findings or {})
+    judged_waste = bool(waste)
     init = probe.get("initialize") or {}
     tools = probe.get("tools") or []
     probes = probe.get("probes") or {}
@@ -323,31 +427,43 @@ def compute(probe: dict) -> tuple[dict, dict]:
             "fields_described": sum(1 for _, p in fields if (p.get("description") or "").strip()),
             "max_field_desc": max([len(p.get("description") or "") for _, p in fields] or [0]),
             "annotations": t.get("annotations") or {},
+            "waste_bytes": (waste.get(f"tool:{t.get('name')}") or {}).get("bytes", 0)
+                           + sum(v["bytes"] for k, v in waste.items() if k.startswith(f"field:{t.get('name')}.")),
+            "desc_waste_chars": (waste.get(f"tool:{t.get('name')}") or {}).get("chars", 0),
         })
     m["tools"] = per_tool
     m["tool_count"] = len(tools)
     m["tool_list_model_bytes"] = sum(p["model_bytes"] for p in per_tool) if tools else 0
+    m["tool_list_waste_bytes"] = sum(p["waste_bytes"] for p in per_tool)
+    m["waste_judged"] = judged_waste
+    m["waste_problems"] = waste_problems
     m["tool_list_wire_bytes"] = size(tools)
     instr = init.get("instructions") or ""
     m["instructions_bytes"] = len(instr.encode("utf-8")) if instr else None
+    m["instructions_waste_bytes"] = (waste.get("instructions") or {}).get("bytes", 0)
     if per_tool:
-        top_desc = max(per_tool, key=lambda p: p["description_chars"])
-        m["max_tool_desc"] = {"value": top_desc["description_chars"], "where": top_desc["name"]}
-        best_field = (0, "")
+        top_desc = max(per_tool, key=lambda p: p["description_chars"] + p["desc_waste_chars"])
+        m["max_tool_desc"] = {"value": top_desc["description_chars"], "where": top_desc["name"],
+                              "effective": top_desc["description_chars"] + top_desc["desc_waste_chars"]}
+        best_field = (0, "", 0)
         for t in tools:
             for path, p in walk_fields(t.get("inputSchema") or {}):
                 n = len(p.get("description") or "")
-                if n > best_field[0]:
-                    best_field = (n, f"{t.get('name')}.{path}")
-        m["max_field_desc"] = {"value": best_field[0], "where": best_field[1]}
+                eff = n + (waste.get(f"field:{t.get('name')}.{path}") or {}).get("chars", 0)
+                if eff > best_field[2]:
+                    best_field = (n, f"{t.get('name')}.{path}", eff)
+        m["max_field_desc"] = {"value": best_field[0], "where": best_field[1], "effective": best_field[2]}
     topics = [x for x in probe.get("resource_reads") or [] if x.get("text_bytes")]
     topics += [{"uri": f"prompt:{x['name']}", "text_bytes": len((x.get("text") or "").encode("utf-8"))}
                for x in probe.get("prompt_gets") or [] if x.get("text")]
-    m["topics"] = [{"uri": x["uri"], "bytes": x["text_bytes"]} for x in topics]
+    def topic_waste(x):
+        return (waste.get(f"topic:{x['uri']}") or {}).get("bytes", 0)
+    m["topics"] = [{"uri": x["uri"], "bytes": x["text_bytes"], "waste": topic_waste(x)} for x in topics]
     if topics:
-        big = max(topics, key=lambda x: x["text_bytes"])
-        m["max_topic"] = {"value": big["text_bytes"], "where": big["uri"]}
+        big = max(topics, key=lambda x: x["text_bytes"] + topic_waste(x))
+        m["max_topic"] = {"value": big["text_bytes"], "where": big["uri"], "effective": big["text_bytes"] + topic_waste(big)}
         m["total_topics"] = sum(x["text_bytes"] for x in topics)
+        m["total_topics_waste"] = sum(topic_waste(x) for x in topics)
     calls = [c for c in probe.get("calls") or [] if "bytes" in c]
     if calls:
         big = max(calls, key=lambda c: c["bytes"])
@@ -368,14 +484,28 @@ def compute(probe: dict) -> tuple[dict, dict]:
 
     # --- protocol
     ok = bool(init.get("ok"))
-    res("P01", 1 if ok else 0, init.get("protocolVersion") or "failed",
+    lifecycle = probe.get("lifecycle") or ("legacy" if ok else "none")
+    disc = probes.get("discover_first") or {}
+    m["lifecycle"] = lifecycle
+    label = {"legacy": "initialize (up to 2025-11-25)", "modern": "stateless (2026-07-28)",
+             "dual": "both initialize and stateless", "none": "failed"}[lifecycle]
+    res("P01", 1 if ok else 0, label,
         note="" if ok else f"initialize failed: {json.dumps(init.get('error'))}")
     if not ok:
         return m, r
     pv = init.get("protocolVersion")
-    res("P02", 1 if pv in ("2026-07-28", "2025-11-25") else 0.5 if pv == "2025-06-18" else 0, str(pv))
+    versions = [pv] + list(disc.get("supportedVersions") or [])
+    best = 1 if any(v in ("2026-07-28", "2025-11-25") for v in versions) else 0.5 if "2025-06-18" in versions else 0
+    res("P02", best, " + ".join(dict.fromkeys(str(v) for v in versions if v)),
+        note="Speaks 2026-07-28 as well." if lifecycle == "dual" else
+             "2025-11-25 is the widely adopted baseline; 2026-07-28 support is a plus, not required yet." if pv == "2025-11-25" else "")
     uv = (probes.get("unknown_version") or {}).get("response") or {}
-    if uv.get("kind") == "success" and uv.get("protocolVersion") and uv.get("protocolVersion") != "1999-01-01":
+    muv = disc.get("unknown_version") or {}
+    if lifecycle == "modern":
+        good = muv.get("code") == -32022 and isinstance(muv.get("data"), dict) and muv["data"].get("supported")
+        res("P03", 1 if good else 0.5 if muv.get("kind") == "protocol" else 0,
+            "-32022 with supported versions" if good else f"code {muv.get('code')}" if muv.get("kind") == "protocol" else muv.get("kind", "no answer"))
+    elif uv.get("kind") == "success" and uv.get("protocolVersion") and uv.get("protocolVersion") != "1999-01-01":
         res("P03", 1, f"offers {uv.get('protocolVersion')}")
     elif uv.get("kind") == "success":
         res("P03", 0, "echoed the unknown version", note="The server accepted 1999-01-01 instead of offering a version it supports.")
@@ -417,7 +547,10 @@ def compute(probe: dict) -> tuple[dict, dict]:
                            "evidence": "not declared but served" if served else "not declared, not served"})
     res("P07", sum(c["score"] for c in checks) / len(checks), f"{sum(c['score'] for c in checks)} of {len(checks)}", items=checks)
     ping = probes.get("ping") or {}
-    res("P08", 1 if ping.get("ok") else 0, f"{ping.get('ms')} ms" if ping.get("ok") else "no answer")
+    if lifecycle == "modern":
+        res("P08", 0, na=True, note="ping is deprecated in 2026-07-28")
+    else:
+        res("P08", 1 if ping.get("ok") else 0, f"{ping.get('ms')} ms" if ping.get("ok") else "no answer")
     tl = probes.get("tools_list") or {}
     if tools:
         res("P09", 1 if tl.get("stable_order") else 0, "stable" if tl.get("stable_order") else "order changes")
@@ -449,6 +582,18 @@ def compute(probe: dict) -> tuple[dict, dict]:
     else:
         res("P11", 0, na=True)
         res("P12", 0, na=True)
+    if tools:
+        dialects = []
+        for t in tools:
+            for key in ("inputSchema", "outputSchema"):
+                sch = t.get(key)
+                if isinstance(sch, dict) and sch.get("$schema") and "2020-12" not in sch["$schema"]:
+                    dialects.append({"item": f"{t.get('name')}.{key}", "score": 0.5, "evidence": sch["$schema"]})
+        older = {d["item"].split(".")[0] for d in dialects}
+        res("P18", 1 - 0.5 * len(older) / len(tools), f"{len(tools) - len(older)} of {len(tools)} on 2020-12",
+            items=dialects[:10] + ([{"item": f"{len(dialects) - 10} more", "score": 0.5, "evidence": ""}] if len(dialects) > 10 else []))
+    else:
+        res("P18", 0, na=True)
     out_calls = []
     tool_by_name = {t.get("name"): t for t in tools}
     for c in probe.get("calls") or []:
@@ -465,6 +610,24 @@ def compute(probe: dict) -> tuple[dict, dict]:
             f"{sum(x['score'] for x in out_calls):.0f} of {len(out_calls)} calls", items=out_calls)
     else:
         res("P13", 0, na=True, note="no calls to tools with an output schema")
+    rnf = (probes.get("resource_not_found") or {}).get("response")
+    if "resources" not in caps or rnf is None:
+        res("P15", 0, na=True, note="no resources capability" if "resources" not in caps else "not probed")
+    else:
+        want = -32602 if lifecycle == "modern" else -32002
+        code = rnf.get("code")
+        res("P15", 1 if code == want or (lifecycle == "dual" and code in (-32002, -32602)) else 0.5 if rnf.get("kind") in ("protocol", "tool") else 0,
+            f"code {code}" if code is not None else rnf.get("kind", "?"), note=f"Expected {want} for this lifecycle. {rnf.get('message', '')[:200]}")
+    if lifecycle in ("modern", "dual"):
+        hints = [disc.get("cache") or {}] + [(probes.get(k) or {}).get("cache") or {} for k in ("tools_list", "resources/list", "prompts/list")]
+        hints = [h for h in hints if h]
+        have = [h for h in hints if h.get("ttlMs") is not None and h.get("cacheScope")]
+        res("P16", len(have) / len(hints) if hints else 0, f"{len(have)} of {len(hints)} results")
+    else:
+        res("P16", 0, na=True, note="only required by 2026-07-28")
+    deprecated = [k for k in ("logging",) if k in caps]
+    res("P17", 0.5 if deprecated else 1, ", ".join(deprecated) + " capability declared" if deprecated else "none used",
+        note="Logging is deprecated in 2026-07-28; harmless for 2025-11-25 clients, so this only costs half." if deprecated else "")
     ut = (probes.get("unknown_tool") or {}).get("response") or {}
     if ut.get("kind") in ("tool", "protocol"):
         named = "mcp_insights_no_such_tool" in (ut.get("message") or "")
@@ -531,22 +694,53 @@ def compute(probe: dict) -> tuple[dict, dict]:
         items=[{"item": "error", "score": 0, "evidence": t[:300]} for t in traces[:3]])
 
     # --- context
-    def metric(code, value, where=""):
+    def metric(code, value, where="", effective=None):
         good, poor, unit = BUDGETS[code]
         if value is None:
             res(code, 0, na=True, note="not measured")
             return
-        res(code, lognormal_score(value, good, poor), fmt_value(value, unit) + (f" · {where}" if where else ""),
-            note=fmt_budget(code))
+        eff = effective if effective is not None else value
+        shown = fmt_value(value, unit)
+        if eff != value:
+            shown += f" ({fmt_value(eff, unit)} effective)"
+        note = fmt_budget(code)
+        if code in ("C01", "C02", "C03", "C04", "C05", "C06"):
+            note += (". Effective size counts quoted waste twice, so dense text can be longer than wasteful text."
+                     if judged_waste else ". Waste not judged: raw size only.")
+        res(code, lognormal_score(eff, good, poor), shown + (f" \u00b7 {where}" if where else ""), note=note)
         r[code]["value"] = value
+        r[code]["effective"] = eff
         r[code]["unit"] = unit
-    metric("C01", m["tool_list_model_bytes"] if tools else None)
-    metric("C02", m["instructions_bytes"])
-    metric("C03", (m.get("max_tool_desc") or {}).get("value"), (m.get("max_tool_desc") or {}).get("where", ""))
-    metric("C04", (m.get("max_field_desc") or {}).get("value"), (m.get("max_field_desc") or {}).get("where", ""))
-    metric("C05", (m.get("max_topic") or {}).get("value"), (m.get("max_topic") or {}).get("where", ""))
-    metric("C06", m.get("total_topics"))
+    metric("C01", m["tool_list_model_bytes"] if tools else None, effective=(m["tool_list_model_bytes"] + m["tool_list_waste_bytes"]) if tools else None)
+    metric("C02", m["instructions_bytes"], effective=(m["instructions_bytes"] or 0) + m["instructions_waste_bytes"] if instr else None)
+    metric("C03", (m.get("max_tool_desc") or {}).get("value"), (m.get("max_tool_desc") or {}).get("where", ""), (m.get("max_tool_desc") or {}).get("effective"))
+    metric("C04", (m.get("max_field_desc") or {}).get("value"), (m.get("max_field_desc") or {}).get("where", ""), (m.get("max_field_desc") or {}).get("effective"))
+    metric("C05", (m.get("max_topic") or {}).get("value"), (m.get("max_topic") or {}).get("where", ""), (m.get("max_topic") or {}).get("effective"))
+    metric("C06", m.get("total_topics"), effective=(m.get("total_topics") or 0) + m.get("total_topics_waste", 0) if topics else None)
+    always = {k: v for k, v in waste.items() if k == "instructions" or k.startswith("tool:") or k.startswith("field:")}
+    on_demand = {k: v for k, v in waste.items() if k.startswith("topic:")}
+    field_bytes = sum(len(v.encode("utf-8")) for k, v in text_index(probe).items() if k.startswith("field:"))
+    for code, group, total in (("C10", always, (m["instructions_bytes"] or 0) + sum(p["description_bytes"] for p in per_tool) + field_bytes),
+                               ("C11", on_demand, sum(v["total"] for v in on_demand.values()))):
+        if not group or not total:
+            res(code, 0, na=True, note="waste not judged" if not group else "no text")
+            continue
+        wasted = sum(v["bytes"] for v in group.values())
+        ratio = wasted / total
+        good, poor, _ = BUDGETS[code]
+        items = []
+        for tid, v in sorted(group.items(), key=lambda kv: -kv[1]["bytes"]):
+            for w in v["waste"]:
+                items.append({"item": tid, "score": 0, "evidence": f"\u201c{norm(w['quote'])[:260]}\u201d \u2014 {w['why']}"})
+        res(code, lognormal_score(max(ratio, 1e-6), good, poor), f"{fmt_bytes(wasted)} of {fmt_bytes(total)} ({ratio * 100:.0f}%)",
+            items=items, note=f"Share of reviewed text quoted as waste; good \u2264 {good * 100:.0f}%, poor \u2265 {poor * 100:.0f}%.")
+        r[code]["value"] = wasted
+        r[code]["ratio"] = ratio
+    m["waste_per_turn"] = {"bytes": sum(v["bytes"] for v in always.values()), "total": (m["instructions_bytes"] or 0) + sum(p["description_bytes"] for p in per_tool) + field_bytes,
+                           "ratio": (r.get("C10") or {}).get("ratio")}
     metric("C07", (m.get("max_response") or {}).get("value"), (m.get("max_response") or {}).get("where", ""))
+    if "C07" in r and not r["C07"].get("na"):
+        r["C07"]["note"] = DATA_DEPENDENT["C07"]
     metric("C08", m.get("cold_start_ms"))
     if tools:
         metric("C09", m["duplication"]["value"])
@@ -561,6 +755,56 @@ def compute(probe: dict) -> tuple[dict, dict]:
         r["C05"]["items"] = [{"item": x["uri"], "score": round(lognormal_score(x["text_bytes"], *BUDGETS["C05"][:2]), 2),
                               "evidence": fmt_bytes(x["text_bytes"])}
                              for x in sorted(topics, key=lambda x: -x["text_bytes"])[:10]]
+
+    # --- agent trials
+    runs = [t for t in (probe.get("trials") or {}).get("runs") or [] if not t.get("invalid")]
+    verdicts = (findings or {}).get("trials") or {}
+    if runs:
+        helpy = [t for t in runs if t.get("expects_help") is True and t.get("help_before_use") is not None]
+        if helpy:
+            res("G17", sum(1 for t in helpy if t["help_before_use"]) / len(helpy),
+                f"{sum(1 for t in helpy if t['help_before_use'])} of {len(helpy)} trials",
+                items=[{"item": t["id"], "score": 1 if t["help_before_use"] else 0,
+                        "evidence": f"{t['help_reads']} help reads ({fmt_bytes(t['help_bytes'])}) "
+                                    + ("before" if t["help_before_use"] else "none before") + f" the first {'/'.join(t['needs'])} call"}
+                       for t in helpy])
+        else:
+            res("G17", 0, na=True, note="no trial used a tool that needs help")
+        plain = [t for t in runs if t.get("expects_help") is False]
+        if plain:
+            res("G18", sum(1 for t in plain if not t["help_reads"]) / len(plain),
+                f"{sum(1 for t in plain if not t['help_reads'])} of {len(plain)} without help",
+                items=[{"item": t["id"], "score": 0 if t["help_reads"] else 1,
+                        "evidence": f"{t['calls']} calls, {t['help_reads']} help reads ({fmt_bytes(t['help_bytes'])})"} for t in plain])
+        else:
+            res("G18", 0, na=True, note="no plain-task trial")
+        judged_runs = [(t, verdicts[t["id"]]) for t in runs if isinstance(verdicts.get(t["id"]), dict)
+                       and verdicts[t["id"]].get("success") is not None
+                       and (verdicts[t["id"]]["success"] >= 1 or (verdicts[t["id"]].get("evidence") or "").strip())]
+        if judged_runs:
+            res("G19", sum(v["success"] for _, v in judged_runs) / len(judged_runs),
+                f"{sum(1 for _, v in judged_runs if v['success'] >= 1)} of {len(judged_runs)} done",
+                items=[{"item": t["id"], "score": float(v["success"]), "evidence": v.get("evidence", "")} for t, v in judged_runs])
+        else:
+            res("G19", 0, na=True, note="trial outcomes not judged")
+        rules = [(t["id"], r) for t in runs for r in t.get("rules") or [] if r.get("applies")]
+        if rules:
+            res("G20", sum(1 for _, r in rules if r["followed"]) / len(rules),
+                f"{sum(1 for _, r in rules if r['followed'])} of {len(rules)} followed",
+                items=[{"item": tid, "score": 1 if r["followed"] else 0, "evidence": r["label"]} for tid, r in rules])
+        else:
+            res("G20", 0, na=True, note="no trial checked a written rule")
+        errs = [t for t in runs if t.get("errors")]
+        if errs:
+            res("E13", sum(t["recovered"] for t in errs) / sum(t["errors"] for t in errs),
+                f"{sum(t['recovered'] for t in errs)} of {sum(t['errors'] for t in errs)} errors",
+                items=[{"item": t["id"], "score": t["recovered"] / t["errors"],
+                        "evidence": "; ".join((e.get("error") or "")[:160] for e in t["events"] if e.get("is_error"))[:400]} for t in errs])
+        else:
+            res("E13", 0, na=True, note="no errors in the trials")
+    else:
+        for code in ("G17", "G18", "G19", "G20", "E13"):
+            res(code, 0, na=True, note="agent trials not run")
 
     # --- safety
     if tools:
@@ -598,13 +842,26 @@ def compute(probe: dict) -> tuple[dict, dict]:
                 a = max(0, mt.start() - 60)
                 hits.append({"item": where, "score": 0, "evidence": (text[a:mt.end() + 60]).replace("\n", " ")})
     res("S02", 0 if hits else 1, f"{len(hits)} matches" if hits else "none found", items=hits[:8])
-    leaks = []
-    for where, text in corpus:
-        for pat in SECRETS:
-            mt = re.search(pat, text or "")
-            if mt:
-                leaks.append({"item": where, "score": 0, "evidence": mt.group(0)[:8] + "… (redacted)"})
-    res("S03", 0 if leaks else 1, f"{len(leaks)} found" if leaks else "none found", items=leaks[:8])
+    if "secrets" in probe or probe.get("probe_version", "0.1") != "0.1":
+        dismissed = {d.get("name"): d.get("reason", "") for d in ((findings or {}).get("secrets") or {}).get("dismiss") or []
+                     if d.get("reason")}
+        leaks = [{"item": x["where"], "score": 1 if x["name"] in dismissed else 0 if x["likely_real"] else 0.5,
+                  "evidence": f'{x["name"]}, {x["length"]} characters, redacted'
+                              + (f'; dismissed: {dismissed[x["name"]]}' if x["name"] in dismissed else
+                                 "" if x["likely_real"] else "; looks like a placeholder")}
+                 for x in probe.get("secrets") or []]
+        real = [x for x in leaks if x["score"] == 0]
+        places = sorted({x["item"] for x in real})
+        res("S03", 0 if real else 1, f"{len(real)} in {', '.join(places[:2])}" if real else "none found",
+            items=sorted(leaks, key=lambda x: x["score"])[:30])
+    else:
+        leaks = []
+        for where, text in corpus:
+            for pat in SECRETS:
+                mt = re.search(pat, text or "")
+                if mt:
+                    leaks.append({"item": where, "score": 0, "evidence": mt.group(0)[:8] + "… (redacted)"})
+        res("S03", 0 if leaks else 1, f"{len(leaks)} found" if leaks else "none found", items=leaks[:8])
     origin = probes.get("origin")
     if origin:
         st = origin.get("status")
@@ -696,6 +953,7 @@ def recommendations(results: dict, findings: dict, cats: dict) -> list[dict]:
         action = re.split(r"(?<=[.;])\s", row[6])[0].rstrip(".;")
         recs.append({"title": action, "category": row[1], "audits": [code],
                      "why": row[5], "fix": row[6], "effort": "M" if row[3] == "metric" else "S",
+                     "evidence": "; ".join(i.get("evidence", "") for i in (res.get("items") or [])[:3]),
                      "gain": res.get("gain", 0), "source": "catalog"})
     for rec in recs:
         rec["rank_value"] = (rec["gain"] or 0) / EFFORT.get(rec["effort"], 2)
@@ -828,9 +1086,9 @@ def render_html(report: dict) -> str:
 
     vitals_spec = [
         ("C01", "Tool list", "model-facing"),
+        ("C10", "Waste per turn", ""),
         ("C02", "Startup instructions", ""),
         ("C03", "Largest tool description", "C03"),
-        ("C04", "Largest field description", "C04"),
         ("C07", "Largest read response", "C07"),
         ("C08", "Cold start", "to first answer"),
     ]
@@ -847,9 +1105,20 @@ def render_html(report: dict) -> str:
             where = (m.get("max_field_desc") or {}).get("where", "")
         elif code == "C07":
             where = (m.get("max_response") or {}).get("where", "")
+            where = f"{where} \u00b7 depends on data" if where else ""
         elif code == "C01":
             where = f"{m.get('tool_count', 0)} tools"
+            if res.get("effective") and res.get("effective") != value:
+                where += f" \u00b7 {fmt_bytes(res['effective'])} effective"
+        elif code == "C02" and res.get("effective") and res.get("effective") != value:
+            where = f"{fmt_bytes(res['effective'])} effective"
+        elif code == "C10":
+            wpt = m.get("waste_per_turn") or {}
+            value = wpt.get("ratio")
+            where = f"{fmt_bytes(wpt.get('bytes'))} of {fmt_bytes(wpt.get('total'))} always loaded" if value is not None else "waste not judged"
         pos = 0
+        if value is not None and code == "C10":
+            value = max(value, 1e-4)
         if value is not None:
             # position on a log scale from good/4 to poor*2
             lo, hi = math.log(good / 4), math.log(poor * 2)
@@ -957,6 +1226,7 @@ def render_html(report: dict) -> str:
         "DATE": esc(pretty_date(meta["collected_at"])),
         "GAUGES": "".join(gauges),
         "VITALS": "".join(vitals),
+        "TRIALS": trials_html(report.get("trials"), results),
         "FIXES": "".join(fixes) or '<p class="empty">Nothing to fix above the noise.</p>',
         "TREEMAP": treemap_svg(m.get("tools") or []) if m.get("tools") else '<p class="empty">No tools.</p>',
         "TREEMAP_NOTE": esc(f"{fmt_bytes(m.get('tool_list_model_bytes'))} model-facing (name, title, description, input schema); "
@@ -1003,8 +1273,11 @@ def audit_group(title, rows, by_code, open_=False, folded=False, hint="") -> str
         code = row[0]
         b = "na" if res["na"] else band(res["score"])
         gain = f'<span class="gain">+{res["gain"]:g}</span>' if res.get("gain") and not res["na"] and res["score"] < 0.9 else ""
-        judged = '<span class="tag">judged</span>' if row[3] == "judged" else ""
+        judged = ('<span class="tag">judged</span>' if row[3] in ("judged", "waste") else
+                  '<span class="tag">trial</span>' if row[3] == "trial" else "")
         crit = '<span class="tag crit">critical</span>' if code in CRITICAL else ""
+        if code in DATA_DEPENDENT:
+            crit += '<span class="tag">depends on data</span>'
         spec = f' <a href="{SPEC}{row[8]}" target="_blank" rel="noopener">Spec</a>' if row[8] else ""
         detail = [f'<p class="why">{esc(row[5])}{spec}</p>']
         if res.get("note"):
@@ -1035,13 +1308,114 @@ def audit_group(title, rows, by_code, open_=False, folded=False, hint="") -> str
     return f'<div class="group">{head}{body}</div>'
 
 
+def trials_report(probe: dict, findings: dict) -> dict | None:
+    t = probe.get("trials")
+    if not t:
+        return None
+    verdicts = (findings or {}).get("trials") or {}
+    runs = []
+    for r in t.get("runs") or []:
+        v = verdicts.get(r["id"]) if isinstance(verdicts.get(r["id"]), dict) else {}
+        runs.append({**r, "verdict": v})
+    return {**t, "runs": runs}
+
+
+def median(xs):
+    xs = sorted(xs)
+    return None if not xs else xs[len(xs) // 2] if len(xs) % 2 else (xs[len(xs) // 2 - 1] + xs[len(xs) // 2]) / 2
+
+
+def trials_html(trials: dict | None, results: dict) -> str:
+    if not trials:
+        return ('<p class="section-lead">Not run. <code>scripts/trial.py</code> gives a fresh agent a task with only this server '
+                'loaded and records what it does, so Guidance here rests on the text alone.</p>')
+    runs = [r for r in trials.get("runs") or [] if not r.get("invalid")]
+    models = sorted({str(r.get("model") or "?").replace("claude-", "") for r in runs})
+    stats = []
+    for code, label in (("G17", "Help read when needed"), ("G18", "Plain tasks without help"),
+                        ("G19", "Tasks completed"), ("G20", "Written rules followed"), ("E13", "Errors recovered")):
+        res = results.get(code) or {}
+        if res.get("na"):
+            continue
+        b = band(res.get("score"))
+        mt = re.match(r"\d+ of \d+", res.get("display", ""))
+        short = mt.group(0) if mt else res.get("display", "")
+        stats.append(f'<div class="vital {b}"><div class="vital-label">{shape(b)}{esc(label)}</div>'
+                     f'<div class="vital-value">{esc(short)}</div>'
+                     f'<div class="vital-where">{esc(code)}</div></div>')
+    helpy = [r["help_bytes"] for r in runs if r.get("help_reads")]
+    cost = sum(r.get("cost_usd") or 0 for r in runs)
+    stats.append(f'<div class="vital na"><div class="vital-label">Help read per task</div>'
+                 f'<div class="vital-value plain">{esc(fmt_bytes(median(helpy)) if helpy else "none")}</div>'
+                 f'<div class="vital-where">median, tasks that read help</div></div>')
+    stats.append(f'<div class="vital na"><div class="vital-label">Trial cost</div>'
+                 f'<div class="vital-value plain">${cost:.2f}</div><div class="vital-where">{len(runs)} trials</div></div>')
+    groups: dict = {}
+    for r in trials.get("runs") or []:
+        groups.setdefault(r["id"].split("@")[0], []).append(r)
+    cards = []
+    for gid, rs in groups.items():
+        rows = []
+        for r in rs:
+            steps = []
+            for e in r.get("events") or []:
+                if e["kind"] == "client" and e["tool"] == "ToolSearch":
+                    continue
+                cls = ("err" if e.get("is_error") else "denied" if e.get("denied") else e["kind"] if e["kind"] in ("help", "client")
+                       else "write" if e["tool"] in (r.get("needs") or []) else "read")
+                label = e.get("uri", "").rsplit("/", 1)[-1] if e.get("uri") else e["tool"]
+                if e["tool"] == "get_help" and '"topic"' in e.get("input", ""):
+                    try:
+                        label = f'get_help({json.loads(e["input"]).get("topic")})'
+                    except ValueError:
+                        pass
+                steps.append(f'<li class="step {cls}" title="{esc(e["tool"])}: {esc(fmt_bytes(e.get("bytes")))}">'
+                             f'<span>{esc(label)}</span><small>{esc(fmt_bytes(e.get("bytes")))}</small></li>')
+            v = r.get("verdict") or {}
+            if r.get("invalid"):
+                verdict = f'<p class="trial-verdict na">{shape("na")}{esc(r.get("status"))}</p>'
+            elif v.get("success") is not None:
+                vb = band(v["success"])
+                word = "Done" if v["success"] >= 1 else "Partly done" if v["success"] > 0 else "Failed"
+                verdict = f'<p class="trial-verdict {vb}">{shape(vb)}<span><b>{word}.</b> {esc(v.get("evidence", ""))}</span></p>'
+            else:
+                verdict = f'<p class="trial-verdict na">{shape("na")}<span>Outcome not judged.</span></p>'
+            hb = r.get("help_before_use")
+            facts = [f'{r.get("calls", 0)} calls', f'{r.get("help_reads", 0)} help reads ({fmt_bytes(r.get("help_bytes", 0))})']
+            if hb is not None and r.get("expects_help"):
+                facts.append(("help before" if hb else "no help before") + f' the first {"/".join(r.get("needs") or [])}')
+            for rule in r.get("rules") or []:
+                if rule.get("applies"):
+                    facts.append(("\u2713 " if rule["followed"] else "\u2717 ") + rule["label"])
+            if r.get("errors"):
+                facts.append(f'{r["errors"]} errors, {r.get("recovered", 0)} recovered')
+            facts.append(f'{(r.get("tokens") or 0) / 1000:,.0f}k tokens, ${r.get("cost_usd") or 0:.2f}')
+            model = str(r.get("model") or "").replace("claude-", "")
+            facts_html = " \u00b7 ".join(esc(f) for f in facts)
+            steps_html = "".join(steps) or '<li class="step">no calls</li>'
+            rows.append(f'<div class="trial-run"><span class="pill effort">{esc(model)}</span>'
+                        f'<ol class="steps">{steps_html}</ol><p class="trial-facts">{facts_html}</p>{verdict}'
+                        f'<details class="fix-detail"><summary>Final answer</summary><pre>{esc(r.get("answer", ""))}</pre></details></div>')
+        first = rs[0]
+        cards.append(f'<article class="trial"><header><span class="trial-id">{esc(gid)}</span>'
+                     f'<h3>{esc(first.get("question") or first.get("task"))}</h3></header>'
+                     f'<p class="trial-task">Task: {esc(first.get("task"))}</p>{"".join(rows)}</article>')
+    lead = (f'What a fresh agent did with only this server loaded: one trial per question the text alone cannot answer. '
+            f'Claude Code in print mode ({esc(", ".join(models))}); writes {esc(trials.get("writes", "blocked"))}.')
+    legend = ('<div class="tm-legend steps-legend"><span><i class="k help"></i>help read</span><span><i class="k read"></i>other call</span>'
+              '<span><i class="k write"></i>the task\u2019s main call</span><span><i class="k denied"></i>blocked write</span>'
+              '<span><i class="k err"></i>error</span></div>')
+    return (f'<p class="section-lead">{lead}</p><div class="vitals trial-stats">{"".join(stats)}</div>'
+            f'<div class="trials">{"".join(cards)}</div>{legend}')
+
+
 def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) -> dict:
     probe = json.loads((dir_ / "probe.json").read_text(encoding="utf-8"))
     findings = {}
     fp = findings_path or (dir_ / "findings.json")
     if fp and fp.exists():
         findings = json.loads(fp.read_text(encoding="utf-8"))
-    metrics, results = compute(probe)
+    metrics, results = compute(probe, findings)
     warnings = merge_judged(results, findings) if (probe.get("initialize") or {}).get("ok") else []
     cats = score_categories(results)
     recs = recommendations(results, findings, cats)
@@ -1052,6 +1426,7 @@ def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) ->
     if baseline_path and baseline_path.exists():
         old = json.loads(baseline_path.read_text(encoding="utf-8"))
         baseline = {k: v.get("score") for k, v in (old.get("categories") or {}).items()}
+    warnings += metrics.get("waste_problems") or []
     unjudged = [code for code, r in results.items() if r.get("unjudged")]
     if unjudged and findings:
         warnings.append(f"not judged: {', '.join(sorted(unjudged))}")
@@ -1076,6 +1451,7 @@ def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) ->
         "notes": (findings or {}).get("notes") or {},
         "baseline": baseline,
         "warnings": warnings,
+        "trials": trials_report(probe, findings),
     }
 
 

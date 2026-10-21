@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""Run agent trials: give a fresh headless agent a task with only this MCP
+server loaded, and record what it did, in order.
+
+Each trial answers one behavioural question the static report leaves open,
+such as "is the syntax help read before the first table is written?". The
+agent is Claude Code in print mode (`claude -p`) with stream-json output, so
+the transcript shows every tool call, its size and whether it failed.
+
+  trial.py run --mcp-config CFG --server NAME --plan DIR/trials.json --out DIR
+
+Write tools are blocked by permissions unless --allow-writes is given (use it
+only against a sandbox). A blocked call still shows what the agent would have
+sent, which is what most trials need. Results go into DIR/probe.json under
+"trials", transcripts into DIR/trials/. Secrets are redacted before anything
+is written, as in probe.py.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fnmatch
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import probe  # noqa: E402  (scrub, write_record)
+
+CLIENT_TOOLS = ["ListMcpResourcesTool", "ReadMcpResourceTool", "ToolSearch"]
+# The child must be a fresh session, not a copy of the one running the review.
+SESSION_ENV = ["CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID",
+               "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH",
+               "CLAUDE_AFTER_LAST_COMPACT", "CLAUDE_CODE_TEE_SDK_STDOUT", "CLAUDE_CODE_DIAGNOSTICS_FILE"]
+NOTE_BLOCKED = ("Tools that change data may be blocked in this session. If a call is denied, do not look for a "
+                "workaround: finish with the exact call you would have made and why.")
+DEFAULT_HELP_TOOLS = ["*help*", "*guide*", "*docs*", "*manual*"]
+
+
+def result_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(str(c.get("text", "")) for c in content if isinstance(c, dict))
+    return ""
+
+
+def is_help(name: str, inp: dict, help_spec: dict) -> bool:
+    if name == "ReadMcpResourceTool":
+        return any(fnmatch.fnmatch(str(inp.get("uri", "")), p) for p in help_spec.get("resources", ["*"]))
+    return any(fnmatch.fnmatch(name, p) for p in help_spec.get("tools", DEFAULT_HELP_TOOLS))
+
+
+def summarize(lines: list[dict], server: str, trial: dict, help_spec: dict) -> dict:
+    prefix = f"mcp__{server}__"
+    init = next((m for m in lines if m.get("type") == "system" and m.get("subtype") == "init"), {})
+    final = next((m for m in reversed(lines) if m.get("type") == "result"), {})
+    denied = {d.get("tool_use_id") for d in final.get("permission_denials") or []}
+    events, by_id, text = [], {}, []
+    for m in lines:
+        content = (m.get("message") or {}).get("content")
+        if not isinstance(content, list):
+            continue
+        for c in content:
+            if m.get("type") == "assistant" and c.get("type") == "tool_use":
+                name = c.get("name", "")
+                short = name[len(prefix):] if name.startswith(prefix) else name
+                inp = c.get("input") or {}
+                kind = ("help" if is_help(short, inp, help_spec) else "client" if short in CLIENT_TOOLS
+                        else "tool" if name.startswith(prefix) else "other")
+                ev = {"i": len(events), "tool": short, "kind": kind, "input": json.dumps(inp, ensure_ascii=False)[:600],
+                      "denied": c.get("id") in denied}
+                if short == "ReadMcpResourceTool":
+                    ev["uri"] = inp.get("uri")
+                events.append(ev)
+                by_id[c.get("id")] = ev
+            elif m.get("type") == "assistant" and c.get("type") == "text":
+                text.append(c.get("text", ""))
+            elif m.get("type") == "user" and c.get("type") == "tool_result":
+                ev = by_id.get(c.get("tool_use_id"))
+                if ev is not None:
+                    body = result_text(c.get("content"))
+                    ev["bytes"] = len(body.encode("utf-8"))
+                    ev["is_error"] = bool(c.get("is_error")) and not ev["denied"]
+                    if ev["is_error"]:
+                        ev["error"] = body[:400]
+    needs = set(trial.get("needs") or [])
+    first_use = next((e["i"] for e in events if e["tool"] in needs), None)
+    help_events = [e for e in events if e["kind"] == "help"]
+    errors = [e for e in events if e.get("is_error")]
+    recovered = 0
+    for e in errors:
+        nxt = next((x for x in events[e["i"] + 1:] if x["tool"] == e["tool"]), None)
+        recovered += bool(nxt and not nxt.get("is_error"))
+    seen, repeats = set(), 0
+    for e in events:
+        key = (e["tool"], e["input"])
+        repeats += key in seen
+        seen.add(key)
+    rules = []
+    for rule in trial.get("rules") or []:
+        first = next((e["i"] for e in events if e["tool"] in rule.get("first", [])), None)
+        before = [e for e in events if e["tool"] in rule.get("before", []) or ("help" in rule.get("before", []) and e["kind"] == "help")]
+        rules.append({"label": rule.get("label", ""), "applies": first is not None,
+                      "followed": None if first is None else any(e["i"] < first for e in before)})
+    usage = final.get("usage") or {}
+    return {
+        "id": trial["id"], "question": trial.get("question", ""), "task": trial["task"],
+        "expects_help": trial.get("expects_help"), "needs": sorted(needs),
+        "model": init.get("model") or max((final.get("modelUsage") or {}).items(),
+                                          key=lambda kv: kv[1].get("outputTokens", 0), default=(None, {}))[0],
+        "events": events,
+        "calls": sum(1 for e in events if e["kind"] in ("tool", "help")),
+        "help_reads": len(help_events), "help_bytes": sum(e.get("bytes", 0) for e in help_events),
+        "first_use": first_use,
+        "help_before_use": None if first_use is None or not needs else any(e["i"] < first_use for e in help_events),
+        "rules": rules,
+        "errors": len(errors), "recovered": recovered, "repeats": repeats,
+        "drafts": [e for e in events if e["denied"]],
+        "tokens": sum(int(usage.get(k) or 0) for k in ("input_tokens", "output_tokens", "cache_read_input_tokens",
+                                                         "cache_creation_input_tokens")),
+        "cost_usd": final.get("total_cost_usd"), "turns": final.get("num_turns"), "ms": final.get("duration_ms"),
+        "status": final.get("subtype") or "no result",
+        "answer": (final.get("result") or "\n".join(text))[-3000:],
+        "mcp_status": [s.get("status") for s in init.get("mcp_servers") or []],
+        "client": f"claude-code {init.get('claude_code_version', '')}".strip(),
+    }
+
+
+def run(args) -> int:
+    out = Path(args.out)
+    record_path = out / "probe.json"
+    if not record_path.exists():
+        raise probe.ProbeError(f"{record_path} is missing; run probe.py collect first")
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
+    claude = shutil.which(args.claude)
+    if not claude:
+        raise probe.ProbeError(f"{args.claude} not found; agent trials need Claude Code on PATH")
+    server = args.server
+    reads = [t["name"] for t in record.get("tools") or [] if (t.get("annotations") or {}).get("readOnlyHint") is True]
+    reads += [t for t in plan.get("confirmed_read_only") or []]
+    allowed = [f"mcp__{server}__{n}" for n in reads] + CLIENT_TOOLS
+    if args.allow_writes:
+        allowed = [f"mcp__{server}"] + CLIENT_TOOLS
+    help_spec = plan.get("help") or {}
+    env = {k: v for k, v in os.environ.items() if k not in SESSION_ENV}
+    tdir = out / "trials"
+    tdir.mkdir(parents=True, exist_ok=True)
+    work = tdir / "work"
+    work.mkdir(exist_ok=True)
+    runs = [r for r in (record.get("trials") or {}).get("runs") or [] if args.only and r["id"] not in args.only]
+    for trial in plan.get("trials") or []:
+        if args.only and trial["id"] not in args.only:
+            continue
+        model = trial.get("model") or args.model
+        cmd = [claude, "-p", trial["task"], "--output-format", "stream-json", "--verbose", "--model", model,
+               "--no-session-persistence", "--strict-mcp-config", "--mcp-config", str(Path(args.mcp_config).resolve()),
+               "--setting-sources", "project", "--tools", ",".join(CLIENT_TOOLS),
+               "--allowedTools", ",".join(allowed), "--max-budget-usd", str(args.max_budget)]
+        if not args.allow_writes:
+            cmd += ["--append-system-prompt", NOTE_BLOCKED]
+        if args.before_each:
+            # Every trial starts from the same sandbox state, or later trials see earlier trials' writes.
+            subprocess.run(args.before_each, shell=True, check=True)
+        print(f"{trial['id']}: running with {model} ...", file=sys.stderr)
+        t0 = time.monotonic()
+        try:
+            proc = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=args.timeout)
+            raw = proc.stdout
+        except subprocess.TimeoutExpired as exc:
+            raw = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        lines = []
+        for line in raw.splitlines():
+            try:
+                lines.append(json.loads(line))
+            except ValueError:
+                continue
+        with (tdir / f"{trial['id']}.jsonl").open("w", encoding="utf-8") as fh:
+            for m in lines:
+                fh.write(json.dumps(probe.scrub(m), ensure_ascii=False) + "\n")
+        summary = summarize(lines, server, trial, help_spec)
+        summary["wall_ms"] = int((time.monotonic() - t0) * 1000)
+        if summary["mcp_status"] != ["connected"]:
+            summary["status"] = f"server did not connect ({', '.join(map(str, summary['mcp_status'])) or 'no init'})"
+            summary["invalid"] = True
+            print(f"{trial['id']}: {summary['status']}; not scored", file=sys.stderr)
+        runs.append(summary)
+        hb = "-" if summary["help_before_use"] is None else "yes" if summary["help_before_use"] else "NO"
+        print(f"{trial['id']}: {summary['calls']} calls, {summary['help_reads']} help reads "
+              f"({summary['help_bytes'] / 1024:.0f} KB), help before use: {hb}, errors {summary['errors']}, "
+              f"${summary['cost_usd'] or 0:.2f}", file=sys.stderr)
+    record["trials"] = {"server": server, "writes": "allowed (sandbox)" if args.allow_writes else "blocked",
+                        "runs": sorted(runs, key=lambda r: r["id"])}
+    probe.write_record(out, record)
+    return 0
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("run", help="run the trials in a plan file")
+    p.add_argument("--mcp-config", required=True, help="Claude Code MCP config JSON with this one server")
+    p.add_argument("--server", required=True, help="the server's key in the MCP config")
+    p.add_argument("--plan", required=True, help="trials.json")
+    p.add_argument("--out", required=True, help="the run directory with probe.json")
+    p.add_argument("--model", default="haiku", help="default model for trials (default: haiku)")
+    p.add_argument("--only", nargs="*", help="run only these trial ids")
+    p.add_argument("--allow-writes", action="store_true", help="let write tools run (sandbox only)")
+    p.add_argument("--before-each", help="shell command run before each trial, e.g. to restore the sandbox")
+    p.add_argument("--max-budget", type=float, default=1.0, help="USD cap per trial (default 1.0)")
+    p.add_argument("--timeout", type=int, default=600, help="seconds per trial (default 600)")
+    p.add_argument("--claude", default="claude", help="Claude Code executable")
+    args = ap.parse_args(argv)
+    try:
+        return run(args)
+    except probe.ProbeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

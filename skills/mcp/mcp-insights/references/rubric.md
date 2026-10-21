@@ -34,6 +34,12 @@ Mark an audit `{"na": true, "reason": "..."}` when it does not apply.
      "effort": "S", "why": "One or two sentences.", "fix": "Paste-ready text or concrete steps.",
      "saves": "-9 KB per turn", "evidence": "optional quote"}
   ],
+  "density": {"texts": [
+    {"text_id": "tool:create_doc", "clarity": 0.5,
+     "waste": [{"quote": "exact text from the description", "why": "internals"}]}
+  ]},
+  "trials": {"t1-plain-read": {"success": 1, "evidence": "What the agent did and why it counts."}},
+  "secrets": {"dismiss": [{"name": "DJANGO_SECRET_KEY", "reason": "documented dev placeholder"}]},
   "summaries": {"protocol": "One sentence per category, shown under its gauge."},
   "notes": {"summary": "The reviewer's overall take.", "agree": ["..."], "disagree": ["..."], "missing": ["..."]}
 }
@@ -43,3 +49,39 @@ Mark an audit `{"na": true, "reason": "..."}` when it does not apply.
 `effort` is `S`, `M` or `L`; the report ranks fixes by the points the listed
 audits would gain divided by effort. Failed automatic audits that no
 recommendation covers get a generic one from the catalog.
+
+`density` lists the wasted spans of always-loaded texts and help topics. Text
+ids are `instructions`, `tool:NAME`, `field:NAME.PATH` (for example
+`field:create_doc.blocks[].text`) and `topic:URI`. Each quote must appear in
+the text (whitespace is normalized) or it is dropped with a warning. Waste is
+repetition, internals, history, restated schema, text about other tools and
+filler; a long text that is all signal has no waste.
+
+`trials` scores each trial's outcome 1, 0.5 or 0 from its transcript, with
+evidence below 1. `secrets.dismiss` clears a redacted value that is not a real
+secret; it needs a reason.
+
+## trials.json
+
+```json
+{
+  "help": {"tools": ["get_help"], "resources": ["uberblick://help/*"]},
+  "trials": [
+    {"id": "t1-plain-read", "question": "Do plain reads work from the descriptions alone?",
+     "task": "When was the document titled 'Roadmap' last updated?",
+     "expects_help": false, "needs": []},
+    {"id": "t2-chart", "question": "Is the data help read before a chart is written?",
+     "task": "Create a document with a bar chart of ...", "expects_help": true,
+     "needs": ["create_doc", "update_data"],
+     "rules": [{"label": "reads the doc before editing", "first": ["insert_block"], "before": ["get_doc"]}]},
+    {"id": "t2-chart@sonnet", "model": "sonnet", "...": "same task, another model"}
+  ]
+}
+```
+
+`help` says which calls count as reading help (globs; default: tools named
+like help, and every resource read). `task` is what a user would type, with
+no hint about help. `needs` names the tools whose first call should come after
+a help read when `expects_help` is true. `rules` check a written rule: some
+call in `before` (or `"help"`) must come before the first call in `first`.
+Use names and data that exist in the server's workspace or sandbox.

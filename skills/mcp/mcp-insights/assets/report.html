@@ -90,6 +90,30 @@ p.section-lead { margin: 0 0 16px; color: var(--muted); }
 .scale .seg.good { background: var(--good); border-radius: 3px 0 0 3px; } .scale .seg.avg { background: var(--avg); } .scale .seg.poor { background: var(--poor); border-radius: 0 3px 3px 0; }
 .scale .pin { position: absolute; top: -4px; width: 4px; height: 14px; margin-left: -2px; background: var(--ink); border-radius: 2px; box-shadow: 0 0 0 2px var(--surface); }
 .vital-budget { color: var(--faint); font-size: 11.5px; }
+.vital-value.plain { color: var(--ink) !important; font-size: 24px !important; }
+.trials { display: grid; gap: 12px; margin-top: 12px; }
+.trial { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; box-shadow: var(--shadow); min-width: 0; }
+.trial header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.trial h3 { flex-basis: 100%; margin: 4px 0 0; font-size: 16px; letter-spacing: -.01em; }
+.trial-id { font: 600 12.5px var(--mono); color: var(--muted); }
+.trial-task { margin: 4px 0 0; color: var(--muted); font-size: 13.5px; }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; counter-reset: step; }
+.step { counter-increment: step; display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 999px; font: 12.5px var(--mono); background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); max-width: 100%; }
+.step::before { content: counter(step); color: var(--faint); font-size: 11px; }
+.step span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step small { color: var(--faint); font: 11px var(--sans); }
+.step.help { background: var(--accent-bg); border-color: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--accent); }
+.step.write { background: var(--ink); border-color: var(--ink); color: var(--bg); } .step.write small, .step.write::before { color: color-mix(in srgb, var(--bg) 70%, transparent); }
+.step.denied { background: var(--avg-bg); border-color: color-mix(in srgb, var(--avg) 40%, transparent); color: var(--avg); }
+.step.err { background: var(--poor-bg); border-color: color-mix(in srgb, var(--poor) 40%, transparent); color: var(--poor); }
+.trial-run { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; display: grid; gap: 8px; justify-items: start; }
+.trial-run .steps, .trial-run .trial-facts, .trial-run .trial-verdict { justify-self: stretch; }
+.trial-facts { margin: 0; color: var(--muted); font-size: 13px; }
+.trial-verdict { margin: 0; display: flex; gap: 8px; align-items: baseline; }
+.trial-verdict .shape { flex: none; transform: translateY(1px); }
+.steps-legend .k { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; border: 1px solid var(--line); background: var(--surface-2); }
+.steps-legend .k.help { background: var(--accent-bg); border-color: var(--accent); } .steps-legend .k.write { background: var(--ink); border-color: var(--ink); }
+.steps-legend .k.denied { background: var(--avg-bg); border-color: var(--avg); } .steps-legend .k.err { background: var(--poor-bg); border-color: var(--poor); }
 .fixes { display: grid; gap: 12px; }
 .fix { display: grid; grid-template-columns: 40px 1fr; gap: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; box-shadow: var(--shadow); }
 .fix:first-child { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset, var(--shadow); }
@@ -215,6 +239,9 @@ footer { margin-top: 40px; color: var(--faint); font-size: 12.5px; text-align: c
   <h2 class="section-title">Context vitals</h2>
   <p class="section-lead">What the server costs an agent before it does anything useful. The bar runs from well inside budget to twice the poor mark.</p>
   <div class="vitals">{{VITALS}}</div>
+
+  <h2 class="section-title">Agent trials</h2>
+  {{TRIALS}}
 
   <h2 class="section-title">Top fixes</h2>
   <p class="section-lead">The five changes with the best estimated gain for the effort. Copy a fix as text, or as a ready-to-file issue.</p>

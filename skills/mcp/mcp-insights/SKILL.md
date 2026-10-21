@@ -3,8 +3,9 @@ name: mcp-insights
 description: >-
   Review an MCP server the way PageSpeed Insights reviews a web page: five
   scores from 0 to 100 (protocol, agent guidance, error recovery, context
-  cost, safety), context vitals such as tool list size, and a ranked list of
-  fixes, in one self-contained HTML report. Use when someone asks how good
+  cost, safety), context vitals such as tool list size, agent trials that show
+  whether a fresh agent finds the help it needs, and a ranked list of fixes,
+  in one self-contained HTML report. Use when someone asks how good
   an MCP server is, why agents struggle with it, how much context its tools
   cost, or what to fix first. Works on any stdio or Streamable HTTP server.
   Not a load test or a security pentest.
@@ -48,7 +49,10 @@ page, reads every resource and argument-free prompt, sends safe error probes
 (unknown method, unknown tool, schema-invalid arguments to read-only tools,
 malformed JSON on stdio, an unknown protocol version) and times the cold
 start. It writes `DIR/probe.json` and transcripts. A failed start leaves the
-server's stderr in `probe.json` under `stderr_tail`.
+server's stderr in `probe.json` under `stderr_tail`. Secrets in anything the
+server returns are redacted before they reach disk; `probe.json` keeps only
+their names, places and lengths under `secrets`, and the report fails Safety
+when a likely real one turns up. Tell the user at once when that happens.
 
 ## 3. Plan and run read calls
 
@@ -72,7 +76,36 @@ description and being sure it changes nothing. Then:
 python3 scripts/probe.py call --command "..." --out DIR --calls DIR/calls.json
 ```
 
-## 4. Judge
+## 4. Trials
+
+Trials show what a fresh agent does with only this server loaded. Run one
+trial per behavioural question the report leaves open, never a fixed set:
+
+- help or syntax that must be read before a tool works
+- a written rule such as "read with get_doc before editing"
+- tools that change things with unclear or missing annotations
+- tool names that are easy to confuse
+
+Skip trials for small read-only servers, for a server already tried under
+another name, and for anything that would write outside a sandbox. Include a
+plain task that should need no help, to check the descriptions stand alone.
+
+Write `DIR/mcp.json` in Claude Code's MCP config format with only this
+server (take secrets from the user's secret manager, never from a file in
+the repo) and `DIR/trials.json` as described in
+[references/rubric.md](references/rubric.md#trialsjson). Then:
+
+```sh
+python3 scripts/trial.py run --mcp-config DIR/mcp.json --server NAME --plan DIR/trials.json --out DIR
+```
+
+It needs Claude Code (`claude`) on PATH and costs a few cents per trial with
+the default Haiku; add a `"model": "sonnet"` copy of a trial to compare.
+Write tools are blocked, and the blocked call is recorded as what the agent
+would have sent. In a sandbox, add `--allow-writes` and `--before-each` with a
+command that restores the sandbox, so every trial starts from the same state.
+
+## 5. Judge
 
 Read every model-facing text in `probe.json`: `initialize.instructions`, each
 tool's description and field descriptions, resource and prompt texts, and the
@@ -80,9 +113,11 @@ error messages under `probes`. Score the judged audits with the anchors in
 [references/rubric.md](references/rubric.md) and write `DIR/findings.json`
 in the shape described there. Every score below 1 needs quoted evidence or it
 is not counted. Write concrete fixes: for a description, the rewritten text
-ready to paste.
+ready to paste. Quote wasted spans under `density`, so context cost counts
+waste rather than length. Read each trial's transcript in `DIR/trials/` and
+record whether it succeeded under `trials`.
 
-## 5. Render
+## 6. Render
 
 ```sh
 python3 scripts/render.py DIR --open
@@ -93,8 +128,8 @@ fixes by estimated gain per effort, and writes `DIR/report.html` and
 `DIR/report.json`. Add `--baseline OLD_DIR/report.json` to show changes since
 an earlier run.
 
-## 6. Reply
+## 7. Reply
 
 Give the five scores, the top three fixes and the path to `report.html`.
-Mention any category that rests on automatic checks only because a judged
-audit was not applicable.
+Mention any category that rests on automatic checks only, and whether trials
+ran. Scores are for the team's own use: do not publish them.
