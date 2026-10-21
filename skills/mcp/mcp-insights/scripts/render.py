@@ -227,7 +227,7 @@ CATALOG = [
      "State in the description what the tool removes and how to undo it.", ["tools"], "", False),
     ("S12", "safety", 5, "judged", "Tools that look like reads cannot write",
      "A query or get tool that also accepts mutations, or a tool that changes credentials, slips past an agent's and a client's caution.",
-     "Split writes into their own tool with honest annotations, or refuse mutations in the read tool.", ["tools"], "", False),
+     "Split writes into their own tool with honest annotations, or refuse mutations in the read tool.", ["tools"], "", True),
 ]
 
 CRITICAL = {row[0] for row in CATALOG if row[9]}
@@ -953,7 +953,10 @@ def score_categories(results: dict) -> dict:
             continue
         raw = sum(row[2] * res["score"] for row, res in applicable) / total_w
         score = round(raw * 100)
-        capped = [row[0] for row, res in applicable if row[0] in CRITICAL and res["score"] < 0.1]
+        # A critical audit caps on any failed item, not only on a failing average:
+        # one silent truncation or one read tool that writes is enough.
+        capped = [row[0] for row, res in applicable if row[0] in CRITICAL
+                  and (res["score"] < 0.1 or any(it.get("score") == 0 for it in res.get("items") or []))]
         if capped:
             score = min(score, 49)
         cats[key] = {"score": score, "name": name, "question": question, "capped_by": capped, "weight": total_w}

@@ -440,11 +440,18 @@ def minimal_invalid_args(tool: dict):
         return {}, f"missing required {', '.join(required)}"
     props = schema.get("properties") or {}
     for name, prop in props.items():
+        if isinstance(prop, dict) and isinstance(prop.get("enum"), list) and all(isinstance(v, str) for v in prop["enum"]):
+            return {name: "mcp-insights-not-an-option"}, f"{name} is not one of its enum values"
+    for name, prop in props.items():
         t = prop.get("type") if isinstance(prop, dict) else None
+        if isinstance(t, list):
+            t = next((x for x in t if x != "null"), None) if len(t) <= 2 else None
         if t in ("string", "number", "integer", "boolean", "array", "object"):
             wrong = {"string": 12345, "number": "not-a-number", "integer": "not-an-integer",
                      "boolean": "not-a-boolean", "array": "not-an-array", "object": "not-an-object"}[t]
             return {name: wrong}, f"{name} has the wrong type"
+    if schema.get("additionalProperties") is False:
+        return {"mcp_insights_unknown": 1}, "an unknown field where additionalProperties is false"
     return None, None
 
 

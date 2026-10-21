@@ -2,7 +2,11 @@
 
 Score each item 1, 0.5 or 0. An item below 1 needs `evidence`: a quote from
 the server's text or a captured response. Without evidence it is not scored.
-Mark an audit `{"na": true, "reason": "..."}` when it does not apply.
+Mark an audit `{"na": true, "reason": "..."}` when it does not apply. For the
+audits that list only failures (G16, E11), record `{"score": 1, "display":
+"none found"}` when you looked and found none.
+
+E12 and S12 are critical: one item scored 0 caps the category at 49.
 
 | Audit | Item | 1 | 0.5 | 0 |
 | --- | --- | --- | --- | --- |
@@ -18,6 +22,7 @@ Mark an audit `{"na": true, "reason": "..."}` when it does not apply.
 | E12 refuses bad writes | each write probe (sandbox only) | refused with the offending part named | refused, part not named | succeeded and stored something else |
 | S10 explicit target | each destructive tool | needs an id | accepts a filter but confirms the count | acts on a free-text query |
 | S11 risk stated | each destructive tool | says what is lost and whether it can be undone | one of the two | neither |
+| S12 honest reads | each tool that looks like a read (query, get, list, search) or touches credentials | cannot change data | changes only the caller's own settings, and says so | runs mutations, or stores, replaces or deletes credentials |
 
 ## findings.json
 
