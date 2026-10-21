@@ -444,6 +444,10 @@ def minimal_invalid_args(tool: dict):
             return {name: "mcp-insights-not-an-option"}, f"{name} is not one of its enum values"
     for name, prop in props.items():
         t = prop.get("type") if isinstance(prop, dict) else None
+        if t is None and isinstance(prop, dict):
+            # pydantic writes Optional[str] as anyOf: [{type: string}, {type: null}]
+            alts = [a.get("type") for a in prop.get("anyOf") or prop.get("oneOf") or [] if isinstance(a, dict)]
+            t = [a for a in alts if isinstance(a, str)] or None
         if isinstance(t, list):
             t = next((x for x in t if x != "null"), None) if len(t) <= 2 else None
         if t in ("string", "number", "integer", "boolean", "array", "object"):
