@@ -11,7 +11,7 @@ standard library and `gh`.
     review.py create report.json [--no-button] > create.json    # create_doc arguments for a new dataset document
     review.py queue --repo OWNER/NAME [--day YYYY-MM-DD]         # only the open-queue figures for a day
 
-The day runs from local midnight to local midnight; the default is yesterday. Only runs that started
+The day runs from midnight to midnight UTC; the default is yesterday. Only runs that started
 before the day ended count, so a day reads the same whenever it is collected.
 Works on any repository that runs ub-agents (https://agents.uberblick.ai): roles, triggers and outcomes
 come from the repository's ub-agents.yaml, and ROLES maps the common role names to a letter.
@@ -124,8 +124,8 @@ def waited(stops, runs, end):
 
 
 def day_window(text):
-    """Local midnight to local midnight for the given day; yesterday when none is given."""
-    zone = dt.datetime.now().astimezone().tzinfo
+    """Midnight to midnight UTC for the given day, whatever the local zone; yesterday when none is given."""
+    zone = dt.timezone.utc
     day = dt.date.fromisoformat(text) if text else dt.datetime.now(zone).date() - dt.timedelta(days=1)
     since = dt.datetime.combine(day, dt.time.min, zone)
     return day, zone, since, since + dt.timedelta(days=1)
@@ -542,7 +542,7 @@ def digest(data):
                  f'run {num(d["run_h"], " h")}' if d["runs"] else "", prs(d)]
         return f'#{d["number"]} {d["title"]}: ' + "; ".join(p for p in parts if p)
 
-    out = [f'{data["repo"]}, {day} ({data["timezone"]}). Times are local; times on other days carry their date.',
+    out = [f'{data["repo"]}, {day} ({data["timezone"]}). Times are in that zone; times on other days carry their date.',
            f'Loop deliveries {s["deliveries"]}, autonomous {s["autonomous"]} ({num(s["autonomous_pct"], "%")}, target '
            f'{TARGETS["autonomous_pct"][1]}). Runs {s["runs"]}, wasted {s["wasted_runs"]} ({num(s["wasted_pct"], "%")}, '
            f'target {TARGETS["wasted_pct"][1]}). Human stops {s["human_stops"]}, {num(s["human_wait_h"], " h")} waited. '
@@ -1072,13 +1072,13 @@ def main():
     m.add_argument("days", help="the document's days collection as get_data returned it; a missing file means none")
     c = commands.add_parser("collect")
     c.add_argument("--repo", required=True)
-    c.add_argument("--day", help="calendar day, YYYY-MM-DD, local time (default yesterday)")
+    c.add_argument("--day", help="calendar day, YYYY-MM-DD, UTC (default yesterday)")
     r = commands.add_parser("render")
     r.add_argument("data"), r.add_argument("notes"), r.add_argument("out")
     r.add_argument("--no-open", action="store_true", help="do not open the report in the default browser")
     q = commands.add_parser("queue", help="only the open-queue figures for a day: issue lists and events, no run records")
     q.add_argument("--repo", required=True)
-    q.add_argument("--day", help="calendar day, YYYY-MM-DD, local time (default yesterday)")
+    q.add_argument("--day", help="calendar day, YYYY-MM-DD, UTC (default yesterday)")
     g = commands.add_parser("digest", help="the day in a few lines per item, to read before data.json")
     g.add_argument("data", help="data.json written by collect, or report.json")
     s = commands.add_parser("records")

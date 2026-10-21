@@ -1,8 +1,10 @@
 """Checks for review.py that need no network: evidence, the digest, records and the document's cards."""
 
 import datetime as dt
+import os
 import re
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -96,6 +98,14 @@ class Tests(unittest.TestCase):
         self.assertTrue(page.startswith('<!doctype html><html lang="en"><meta charset="utf-8">'))
         self.assertLess(page.index('name="viewport"'), page.index("<title>"))
         self.assertIn("Prüfung — schneller…", page)
+
+    def test_a_day_is_a_utc_day_in_any_local_zone(self):
+        with mock.patch.dict(os.environ, {"TZ": "Asia/Bangkok"}):
+            time.tzset()
+            window = review.day_window("2026-10-14")
+        time.tzset()
+        self.assertEqual(window[2:], (dt.datetime(2026, 10, 14, tzinfo=dt.timezone.utc),
+                                      dt.datetime(2026, 10, 15, tzinfo=dt.timezone.utc)))
 
     def test_missing_days_since_the_newest_stored_one(self):
         yesterday = dt.date(2026, 10, 18)

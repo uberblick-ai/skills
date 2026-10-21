@@ -192,8 +192,8 @@ rather than runs has `runs: 0` and says so in `cost`.
 
 ```json
 {"schema": "ub-agents-deliver-report/1",
- "repo": "owner/name", "day": "2026-10-07", "timezone": "CEST +0200",
- "since": "2026-10-06T22:00:00Z", "until": "2026-10-07T22:00:00Z",
+ "repo": "owner/name", "day": "2026-10-07", "timezone": "UTC +0000",
+ "since": "2026-10-07T00:00:00Z", "until": "2026-10-08T00:00:00Z",
  "summary": {"repo": "owner/name", "day": "2026-10-07", "headline": "...",
              "deliveries": 5, "autonomous": 2, "autonomous_pct": 40,
              "runs": 54, "wasted_runs": 12, "wasted_pct": 22.2, "run_h": 8.51,

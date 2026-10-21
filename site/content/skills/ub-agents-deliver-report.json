@@ -8,11 +8,11 @@
     "Why did the preparer keep retrying last Tuesday?"
   ],
   "steps": [
-    "Collects one calendar day from GitHub in your local time, yesterday by default: runs, outcomes, comments and merged PRs. A day reads the same whenever it is collected.",
+    "Collects one calendar day in UTC from GitHub, yesterday by default: runs, outcomes, comments and merged PRs. A day reads the same whenever it is collected.",
     "Names a cause for every delivery that needed a person, every wasted run and every reviewer send-back, from run summaries, denied commands and retrospectives.",
     "Proposes at most four changes, each giving clearer authority, better wording, fewer instructions or more autonomy. It never adds a role, label, gate or checklist.",
     "Renders the report, opens it in your browser and leaves a JSON record of the day next to it.",
-    "With the Uberblick MCP server, stores the day in a <em>Delivery report</em> document, so KPIs and recurring causes show up over time, with the open actions as cards that each have a button to discuss them in Claude Code. When the document stops short of yesterday, it reports every missing day, oldest first; without a document it reports yesterday alone."
+    "Whenever an Uberblick MCP server is connected, stores the day in a <em>Delivery report</em> document, so KPIs and recurring causes show up over time, with the open actions as cards that each have a button to discuss them in Claude Code. When the document stops short of yesterday, it reports every missing day, oldest first; without a document it reports yesterday alone."
   ],
   "facts_title": "What it measures",
   "facts": [
