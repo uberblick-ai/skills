@@ -17,7 +17,7 @@ LIGHT = {"bg": "#ffffff", "ink": "#17202c", "muted": "#5a6575", "line": "#d3d9e2
          "agent-bg": "#e7eeed", "system": "#4f5d76", "system-bg": "#ebedf3", "rework": "#826954",
          "rework-bg": "#f3f0eb", "stop": "#815f5a", "stop-bg": "#ede6e5", "done": "#536e5a", "done-bg": "#e8ede9"}
 # Past these the report no longer fits two pages.
-BUDGET = {"summary": 60, "phase": 30, "does": 20, "passes": 35, "holds": 35, "gates": 8}
+BUDGET = {"summary": 60, "phase": 30, "does": 20, "rule": 30, "gates": 8}
 
 
 def esc(value):
@@ -93,9 +93,8 @@ def validate(data, flows=None):
             text(gate, key, gid)
         if gate.get("decides") not in DECIDERS:
             raise ValueError(f"{gid}: decides must be one of {', '.join(sorted(DECIDERS))}")
-        for key in ("passes", "holds"):
-            if words(text(gate, key, gid)) > BUDGET[key]:
-                warnings.append(f"{gid}: {key} is over {BUDGET[key]} words")
+        if words(text(gate, "rule", gid)) > BUDGET["rule"]:
+            warnings.append(f"{gid}: rule is over {BUDGET['rule']} words")
         sources = gate.get("sources")
         if not isinstance(sources, list) or not sources:
             raise ValueError(f"{gid}: sources must name the files (path:line) the gate comes from")
@@ -178,7 +177,7 @@ def blocks(data, svgs):
         for gid in phase.get("gates", []):
             g = gates[gid]
             out.append(("card", {"label": f"{gid} · {g['at']} · {g['decides']} decides", "title": g["name"],
-                                 "body": f"**Passes** {g['passes']}\n**Holds** {g['holds']}",
+                                 "body": g["rule"],
                                  "footer": " · ".join(link(s) for s in g["sources"])}))
     if data.get("settings"):
         out += [("h2", "Limits and policy"),

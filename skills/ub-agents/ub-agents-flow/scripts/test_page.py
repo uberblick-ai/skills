@@ -55,10 +55,12 @@ class PageTests(unittest.TestCase):
 
     def test_budgets_warn(self):
         self.data["summary"] = "word " * 61
+        self.data["gates"][0]["rule"] = "word " * 31
         self.data["gates"] += [dict(self.data["gates"][0], id=f"G{n}") for n in range(7, 10)]
         self.data["phases"][1]["gates"] += ["G7", "G8", "G9"]
         warnings = page.validate(self.data)
         self.assertIn("summary is over 60 words", warnings)
+        self.assertIn("G1: rule is over 30 words", warnings)
         self.assertIn("9 gates; merge related ones to stay within 8", warnings)
 
     def test_malformed_reports_fail(self):
@@ -68,6 +70,7 @@ class PageTests(unittest.TestCase):
             lambda d: d["gates"][0].update(decides="robot"),
             lambda d: d["gates"][1].update(id="G1"),
             lambda d: d["gates"][0].update(sources=[]),
+            lambda d: d["gates"][0].pop("rule"),
             lambda d: d["roles"][0].update(outcomes={}),
             lambda d: d["roles"].append(copy.deepcopy(d["roles"][0])),
             lambda d: d.pop("phases"),

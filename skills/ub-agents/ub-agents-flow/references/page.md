@@ -5,9 +5,9 @@
 blocks: `flow.md` in Uberblick Markdown and `flow.html` styled like an
 Uberblick document. The report is the title and summary, then per phase a
 heading, its sentence, its drawing as an `ablauf` fence, a table of its roles
-and a card per gate, then a table of limits and policy and the notes as a
-list. The example in [../assets/example.json](../assets/example.json) is
-uberblick-ai/ub-agents.
+and a card per gate with its rule and the lines it comes from, then a table of
+limits and policy and the notes as a list. The example in
+[../assets/example.json](../assets/example.json) is uberblick-ai/ub-agents.
 
 ```json
 {
@@ -50,8 +50,7 @@ uberblick-ai/ub-agents.
       "name": "Review",
       "at": "reviewer",
       "decides": "agent",
-      "passes": "At most 35 words: what must be true for the item to move on.",
-      "holds": "At most 35 words: what holds it and the outcome or label that says so.",
+      "rule": "One sentence, at most 30 words: what lets the item move on, and where it goes otherwise.",
       "sources": [".agents/reviewer.md:3-17", "ub-agents.yaml:80"]
     }
   ],
@@ -77,8 +76,11 @@ uberblick-ai/ub-agents.
 - `gates` are numbered `G1`, `G2`, ... in the order an item meets them, and
   the same numbers appear in the flow. `decides` is `launcher` (the launcher
   enforces it from the config), `agent` (an agent checks it per its
-  instructions) or `person`. `sources` are paths relative to the repository
-  root, with a line or a line range where the rule is written.
+  instructions) or `person`. `rule` is the gate in one plain sentence, such
+  as "A maintainer added the trigger label and nothing holds the issue: no
+  open blocker, no `needs-human`, retries left." Name the labels it sends work
+  to; leave the detail to the sources. `sources` are paths relative to the
+  repository root, with a line or a line range where the rule is written.
 - `settings` and `notes` are optional. Settings are the config values that
   change how work moves: limits, queue order, approvals, runtime rules.
 

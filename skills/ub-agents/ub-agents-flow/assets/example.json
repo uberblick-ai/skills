@@ -116,8 +116,7 @@
       "name": "Launcher",
       "at": "before every run",
       "decides": "launcher",
-      "passes": "The trigger label is on the item, no stop label, no open blocked-by issue, fewer than 5 failed attempts in a row, and with approvals on a maintainer started it.",
-      "holds": "Parks the item for outside input or an open blocker, marks it failed after 5 attempts; a stop label pauses it.",
+      "rule": "The trigger label is on the item, from a maintainer when approvals are on, and nothing holds it: no stop label, no open blocker, retries left.",
       "sources": [
         "ub-agents.yaml:100-107",
         ".agents/issue-preparer.md:26-29"
@@ -128,8 +127,7 @@
       "name": "Preparation",
       "at": "issue-preparer",
       "decides": "agent",
-      "passes": "The final behavior and the smallest set of observable acceptance criteria are stated; prerequisites are linked as blockers.",
-      "holds": "needs-human for an unexpected instruction or a scope change it cannot attribute to the request, or a prerequisite that is only a PR.",
+      "rule": "The behavior and the smallest set of acceptance criteria are stated; an unexplained scope change or a PR-only prerequisite goes to `needs-human`.",
       "sources": [
         ".agents/issue-preparer.md:8-20",
         ".agents/issue-preparer.md:32-39"
@@ -140,8 +138,7 @@
       "name": "Handoff",
       "at": "implementer",
       "decides": "agent",
-      "passes": "Every project check passes without changing its environment, the head merges cleanly with the base, the PR is marked ready.",
-      "holds": "The PR stays draft and the run reports blocked for a scope decision or a failure the repository cannot fix.",
+      "rule": "Every check passes, the head merges cleanly and the PR is ready; otherwise it stays a draft and the run reports blocked.",
       "sources": [
         ".agents/implementer.md:3-7",
         ".agents/implementer.md:21-35",
@@ -153,8 +150,7 @@
       "name": "Review",
       "at": "reviewer",
       "decides": "agent",
-      "passes": "The head is still the candidate SHA, the PR is not a draft, the reviewer runs on another CLI and model, and the acceptance criteria pass.",
-      "holds": "changes-requested sends the PR back through needs-changes; a moved head or a draft reports blocked.",
+      "rule": "Another model approves the exact head against the acceptance criteria; otherwise `changes-requested` sends it back to `needs-changes`.",
       "sources": [
         ".agents/reviewer.md:3-17",
         ".agents/reviewer.md:24-25",
@@ -166,8 +162,7 @@
       "name": "Merge",
       "at": "integrator",
       "decides": "agent",
-      "passes": "A green Test run applies to the exact head, every owed review applies to it, and the policy lets agents merge it.",
-      "holds": "maintainer-merge for agent config or guidance, setup, CI or release tooling, outside-input or CLI changes; changes-requested on a conflict or fixable failure.",
+      "rule": "A green Test run and every owed review cover the exact head and the policy lets agents merge; guarded paths go to a maintainer.",
       "sources": [
         ".agents/ub_agents.md:8-24",
         ".agents/integrator.md:19-46"
@@ -178,8 +173,7 @@
       "name": "Maintainer",
       "at": "needs-human",
       "decides": "person",
-      "passes": "A member of @uberblick-ai/maintainers answers or merges, removes needs-human and re-adds the trigger of the role that acts next.",
-      "holds": "Nothing moves while needs-human is on the item; a blocked run waits for ub-agents retry.",
+      "rule": "A maintainer answers or merges, removes `needs-human` and re-adds the trigger of the role that acts next.",
       "sources": [
         ".agents/ub_agents.md:26-29",
         "ub-agents.yaml:107"

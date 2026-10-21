@@ -78,7 +78,7 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
 3. Write `DIR/flow.json` as [references/page.md](references/page.md)
    describes: a three-sentence summary, the two phases with a sentence each
    and their roles and gates, every role, the gates in the order an item
-   meets them, the settings that change how work moves, and the notes from
+   meets them with one plain sentence each, the settings that change how work moves, and the notes from
    step 2.
 
 4. Draw `DIR/issue.flow` and `DIR/pr.flow` as
