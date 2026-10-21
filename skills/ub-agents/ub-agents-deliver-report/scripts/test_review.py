@@ -59,6 +59,12 @@ class Tests(unittest.TestCase):
         self.assertIn("## Needs a cause (1)", text)
         self.assertIn("  G 06:37 13.3 min waste done", text)
 
+    def test_new_document_has_no_kpi_table(self):
+        blocks = review.create_document(data())["blocks"]
+        self.assertNotIn("table", [b["type"] for b in blocks])
+        self.assertEqual([b["text"] for b in blocks if b["type"] == "heading"],
+                         ["Data", "Recommended Actions", "Changelog"])
+
     def test_records_send_schemas_only_when_asked(self):
         report = data() | {"summary": data()["summary"] | {"day": "2026-10-14"}}
         self.assertFalse(any("schema" in op for op in review.records(report)))

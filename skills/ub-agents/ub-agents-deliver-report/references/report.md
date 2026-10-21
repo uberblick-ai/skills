@@ -261,9 +261,7 @@ bottom:
 
 1. **Intro.** What the loop is, what the report measures, and where the skill
    lives.
-2. **KPIs.** The table above in short: each KPI, its goal and one line of
-   definition.
-3. **Data.** Line charts bound to `days`, then a "Recent days" table, newest
+2. **Data.** Line charts bound to `days`, then a "Recent days" table, newest
    first. Both are `chart` blocks holding a version-1 mapping, for example:
 
    ```json
@@ -285,7 +283,7 @@ bottom:
    `limit` keeps the newest seven days in the table. `pageSize`, which older
    documents carry, never affected the display.
 
-4. **Recommended Actions.** The day's `actions`: up to five proposed
+3. **Recommended Actions.** The day's `actions`: up to five proposed
    lessons, each a card with the lever as its label, the title, the change as
    its body, and a footer with where it lives, its cost, its causes and its
    evidence. Below them, the `tracked` lessons of the last 14 days, struck
@@ -308,7 +306,7 @@ bottom:
    then set the lesson's record in `lessons` to `tracked`, with
    `addressed_by` and `addressed_as`, so later reports keep it struck
    through.
-5. **Changelog.** A bullet list of the five latest `changes`, newest first:
+4. **Changelog.** A bullet list of the five latest `changes`, newest first:
    the day, the change linked to its issue, PR or commit in ub-agents or the
    project, and why it was made.
 
