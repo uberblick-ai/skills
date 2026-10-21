@@ -51,8 +51,9 @@ legend
 
 ## Conventions for a loop flow
 
-- Two flows. `issue.flow` runs from the entry label (`needs-preparation`) to
-  the label the implementer starts on, ending in an `end` node such as
+- Two flows. `issue.flow` starts at an `end created tone=muted "Issue created"`
+  node with an edge to the entry label (`needs-preparation`) saying who adds
+  it, and runs to the label the implementer starts on, ending in an `end` node such as
   "Implementation picks it up". `pr.flow` starts from that label and ends at
   the merge. Leave launcher gates in the issue flow and mention them in the PR
   flow's first edge label.
@@ -89,7 +90,8 @@ second column of the issue flow, beside the preparer, with its own gate
 ```
 columns main review
 
-pill needs-preparation col=main tone=muted
+end created col=main tone=muted "Issue created"
+pill needs-preparation tone=muted
 box issue-preparer "states behavior and acceptance criteria"
 decision g2 tone=system "G2 Small and clear?"
 pill ready tone=done
@@ -99,6 +101,7 @@ pill needs-review col=review row=g2 tone=agent
 box issue-reviewer row=ready "second opinion on scope and criteria"
 decision g3 row=delivery tone=system "G3 Scope and criteria hold?"
 
+created --> needs-preparation : a maintainer adds the label
 needs-preparation --> issue-preparer
 issue-preparer --> g2
 g2 --> ready : prepared
