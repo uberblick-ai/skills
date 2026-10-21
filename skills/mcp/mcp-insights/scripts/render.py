@@ -1482,7 +1482,8 @@ def render_html(report: dict) -> str:
         elif code == "C10":
             wpt = m.get("waste_per_turn") or {}
             value = wpt.get("ratio")
-            where = f"{short_tokens(wpt.get('tokens'))} of {short_tokens(wpt.get('total'))} tokens" if value is not None else "waste not judged"
+            where = (f"{short_tokens(wpt.get('tokens'))} of {short_tokens(wpt.get('total'))} tokens" if value is not None
+                     else "needs the reviewer to quote filler in findings.json")
         pos = 0
         if value is not None and code == "C10":
             value = max(value, 1e-4)
@@ -1497,7 +1498,7 @@ def render_html(report: dict) -> str:
                + (f'<span class="pin" style="left:{pos:.1f}%"></span>' if value is not None else "") + "</div>")
         vitals.append(f'<div class="vital {b}"><div class="vital-label">{shape(b)}<span class="grow">{esc(label)}</span>'
                       f'{info_html(label, info, fmt_budget(code))}</div>'
-                      f'<div class="vital-value">{"none sent" if code == "C02" and m.get("instructions_bytes") is None else value_html(value, unit)}</div>'
+                      f'<div class="vital-value">{"none sent" if code == "C02" and m.get("instructions_bytes") is None else "not reviewed" if code == "C10" and value is None else value_html(value, unit)}</div>'
                       f'<div class="vital-where">{esc(where)}</div>{bar}'
                       f'<div class="vital-budget">{esc(fmt_budget(code))}</div></div>')
 
