@@ -588,7 +588,8 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
         c["tokens_est"] = c["tokens"] if "tokens" in c else round(c["bytes"] / 2.7)
     if calls:
         big = max(calls, key=lambda c: c["tokens_est"])
-        m["max_response"] = {"value": big["tokens_est"], "where": big["tool"], "bytes": big.get("text_bytes", big["bytes"])}
+        m["max_response"] = {"value": big["tokens_est"], "where": big["tool"], "bytes": big.get("text_bytes", big["bytes"]),
+                             "from_whole_result": "tokens" not in big}
     m["cold_start_ms"] = probe.get("cold_start_ms")
     seen: dict = {}
     total_text = 0
@@ -897,6 +898,9 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     metric("C07", (m.get("max_response") or {}).get("value"), (m.get("max_response") or {}).get("where", ""))
     if "C07" in r and not r["C07"].get("na"):
         r["C07"]["note"] = DATA_DEPENDENT["C07"]
+        if (m.get("max_response") or {}).get("from_whole_result"):
+            r["C07"]["note"] += (" This probe predates text measurement, so the size counts the whole result; servers that also"
+                                 " return structuredContent are counted about twice. Re-run probe.py call for the text the model gets.")
     metric("C08", m.get("cold_start_ms"))
     if tools:
         metric("C09", m["duplication"]["value"])
