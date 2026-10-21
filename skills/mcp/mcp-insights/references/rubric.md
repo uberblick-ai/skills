@@ -67,7 +67,9 @@ topics.
     {"text_id": "tool:create_doc", "clarity": 0.5,
      "waste": [{"quote": "exact text from the description", "why": "internals"}]}
   ]},
-  "trials": {"t1-plain-read": {"outcome": "done", "success": 1, "evidence": "What the agent did and why it counts."}},
+  "trials": {"t1-plain-read": {"outcome": "done", "success": 1, "evidence": "What the agent did and why it counts."},
+             "t4-wireframe#2": {"outcome": "failed", "evidence": "A repeated trial is judged per attempt."}},
+  "sdk": {"P18": "draft-07 schemas come from the SDK's schema converter"},
   "secrets": {"dismiss": [{"name": "DJANGO_SECRET_KEY", "reason": "documented dev placeholder"}]},
   "summaries": {"protocol": "One sentence per category, shown under its gauge."},
   "notes": {"summary": "The reviewer's overall take.", "agree": ["..."], "disagree": ["..."], "missing": ["..."]}
@@ -118,10 +120,14 @@ the texts you reviewed, and the report says how many that is.
   the server.
 - `declined`: the agent rightly refused.
 
-Blocked and declined trials do not count toward "tasks completed". Trials are
+A trial with `verify` is `done` when the check passes and `failed` when it
+does not, unless you record another outcome. Blocked and declined trials do
+not count toward "tasks completed". Trials are
 shown beside the scores and never change them, because which trials run is
 the reviewer's choice. `secrets.dismiss` clears a redacted value that is not
-a real secret; it needs a reason.
+a real secret; it needs a reason. `sdk` names audits whose finding comes from
+the server's SDK, with the reason; the report labels them, and a suggestion
+whose audits all come from the SDK ranks below the server's own fixes.
 
 ## trials.json
 
@@ -136,7 +142,10 @@ a real secret; it needs a reason.
      "task": "Create a document with a bar chart of ...", "expects_help": true,
      "needs": ["create_doc", "update_data"],
      "rules": [{"label": "reads the doc before editing", "first": ["insert_block"], "before": ["get_doc"]}]},
-    {"id": "t2-chart@sonnet", "model": "sonnet", "...": "same task, another model"}
+    {"id": "t2-chart@sonnet", "model": "sonnet", "...": "same task, another model"},
+    {"id": "t3-wireframe", "question": "Is the wireframe syntax found, and does the parser accept the result?",
+     "task": "In the document 'Sandbox', add a wireframe of a sign-in dialog.", "expects_help": true,
+     "needs": ["insert_block"], "repeat": 3, "verify": "python3 check_wireframe.py sandbox.sqlite"}
   ]
 }
 ```
@@ -150,6 +159,10 @@ call, `tool` or `tool:pattern` (the pattern matches a resource URI as a glob or
 appears in the arguments), for example `ReadMcpResourceTool:mise://tasks` or
 `get_help:markdown`; `"help"` accepts any help read.
 Use names and data that exist in the server's workspace or sandbox.
+`repeat` runs the trial that many times (ids become `t3-wireframe#1` and so
+on), and `verify` is a shell command run after each attempt whose exit code
+grades it. With writes allowed, pair it with `--before-each` so every attempt
+starts from the same sandbox.
 
 An error counts as recovered when the agent's next call to the same tool,
 with at most two other server calls in between, has changed input and

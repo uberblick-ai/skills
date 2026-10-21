@@ -178,10 +178,12 @@ def resummarize(args) -> int:
     record = json.loads((out / "probe.json").read_text(encoding="utf-8"))
     plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
     runs = []
+    before = {r["id"]: r for r in (record.get("trials") or {}).get("runs") or []}
+    found = []
     for trial in plan.get("trials") or []:
-        path = out / "trials" / f"{trial['id']}.jsonl"
-        if not path.exists():
-            continue
+        paths = [out / "trials" / f"{trial['id']}.jsonl"] + sorted((out / "trials").glob(f"{trial['id']}#*.jsonl"))
+        found += [(dict(trial, id=p.stem, base_id=trial["id"]), p) for p in paths if p.exists()]
+    for trial, path in found:
         lines = []
         for line in path.read_text(encoding="utf-8").splitlines():
             try:
@@ -193,6 +195,10 @@ def resummarize(args) -> int:
         summary = safe_summary(lines, args.server, trial, plan.get("help") or {})
         if summary.get("mcp_status") and summary["mcp_status"] != ["connected"]:
             summary["invalid"] = True
+        summary["base_id"] = trial["base_id"]
+        for key in ("verify", "wall_ms", "attempt"):
+            if key in (before.get(trial["id"]) or {}):
+                summary[key] = before[trial["id"]][key]
         runs.append(summary)
     old = (record.get("trials") or {})
     record["trials"] = {"server": args.server, "writes": old.get("writes", "blocked"), "runs": sorted(runs, key=lambda r: r["id"])}
@@ -225,10 +231,17 @@ def run(args) -> int:
     tdir.mkdir(parents=True, exist_ok=True)
     # Outside the home tree, so no parent directory contributes instruction files.
     work = Path(tempfile.mkdtemp(prefix="mcp-trial-", dir="/tmp" if os.path.isdir("/tmp") else None))
-    runs = [r for r in (record.get("trials") or {}).get("runs") or [] if args.only and r["id"] not in args.only]
+    runs = [r for r in (record.get("trials") or {}).get("runs") or []
+            if args.only and r["id"].split("#")[0] not in args.only]
+    # One run shows a behaviour, not a rate: repeat each trial to report "k of n".
+    planned = []
     for trial in plan.get("trials") or []:
         if args.only and trial["id"] not in args.only:
             continue
+        n = max(1, int(trial.get("repeat") or args.repeat))
+        planned += [dict(trial, id=f"{trial['id']}#{k}" if n > 1 else trial["id"], base_id=trial["id"], attempt=k)
+                    for k in range(1, n + 1)]
+    for trial in planned:
         model = trial.get("model") or args.model
         cmd = [claude, "-p", trial["task"], "--output-format", "stream-json", "--verbose", "--model", model,
                "--no-session-persistence", "--strict-mcp-config", "--mcp-config", str(Path(args.mcp_config).resolve()),
@@ -259,6 +272,15 @@ def run(args) -> int:
                 fh.write(json.dumps(probe.scrub(m), ensure_ascii=False) + "\n")
         summary = safe_summary(lines, server, trial, help_spec)
         summary["wall_ms"] = int((time.monotonic() - t0) * 1000)
+        summary["base_id"], summary["attempt"] = trial["base_id"], trial["attempt"]
+        if trial.get("verify"):
+            # Graded by the server's own parser or reads, not judged from the transcript.
+            try:
+                v = subprocess.run(trial["verify"], shell=True, capture_output=True, text=True, timeout=120)
+                summary["verify"] = {"command": trial["verify"], "ok": v.returncode == 0,
+                                     "output": probe.scrub_text((v.stdout + v.stderr).strip())[-600:]}
+            except subprocess.TimeoutExpired:
+                summary["verify"] = {"command": trial["verify"], "ok": False, "output": "timed out after 120 s"}
         if summary["mcp_status"] != ["connected"]:
             summary["status"] = f"server did not connect ({', '.join(map(str, summary['mcp_status'])) or 'no init'})"
             summary["invalid"] = True
@@ -288,6 +310,7 @@ def main(argv=None) -> int:
     p.add_argument("--out", required=True, help="the run directory with probe.json")
     p.add_argument("--model", default="haiku", help="default model for trials (default: haiku)")
     p.add_argument("--only", nargs="*", help="run only these trial ids")
+    p.add_argument("--repeat", type=int, default=1, help="runs per trial unless the trial sets repeat (default 1)")
     p.add_argument("--allow-writes", action="store_true", help="let write tools run (sandbox only)")
     p.add_argument("--before-each", help="shell command run before each trial, e.g. to restore the sandbox")
     p.add_argument("--max-budget", type=float, default=1.0, help="USD cap per trial (default 1.0)")

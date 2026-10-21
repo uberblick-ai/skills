@@ -52,7 +52,10 @@ page, reads every resource and argument-free prompt, sends safe error probes
 (unknown method, unknown tool, schema-invalid arguments to read-only tools,
 malformed JSON on stdio, an unknown protocol version) and times the cold
 start. It writes `DIR/probe.json` and transcripts. A failed start leaves the
-server's stderr in `probe.json` under `stderr_tail`. Secrets in anything the
+server's stderr in `probe.json` under `stderr_tail`. When `--cwd` is the
+server's git checkout, the record pins its commit and notes uncommitted
+changes; otherwise pass `--commit SHA`, or the report warns that the run does
+not say which code it reviewed. Secrets in anything the
 server returns are redacted before they reach disk; `probe.json` keeps only
 their names, places and lengths under `secrets`, and the report fails Safety
 when a likely real one turns up. Tell the user at once when that happens.
@@ -101,10 +104,17 @@ python3 scripts/probe.py call --command "..." --out DIR --calls DIR/calls.json
 ## 4. Trials
 
 Trials show what a fresh agent does with only this server loaded. Run one
-trial per behavioural question the report leaves open, never a fixed set:
+trial per behavioural question the report leaves open, never a fixed set.
+Test the claims the server's own text makes, because that is where agents go
+wrong:
 
+- each format the server defines beyond plain Markdown (a diagram language,
+  a card or widget grammar): one trial per format, graded by that format's
+  real parser through `verify`, not by reading the transcript
+- each edit rule (what `old_text` must hold, read before writing, keep
+  comments and ids): an edit trial on a block that carries a comment, checked
+  by reading the block back
 - help or syntax that must be read before a tool works
-- a written rule such as "read with get_doc before editing"
 - tools that change things with unclear or missing annotations
 - tool names that are easy to confuse
 
@@ -113,6 +123,20 @@ another name, and for anything that would write outside a sandbox. Include a
 plain task that should need no help, to check the descriptions stand alone.
 Trials are shown beside the scores and never change them, because which
 trials run is your choice; they show what the scores cannot.
+
+One run shows what an agent can do, not how often it succeeds. Give each
+trial `"repeat": 3` (5 when the result decides a fix) and a Sonnet copy, so
+the report shows "k of n" per model. `verify` is a shell command run after
+each attempt: exit 0 means the task is done, and its output appears on the
+trial card. Write it against the server's own reads or the format's parser,
+for example a script that reads the block back and parses it.
+
+When the maintainer has a fix on a branch, run the same plan against the
+baseline and the branch, with the same models and repeats, and render the
+branch with `--baseline`: that measures a suggestion's effect instead of
+assuming it. When the startup instructions can be changed locally, an
+ablation does the same for discovery: the same trial with and without the
+help topics listed in the instructions.
 
 Write `DIR/mcp.json` in Claude Code's MCP config format with only this
 server (take secrets from the user's secret manager, never from a file in
@@ -130,9 +154,23 @@ would have sent. In a sandbox, add `--allow-writes` and `--before-each` with a
 command that restores the sandbox, so every trial starts from the same state.
 Then read what the agent wrote back through the server and check it with the
 server's own reads; that is how silent truncation and Markdown stored as
-literal text show up (E12). With a sandbox, also send a few deliberately
-malformed writes yourself (a table row with an extra cell, an unknown key) and
-read them back.
+literal text show up (E12).
+
+With a sandbox, also send deliberately wrong writes yourself: add calls with
+`"write_probe": true`, an `expect` and a `read_back` read to `calls.json` and
+run `probe.py call --allow-writes` against the sandbox. Good probes are a
+table row longer than the header, an edit whose `old_text` is only the part
+being changed, the same without `rev`, and an unknown key:
+
+```json
+{"tool": "insert_block", "write_probe": true, "purpose": "row longer than the header", "expect": "refused, naming the row",
+ "arguments": {"uuid": "<sandbox doc>", "type": "table", "text": "| a | b |\n| --- | --- |\n| 1 | 2 | 3 |"},
+ "read_back": {"tool": "get_doc", "arguments": {"uuid": "<sandbox doc>"}}}
+```
+
+Each probe keeps the server's answer and what the read-back shows was
+stored: the evidence for E11 (does the error name the real cause) and E12
+(was something else stored without a word).
 
 ## 5. Judge
 
@@ -153,7 +191,15 @@ workflow), one sub-agent per family when you can start them: each reads the
 help and, when the server's repository is at hand, the implementation, and
 reports the copies that drift, editing that is not taught, writes that should
 fail, and internals that leak. Read each trial's transcript in `DIR/trials/` and
-record whether it succeeded under `trials`.
+record whether it succeeded under `trials`; a trial with `verify` is graded
+by its check unless you record otherwise.
+
+Some audits match on names or patterns (S01, G08); the report tags them
+heuristic, so check what the tool does before citing one. When a finding
+comes from the server's SDK rather than its own code (the JSON Schema draft
+it emits, the wording of its input validation errors, a protocol error
+code), list it under `sdk` in `findings.json` with the reason: the report
+tags it and ranks its suggestion lower, because the fix is an SDK upgrade.
 
 ## 6. Render
 
@@ -166,11 +212,12 @@ suggestions by their effect (re-scoring the categories as if each one were
 done, those that lift a critical cap first), and writes `DIR/report.html`
 and `DIR/report.json`. Fix any warning it prints about suggestions without
 `targets` or `check`, or scores without evidence. Add `--baseline OLD_DIR/report.json` to show changes since
-an earlier run.
+an earlier run or against the baseline of a branch comparison.
 
 ## 7. Reply
 
 Give the five scores, the top three suggestions and the path to
 `report.html`. Say whether this was a full review, a partial one or automatic
-checks only, name any provisional category, and say whether trials ran.
+checks only, name any provisional category, and say whether trials ran and
+how many times each.
 Scores are for the team's own use: do not publish them.

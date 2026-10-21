@@ -103,7 +103,7 @@ def scrub_text(text: str, found: list | None = None, where: str = "") -> str:
 
 
 # The probe's own fields, written by us rather than the server; "token_estimator" looks like a secret by name.
-OWN_KEYS = {"probe_version", "token_estimator", "collected_at"}
+OWN_KEYS = {"probe_version", "token_estimator", "collected_at", "source"}
 
 
 def scrub(obj, found: list | None = None, path: str = ""):
@@ -492,6 +492,22 @@ def minimal_invalid_args(tool: dict):
     return None, None
 
 
+def source_revision(cwd: str | None, given: str | None) -> dict | None:
+    """The commit the server was built from, so a run can be reproduced: --commit, or the git checkout in --cwd."""
+    if given:
+        return {"commit": given, "from": "--commit"}
+    if not cwd:
+        return None
+    try:
+        head = subprocess.run(["git", "-C", cwd, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
+        dirty = subprocess.run(["git", "-C", cwd, "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if head.returncode != 0:
+        return None
+    return {"commit": head.stdout.strip(), "dirty": bool(dirty.stdout.strip()), "from": "git"}
+
+
 def collect(args) -> int:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -503,6 +519,7 @@ def collect(args) -> int:
         "target": {"transport": "http" if args.url else "stdio",
                    "command": args.command, "url": args.url, "cwd": args.cwd,
                    "label": args.label},
+        "source": source_revision(args.cwd, args.commit),
         "probes": {},
     }
     probes = record["probes"]
@@ -629,6 +646,13 @@ def collect(args) -> int:
 
         msg, ms = conn.request("resources/read", {"uri": "mcp-insights://no-such-resource"})
         probes["resource_not_found"] = {"response": error_of(msg) or {"kind": "success"}}
+        # A URI no template matches is answered by most SDKs before the server's code runs; one that fits a
+        # template but names nothing reaches the server's own handler.
+        templates = [t.get("uriTemplate") for t in record.get("resourceTemplates") or [] if t.get("uriTemplate")]
+        if templates:
+            uri = re.sub(r"\{[^}]*\}", "mcp-insights-no-such-item", templates[0])
+            msg, ms = conn.request("resources/read", {"uri": uri})
+            probes["resource_not_found_template"] = {"uri": uri, "response": error_of(msg) or {"kind": "success"}}
 
         if isinstance(conn, StdioConnection):
             conn.send_raw('{"jsonrpc": "2.0", "id": "mcp-insights-parse", "method": ')
@@ -756,7 +780,7 @@ def call(args) -> int:
     tools = {t.get("name"): t for t in record.get("tools") or []}
     transcript = Transcript(out / "transcript-calls.jsonl")
     conn = open_connection(args, transcript)
-    results = []
+    results, write_probes = [], []
     try:
         init, _ = initialize(conn, timeout=args.start_timeout)
         if init is None or "error" in init:
@@ -769,6 +793,12 @@ def call(args) -> int:
             tool = tools.get(name)
             if tool is None:
                 results.append({"tool": name, "skipped": "not in the tool list"})
+                continue
+            if c.get("write_probe"):
+                if not args.allow_writes:
+                    results.append({"tool": name, "skipped": "write probe; run with --allow-writes against a sandbox"})
+                else:
+                    write_probes.append(write_probe(conn, c, tools))
                 continue
             if (tool.get("annotations") or {}).get("readOnlyHint") is not True and not c.get("confirmed_read_only"):
                 results.append({"tool": name, "skipped": "not marked read-only; set confirmed_read_only after checking"})
@@ -811,10 +841,38 @@ def call(args) -> int:
     finally:
         conn.close()
     record["calls"] = results
+    if write_probes:
+        record["write_probes"] = write_probes
     write_record(out, record)
+    if write_probes:
+        silent = sum(1 for w in write_probes if w.get("accepted") and not w.get("diagnostic"))
+        print(f"{len(write_probes)} write probes; {silent} accepted without a word: read them back and judge E12")
     done = sum(1 for r in results if "bytes" in r)
     print(f"{done} of {len(results)} calls answered; largest {max([r.get('bytes', 0) for r in results] or [0]) / 1024:.1f} KB")
     return 0
+
+
+def write_probe(conn, c: dict, tools: dict) -> dict:
+    """A deliberately malformed write to a sandbox, then the read that shows what was stored (E12)."""
+    msg, ms = conn.request("tools/call", {"name": c["tool"], "arguments": c.get("arguments") or {}}, timeout=60)
+    res = (msg or {}).get("result") or {}
+    text = content_text(res) if res else ""
+    entry = {"tool": c["tool"], "arguments": c.get("arguments") or {}, "purpose": c.get("purpose"), "expect": c.get("expect"),
+             "ms": ms, "accepted": bool(msg) and "error" not in msg and not res.get("isError"),
+             "response": error_of(msg) if msg and "error" in msg else {"isError": bool(res.get("isError")), "text": text[:2000]}}
+    # A write that went through but says what it changed or dropped is not silent.
+    entry["diagnostic"] = bool(re.search(r"(?i)warn|ignored|dropped|truncat|skipped|invalid|extra|unknown", text)) if entry["accepted"] else None
+    back = c.get("read_back")
+    if back:
+        rb = tools.get(back.get("tool")) or {}
+        if (rb.get("annotations") or {}).get("readOnlyHint") is not True and not back.get("confirmed_read_only"):
+            entry["read_back"] = {"skipped": "read_back tool is not marked read-only"}
+        else:
+            m2, _ = conn.request("tools/call", {"name": back["tool"], "arguments": back.get("arguments") or {}}, timeout=60)
+            r2 = (m2 or {}).get("result") or {}
+            entry["read_back"] = {"tool": back["tool"], "arguments": back.get("arguments") or {},
+                                  "text": content_text(r2)[:4000] if r2 else "", "error": error_of(m2) if m2 and "error" in m2 else None}
+    return entry
 
 
 def validate(value, schema, path="$"):
@@ -927,8 +985,11 @@ def main(argv=None) -> int:
         p.add_argument("--start-timeout", type=float, default=60, help="seconds to wait for initialize")
         if name == "collect":
             p.add_argument("--label", help="a short name for the server in the report")
+            p.add_argument("--commit", help="the commit the server was built from, when --cwd is not its git checkout")
         else:
             p.add_argument("--calls", required=True, help="calls.json written by the agent")
+            p.add_argument("--allow-writes", action="store_true",
+                           help="run calls marked write_probe (sandbox only): malformed writes and the read that shows what was stored")
     p = sub.add_parser("import")
     p.add_argument("--tools", required=True, help="tool definitions as the client shows them (JSON array or JSON lines)")
     p.add_argument("--label", required=True, help="a short name for the server in the report")

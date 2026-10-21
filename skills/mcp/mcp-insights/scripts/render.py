@@ -278,9 +278,12 @@ LEFTOVERS = (r"^\s*(Args|Arguments|Parameters|Returns|Raises|Yields|Example usag
              r"\b(TODO|FIXME|XXX)\b|\bOptional\[|\bList\[|->\s*(dict|str|list|None)\b|:param \w+:|@param\b|:returns?:")
 INSTRUCTIONS_SHOWN = 2048  # bytes of instructions Claude Code shows (Uberblick's help review, 2026-10-21)
 
-READ_VERBS = r"^(get|list|search|read|find|fetch|query|describe|show|export|lookup|view|count|status|sync_status|backlinks)"
-WRITE_VERBS = r"(create|update|delete|remove|set|edit|insert|write|archive|restore|pin|unpin|move|send|post|add|annotate|link|upload|merge|close|toggle|trigger|run|execute)"
-DESTRUCTIVE_VERBS = r"(delete|remove|drop|purge|destroy|reset|wipe|archive)"
+READ_VERBS = r"^(get|list|search|read|find|fetch|query|describe|show|export|lookup|view|count|status|sync status|backlinks)\b"
+WRITE_VERBS = r"\b(create|update|delete|remove|set|edit|insert|write|archive|restore|pin|unpin|move|send|post|add|annotate|link|upload|merge|close|toggle|trigger|run|execute)\b"
+DESTRUCTIVE_VERBS = r"\b(delete|remove|drop|purge|destroy|reset|wipe|archive)\b"
+# Audits that match on names or patterns rather than behaviour: a hit is a lead to verify, not a proven defect.
+HEURISTIC = {"S01": "Matched on tool names, not on what the tools do: a hit is a lead to check, not a verified defect.",
+             "G08": "Matched on wording patterns: check each hit in context."}
 INJECTION = [
     r"ignore (all |any )?(previous|prior|above) (instructions|messages)",
     r"do not (tell|inform|mention|show) (this )?(to )?the user",
@@ -445,6 +448,19 @@ def fmt_budget(code) -> str:
     return f"good ≤ {fmt_value(good, unit)}, poor ≥ {fmt_value(poor, unit)}"
 
 
+EFFECTIVE_NOTE = ("Effective size counts the text quoted as waste twice, so a dense text can be longer than a "
+                  "wasteful one and still score better.")
+
+
+def budget_bytes(code, bpt) -> str:
+    """Token budgets in bytes, for maintainers whose own limits are in KB."""
+    good, poor, unit = BUDGETS[code]
+    if unit != "tok" or not bpt:
+        return ""
+    return (f"In this server's text that is about {fmt_bytes(good * bpt)} and {fmt_bytes(poor * bpt)} "
+            f"({bpt:.1f} bytes per token; JSON and indented text fit fewer bytes in a token than prose).")
+
+
 def sentences(text: str):
     for s in re.split(r"(?<=[.!?])\s+|\n+", text or ""):
         s = s.strip()
@@ -590,6 +606,8 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     m["tool_list_waste_bytes"] = sum(p["waste_bytes"] for p in per_tool)
     m["tool_list_model_tokens"] = sum(p["model_tokens"] for p in per_tool) if tools else 0
     m["tool_list_waste_tokens"] = sum(p["waste_tokens"] for p in per_tool)
+    m["bytes_per_token"] = (m["tool_list_model_bytes"] / sum(p["model_tokens"] for p in per_tool)
+                            if tools and sum(p["model_tokens"] for p in per_tool) else 4.0)
     m["tool_list_wire_tokens"] = estimate_tokens(json.dumps(tools, ensure_ascii=False, separators=(",", ":")))
     m["waste_judged"] = judged_waste
     m["waste_problems"] = waste_problems
@@ -781,14 +799,19 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             f"{sum(x['score'] for x in out_calls):.0f} of {len(out_calls)} calls", items=out_calls)
     else:
         res("P13", 0, na=True, untested=any(t.get("outputSchema") for t in tools), note="no calls to tools with an output schema")
-    rnf = (probes.get("resource_not_found") or {}).get("response")
+    # Prefer the probe that reached the server's own handler; the other is usually the SDK's answer.
+    own = probes.get("resource_not_found_template") or {}
+    rnf = own.get("response") or (probes.get("resource_not_found") or {}).get("response")
     if "resources" not in caps or rnf is None:
         res("P15", 0, na=True, untested="resources" in caps, note="no resources capability" if "resources" not in caps else "not probed")
     else:
         want = -32602 if lifecycle == "modern" else -32002
         code = rnf.get("code")
+        where = (f"Asked for {own['uri']}, which fits the server's template, so its own handler answered. " if own else
+                 "Asked for a URI no template matches; an SDK often answers that before the server's code runs. ")
         res("P15", 1 if code == want or (lifecycle == "dual" and code in (-32002, -32602)) else 0.5 if rnf.get("kind") in ("protocol", "tool") else 0,
-            f"code {code}" if code is not None else rnf.get("kind", "?"), note=f"Expected {want} for this lifecycle. {rnf.get('message', '')[:200]}")
+            f"code {code}" if code is not None else rnf.get("kind", "?"),
+            note=f"{where}Expected {want} for this lifecycle. {rnf.get('message', '')[:200]}")
     if lifecycle in ("modern", "dual"):
         hints = [disc.get("cache") or {}] + [(probes.get(k) or {}).get("cache") or {} for k in ("tools_list", "resources/list", "prompts/list")]
         hints = [h for h in hints if h]
@@ -824,7 +847,8 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             if mt:
                 a = max(0, mt.start() - 40)
                 leftovers.append({"item": t.get("name"), "score": 0, "evidence": (t.get("description") or "")[a:mt.end() + 60].replace("\n", " ")})
-        res("G08", 1 - len(leftovers) / len(tools), f"{len(leftovers)} of {len(tools)} tools" if leftovers else "none", items=leftovers[:12])
+        res("G08", 1 - len(leftovers) / len(tools), f"{len(leftovers)} of {len(tools)} tools" if leftovers else "none", items=leftovers[:12],
+            note=HEURISTIC["G08"] if leftovers else "")
     else:
         res("G08", 0, na=True)
     if instr.strip():
@@ -922,10 +946,11 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
         shown = fmt_value(value, unit)
         if eff != value:
             shown += f" ({fmt_value(eff, unit)} effective)"
-        note = fmt_budget(code)
+        note = fmt_budget(code) + "."
+        if budget_bytes(code, m.get("bytes_per_token")):
+            note += " " + budget_bytes(code, m.get("bytes_per_token"))
         if code in ("C01", "C02", "C03", "C04", "C05", "C06"):
-            note += (". Effective size counts quoted waste twice, so dense text can be longer than wasteful text."
-                     if judged_waste else ". Waste not judged: raw size only.")
+            note += " " + (EFFECTIVE_NOTE if judged_waste else "Waste not judged: raw size only.")
         res(code, lognormal_score(eff, good, poor), shown + (f" \u00b7 {where}" if where else ""), note=note)
         r[code]["value"] = value
         r[code]["effective"] = eff
@@ -1088,7 +1113,9 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     if tools:
         checks = []
         for t in tools:
-            name = (t.get("name") or "").lower()
+            # Whole words only: "backlinks" is not a "link" tool.
+            words = re.split(r"[_\-\s.]+", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", t.get("name") or "").lower())
+            name = " ".join(words)
             ann = t.get("annotations") or {}
             ro = ann.get("readOnlyHint")
             if re.search(DESTRUCTIVE_VERBS, name):
@@ -1104,7 +1131,7 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
         if checks:
             res("S01", sum(c["score"] for c in checks) / len(checks),
                 f"{sum(1 for c in checks if c['score'] == 1)} of {len(checks)} consistent",
-                items=[c for c in checks if c["score"] < 1])
+                items=[c for c in checks if c["score"] < 1], note=HEURISTIC["S01"])
         else:
             res("S01", 0, na=True, note="no tool name matched the heuristics")
     else:
@@ -1347,6 +1374,7 @@ def recommendations(results: dict, findings: dict, cats: dict) -> list[dict]:
                      "evidence": "; ".join(f"{it.get('item')}: {it.get('evidence', '')}" for it in failing[:3]),
                      "effects": fix_effects(results, cats, targets), "source": "catalog"})
     for rec in recs:
+        rec["sdk"] = bool(rec["audits"]) and all((results.get(a) or {}).get("sdk") for a in rec["audits"])
         touched = capped & set(rec["audits"])
         rec["lifts_cap"] = bool(touched) and not touched & caps_after(results, rec["targets_audits"], per_turn_saving(rec.get("saves")))
     # A cap held by two failing items lifts only when both are fixed: say so instead of showing no effect.
@@ -1364,7 +1392,10 @@ def recommendations(results: dict, findings: dict, cats: dict) -> list[dict]:
         joint_gain = sum((rec.get("joint_effects") or {}).values()) / (len(rec.get("lifts_cap_with") or []) + 1)
         # A fix that lifts a critical cap goes first; the rest rank by points per effort.
         rec["rank_value"] = ((1000 if rec["lifts_cap"] or rec.get("lifts_cap_with") else 0)
-                             + max(rec["gain"], joint_gain) / (EFFORT.get(rec["effort"], 2) if repo else 1))
+                             + max(rec["gain"], joint_gain) / (EFFORT.get(rec["effort"], 2) if repo else 1)
+                             - (100 if rec["sdk"] else 0))
+        if rec["sdk"]:
+            rec["why"] = (rec.get("why") or "") + " This comes from the SDK, so it is fixed by upgrading it rather than in the server's code."
         if not repo:
             rec.pop("effort", None)
         effects = ", ".join(f"+{v:g} {cat_names.get(k, k)}" for k, v in sorted(rec["effects"].items(), key=lambda kv: -kv[1]))
@@ -1542,7 +1573,7 @@ def render_html(report: dict) -> str:
                f'<span class="seg avg" style="width:{p_at - g_at:.1f}%"></span><span class="seg poor" style="width:{100 - p_at:.1f}%"></span>'
                + (f'<span class="pin" style="left:{pos:.1f}%"></span>' if value is not None else "") + "</div>")
         vitals.append(f'<div class="vital {b}"><div class="vital-label">{shape(b)}<span class="grow">{esc(label)}</span>'
-                      f'{info_html(label, info, fmt_budget(code))}</div>'
+                      f'{info_html(label, info, " ".join(filter(None, [fmt_budget(code) + ".", budget_bytes(code, m.get("bytes_per_token")), EFFECTIVE_NOTE if res.get("effective") not in (None, value) else ""])))}</div>'
                       f'<div class="vital-value">{"none sent" if code == "C02" and m.get("instructions_bytes") is None else "not reviewed" if code == "C10" and value is None else value_html(value, unit)}</div>'
                       f'<div class="vital-where">{esc(where)}</div>{bar}'
                       f'<div class="vital-budget">{esc(fmt_budget(code))}</div></div>')
@@ -1619,13 +1650,14 @@ def render_html(report: dict) -> str:
                          if ann.get(k)) or ('<span class="sub">not visible</span>' if meta.get("via") else "")
         fd = f'{p["fields_described"]}/{p["fields"]}' if p["fields"] else "–"
         grade = tool_grade(p, results)
+        ost = f'{p["output_schema_tokens"]:,}' if p["output_schema_tokens"] else "–"
         inventory_rows.append(
             f'<tr><td><code>{esc(p["name"])}</code>' + (f'<div class="sub">{esc(p["title"])}</div>' if p["title"] else "") + "</td>"
             f'<td class="grade g-{grade}" data-v="{"ABCDF–".index(grade)}">{grade}</td>'
             f'<td data-v="{p["description_chars"]}">{p["description_chars"]:,}</td>'
             f'<td data-v="{p["model_tokens"] - p["description_tokens"]}">{p["model_tokens"] - p["description_tokens"]:,}</td>'
             f'<td data-v="{p["model_tokens"]}">{p["model_tokens"]:,}</td>'
-            f'<td data-v="{p["output_schema_tokens"]}">{f"{p[chr(111) + "utput_schema_tokens"]:,}" if p["output_schema_tokens"] else "–"}</td>'
+            f'<td data-v="{p["output_schema_tokens"]}">{ost}</td>'
             f'<td data-v="{p["fields_described"] / p["fields"] if p["fields"] else 1}">{fd}</td><td>{flags}</td></tr>')
 
     notes = report.get("notes") or {}
@@ -1647,7 +1679,7 @@ def render_html(report: dict) -> str:
     if meta.get("trial_count"):
         badges.append(f'{meta["trial_count"]} agent trials')
     if meta.get("calls"):
-        badges.append(f'{meta["calls"]} read calls')
+        badges.append(f'{meta["calls"]} read call{"" if meta["calls"] == 1 else "s"}')
     if meta.get("repo"):
         badges.append("repo")
     template = TEMPLATE.read_text(encoding="utf-8")
@@ -1656,7 +1688,8 @@ def render_html(report: dict) -> str:
         "SERVER_TITLE": esc(meta["server_title"]),
         "SERVER_META": esc(" · ".join(dict.fromkeys(x for x in (
             meta.get("server_name"), meta.get("server_version"), meta.get("protocol") and f"protocol {meta['protocol']}",
-            meta.get("target"), meta.get("via") and f"seen through {meta['via']}") if x))),
+            meta.get("target"), meta.get("commit") and f"commit {meta['commit']}",
+            meta.get("via") and f"seen through {meta['via']}") if x))),
         "BADGES": "".join(f'<span class="badge">{esc(b)}</span>' for b in badges),
         "DATE": esc(pretty_date(meta["collected_at"])),
         "GAUGES": "".join(gauges),
@@ -1664,6 +1697,8 @@ def render_html(report: dict) -> str:
         "TRIALS": trials_html(report.get("trials"), results),
         "FIXES": "".join(fixes) or '<p class="empty">Nothing to suggest above the noise.</p>',
         "FIXES_LEAD": esc("The five changes with the largest expected effect on the scores; those that lift a cap come first. "
+                          "Each gain is the category re-scored as if the audits the suggestion names passed, or, for a size fix "
+                          "with a stated saving, as if the text were that much smaller: what a complete fix would earn, not a forecast. "
                           + ("Based on the source checkout, with effort estimates." if meta.get("repo") else
                              "Made from the outside, without the source: they describe what the agent saw and what it should see instead, "
                              "so check them against the code before acting.")),
@@ -1717,6 +1752,10 @@ def audit_group(title, rows, by_code, open_=False, folded=False, hint="") -> str
         crit = '<span class="tag crit">critical</span>' if code in CRITICAL else ""
         if code in DATA_DEPENDENT:
             crit += '<span class="tag">depends on data</span>'
+        if code in HEURISTIC:
+            crit += '<span class="tag">heuristic</span>'
+        if res.get("sdk"):
+            crit += '<span class="tag">SDK default</span>'
         spec = f' <a href="{SPEC}{row[8]}" target="_blank" rel="noopener">Spec</a>' if row[8] else ""
         detail = [f'<p class="why">{esc(row[5])}{spec}</p>']
         if res.get("note"):
@@ -1768,6 +1807,9 @@ def trial_outcome(run: dict, verdict: dict) -> str | None:
     """done, partial, drafted or failed; blocked (by the environment) and declined (rightly) do not count."""
     if not isinstance(verdict, dict):
         return None
+    if not verdict and run.get("verify"):
+        # A trial with a parser check is graded by it unless the reviewer judged otherwise.
+        return "done" if run["verify"].get("ok") else "failed"
     if verdict.get("outcome") in OUTCOMES:
         return verdict["outcome"]
     s = verdict.get("success")
@@ -1793,6 +1835,12 @@ def help_size(t: dict) -> str:
 def median(xs):
     xs = sorted(xs)
     return None if not xs else xs[len(xs) // 2] if len(xs) % 2 else (xs[len(xs) // 2 - 1] + xs[len(xs) // 2]) / 2
+
+
+def short_command(cmd: str) -> str:
+    """A check command as the reader needs it: without the cd into the reviewer's scratch directory or its paths."""
+    cmd = re.sub(r"^cd \S+ && ", "", cmd.strip())
+    return re.sub(r"(?<![\w.])/(?:[^\s/]+/)+([^\s/]+)", r"\1", cmd)
 
 
 def trials_html(trials: dict | None, results: dict) -> str:
@@ -1826,7 +1874,7 @@ def trials_html(trials: dict | None, results: dict) -> str:
                  f'<div class="vital-value plain">${cost:.2f}</div><div class="vital-where">{len(runs)} trials</div></div>')
     groups: dict = {}
     for r in trials.get("runs") or []:
-        groups.setdefault(r["id"].split("@")[0], []).append(r)
+        groups.setdefault((r.get("base_id") or r["id"]).split("@")[0].split("#")[0], []).append(r)
     cards = []
     for gid, rs in groups.items():
         rows = []
@@ -1862,23 +1910,46 @@ def trials_html(trials: dict | None, results: dict) -> str:
             for rule in r.get("rules") or []:
                 if rule.get("applies"):
                     facts.append(("\u2713 " if rule["followed"] else "\u2717 ") + rule["label"])
+            if r.get("verify"):
+                said = (r["verify"].get("output") or "").strip().splitlines()
+                said = said[0] if said else ""
+                said = said[:160] + "\u2026" if len(said) > 160 else said
+                facts.append(("\u2713 check passed" if r["verify"].get("ok") else "\u2717 check failed")
+                             + (f": {said}" if said and not r["verify"].get("ok") else ""))
             if r.get("errors"):
                 facts.append(f'{r["errors"]} errors, {r.get("recovered", 0)} recovered')
             if r.get("context_peak"):
                 facts.append(f'context {fmt_tokens(r.get("context_start"))} \u2192 {fmt_tokens(r["context_peak"])}')
             facts.append(f'{fmt_tokens(r.get("tokens") or 0)} billed, ${r.get("cost_usd") or 0:.3f}')
-            model = str(r.get("model") or "").replace("claude-", "")
+            model = str(r.get("model") or "").replace("claude-", "") + (f' #{r["attempt"]}' if "#" in r["id"] else "")
             facts_html = " \u00b7 ".join(esc(f) for f in facts)
             steps_html = "".join(steps) or '<li class="step">no calls</li>'
             rows.append(f'<div class="trial-run"><span class="pill effort">{esc(model)}</span>'
                         f'<ol class="steps">{steps_html}</ol><p class="trial-facts">{facts_html}</p>{verdict}'
                         f'<details class="fix-detail"><summary>Final answer</summary><pre>{esc(r.get("answer", ""))}</pre></details></div>')
         first = rs[0]
+        # With repeats, the rate per model is the finding; one run alone shows a behaviour.
+        tally = {}
+        for r in rs:
+            if r.get("outcome") and r["outcome"] not in UNCOUNTED_OUTCOMES and not r.get("invalid"):
+                m_ = str(r.get("model") or "?").replace("claude-", "")
+                done_, n_ = tally.get(m_, (0, 0))
+                tally[m_] = (done_ + (r["outcome"] == "done"), n_ + 1)
+        rate = " \u00b7 ".join(f"{m_}: {d} of {n} done" for m_, (d, n) in sorted(tally.items()) if n > 1)
         cards.append(f'<article class="trial"><header><span class="trial-id">{esc(gid)}</span>'
                      f'<h3>{esc(first.get("question") or first.get("task"))}</h3></header>'
-                     f'<p class="trial-task">Task: {esc(first.get("task"))}</p>{"".join(rows)}</article>')
+                     f'<p class="trial-task">Task: {esc(first.get("task"))}</p>'
+                     + (f'<p class="trial-task"><b>{esc(rate)}</b></p>' if rate else "")
+                     + (f'<p class="trial-task">Checked with: <code>{esc(short_command(first["verify"]["command"]))}</code></p>' if first.get("verify") else "")
+                     + f'{"".join(rows)}</article>')
+    repeated = {gid for gid, rs in groups.items() if any("#" in r["id"] for r in rs)}
+    once = ("Each trial ran once per model, so these show what an agent can do, not how often it succeeds. " if not repeated else
+            "" if len(repeated) == len(groups) else
+            "Trials with a \u201ck of n\u201d line ran several times per model; the others ran once, so they show what an agent can do, "
+            "not how often it succeeds. ")
     lead = (f'What a fresh agent did with only this server loaded: one trial per question the text alone cannot answer. '
-            f'Claude Code in print mode ({esc(", ".join(models))}); writes {esc(trials.get("writes", "blocked"))}.')
+            f'Claude Code in print mode ({esc(", ".join(models))}); writes {esc(trials.get("writes", "blocked"))}. '
+            + esc(once) + "The tasks were the reviewer\u2019s choice, so they say nothing about tasks that were not tried.")
     legend = ('<div class="tm-legend steps-legend"><span><i class="k help"></i>help read</span><span><i class="k read"></i>other call</span>'
               '<span><i class="k write"></i>the task\u2019s main call</span><span><i class="k denied"></i>blocked write</span>'
               '<span><i class="k err"></i>error</span></div>')
@@ -1942,6 +2013,11 @@ def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) ->
         findings = json.loads(fp.read_text(encoding="utf-8"))
     metrics, results = compute(probe, findings)
     warnings = merge_judged(results, findings) if (probe.get("initialize") or {}).get("ok") else []
+    # Behaviour the server's SDK produces, not its own code: still what the agent sees, so it is scored,
+    # but labelled, and its suggestion goes last.
+    for code, why in ((findings or {}).get("sdk") or {}).items():
+        if code in results:
+            results[code] = {**results[code], "sdk": True, "note": " ".join(x for x in (results[code].get("note"), f"From the SDK: {why}") if x)}
     cats = score_categories(results)
     recs = recommendations(results, findings, cats)
     init = probe.get("initialize") or {}
@@ -1952,6 +2028,11 @@ def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) ->
         old = json.loads(baseline_path.read_text(encoding="utf-8"))
         baseline = {k: v.get("score") for k, v in (old.get("categories") or {}).items()}
     warnings += metrics.get("waste_problems") or []
+    # A released version names the code; a placeholder such as 0.0.0 does not.
+    unpinned = not re.match(r"\d+\.\d+", str(info.get("version") or "")) or re.search(r"^0\.0\.0|dev|local|snapshot", str(info.get("version")), re.I)
+    if not probe.get("source") and target.get("transport") != "client" and unpinned:
+        warnings.append("The run does not pin the server's code (version "
+                        f"{info.get('version') or 'unknown'}): pass --cwd with its git checkout or --commit to collect.")
     for rec in (findings or {}).get("recommendations") or []:
         missing = [f for f in ("targets", "check") if not rec.get(f)]
         if not rec.get("audits"):
@@ -1979,6 +2060,8 @@ def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) ->
             "server_name": info.get("name"), "server_version": info.get("version"),
             "protocol": init.get("protocolVersion"), "transport": target.get("transport"),
             "via": target.get("via") if target.get("transport") == "client" else None,
+            "commit": ((probe.get("source") or {}).get("commit") or "")[:12] + ("+dirty" if (probe.get("source") or {}).get("dirty") else "")
+                      if (probe.get("source") or {}).get("commit") else None,
             "target": target.get("label") or target.get("url") or "",
             "collected_at": probe.get("collected_at"), "probe_version": probe.get("probe_version"),
             "render_version": RENDER_VERSION, "catalog_version": CATALOG_VERSION,
