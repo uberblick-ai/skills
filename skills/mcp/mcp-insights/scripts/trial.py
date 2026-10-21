@@ -25,6 +25,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -63,7 +64,8 @@ def summarize(lines: list[dict], server: str, trial: dict, help_spec: dict) -> d
     denied = {d.get("tool_use_id") for d in final.get("permission_denials") or []}
     events, by_id, text = [], {}, []
     for m in lines:
-        content = (m.get("message") or {}).get("content")
+        msg = m.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
         if not isinstance(content, list):
             continue
         for c in content:
@@ -126,12 +128,54 @@ def summarize(lines: list[dict], server: str, trial: dict, help_spec: dict) -> d
         "drafts": [e for e in events if e["denied"]],
         "tokens": sum(int(usage.get(k) or 0) for k in ("input_tokens", "output_tokens", "cache_read_input_tokens",
                                                          "cache_creation_input_tokens")),
-        "cost_usd": final.get("total_cost_usd"), "turns": final.get("num_turns"), "ms": final.get("duration_ms"),
+        "cost_usd": final.get("total_cost_usd") or sum(float(v.get("costUSD") or 0) for v in (final.get("modelUsage") or {}).values()
+                                                       if isinstance(v, dict)) or None,
+        "turns": final.get("num_turns"), "ms": final.get("duration_ms"),
         "status": final.get("subtype") or "no result",
         "answer": (final.get("result") or "\n".join(text))[-3000:],
         "mcp_status": [s.get("status") for s in init.get("mcp_servers") or []],
         "client": f"claude-code {init.get('claude_code_version', '')}".strip(),
     }
+
+
+def safe_summary(lines, server, trial, help_spec) -> dict:
+    """One odd transcript must not lose the other trials' results."""
+    try:
+        return summarize(lines, server, trial, help_spec)
+    except Exception as exc:  # noqa: BLE001
+        return {"id": trial["id"], "question": trial.get("question", ""), "task": trial["task"], "events": [],
+                "calls": 0, "help_reads": 0, "help_bytes": 0, "help_before_use": None, "rules": [], "errors": 0,
+                "recovered": 0, "repeats": 0, "drafts": [], "tokens": 0, "cost_usd": None, "answer": "",
+                "mcp_status": [], "status": f"could not read the transcript: {exc!r}", "invalid": True}
+
+
+def resummarize(args) -> int:
+    """Rebuild the trial summaries from transcripts already in DIR/trials/, without running anything."""
+    out = Path(args.out)
+    record = json.loads((out / "probe.json").read_text(encoding="utf-8"))
+    plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
+    runs = []
+    for trial in plan.get("trials") or []:
+        path = out / "trials" / f"{trial['id']}.jsonl"
+        if not path.exists():
+            continue
+        lines = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(msg, dict):
+                lines.append(msg)
+        summary = safe_summary(lines, args.server, trial, plan.get("help") or {})
+        if summary.get("mcp_status") and summary["mcp_status"] != ["connected"]:
+            summary["invalid"] = True
+        runs.append(summary)
+    old = (record.get("trials") or {})
+    record["trials"] = {"server": args.server, "writes": old.get("writes", "blocked"), "runs": sorted(runs, key=lambda r: r["id"])}
+    probe.write_record(out, record)
+    print(f"{len(runs)} trial transcripts summarized", file=sys.stderr)
+    return 0
 
 
 def run(args) -> int:
@@ -152,10 +196,12 @@ def run(args) -> int:
         allowed = [f"mcp__{server}"] + CLIENT_TOOLS
     help_spec = plan.get("help") or {}
     env = {k: v for k, v in os.environ.items() if k not in SESSION_ENV}
+    # The user's own CLAUDE.md, AGENTS.md and memories must not steer the trial agent.
+    env.update({"CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"})
     tdir = out / "trials"
     tdir.mkdir(parents=True, exist_ok=True)
-    work = tdir / "work"
-    work.mkdir(exist_ok=True)
+    # Outside the home tree, so no parent directory contributes instruction files.
+    work = Path(tempfile.mkdtemp(prefix="mcp-trial-", dir="/tmp" if os.path.isdir("/tmp") else None))
     runs = [r for r in (record.get("trials") or {}).get("runs") or [] if args.only and r["id"] not in args.only]
     for trial in plan.get("trials") or []:
         if args.only and trial["id"] not in args.only:
@@ -188,17 +234,20 @@ def run(args) -> int:
         with (tdir / f"{trial['id']}.jsonl").open("w", encoding="utf-8") as fh:
             for m in lines:
                 fh.write(json.dumps(probe.scrub(m), ensure_ascii=False) + "\n")
-        summary = summarize(lines, server, trial, help_spec)
+        summary = safe_summary(lines, server, trial, help_spec)
         summary["wall_ms"] = int((time.monotonic() - t0) * 1000)
         if summary["mcp_status"] != ["connected"]:
             summary["status"] = f"server did not connect ({', '.join(map(str, summary['mcp_status'])) or 'no init'})"
             summary["invalid"] = True
             print(f"{trial['id']}: {summary['status']}; not scored", file=sys.stderr)
         runs.append(summary)
+        record["trials"] = {"server": server, "writes": "allowed (sandbox)" if args.allow_writes else "blocked",
+                            "runs": sorted(runs, key=lambda r: r["id"])}
+        probe.write_record(out, record)
         hb = "-" if summary["help_before_use"] is None else "yes" if summary["help_before_use"] else "NO"
         print(f"{trial['id']}: {summary['calls']} calls, {summary['help_reads']} help reads "
               f"({summary['help_bytes'] / 1024:.0f} KB), help before use: {hb}, errors {summary['errors']}, "
-              f"${summary['cost_usd'] or 0:.2f}", file=sys.stderr)
+              f"${summary['cost_usd'] or 0:.3f}", file=sys.stderr)
     record["trials"] = {"server": server, "writes": "allowed (sandbox)" if args.allow_writes else "blocked",
                         "runs": sorted(runs, key=lambda r: r["id"])}
     probe.write_record(out, record)
@@ -220,9 +269,13 @@ def main(argv=None) -> int:
     p.add_argument("--max-budget", type=float, default=1.0, help="USD cap per trial (default 1.0)")
     p.add_argument("--timeout", type=int, default=600, help="seconds per trial (default 600)")
     p.add_argument("--claude", default="claude", help="Claude Code executable")
+    r = sub.add_parser("summarize", help="rebuild summaries from DIR/trials/*.jsonl without running")
+    r.add_argument("--server", required=True)
+    r.add_argument("--plan", required=True)
+    r.add_argument("--out", required=True)
     args = ap.parse_args(argv)
     try:
-        return run(args)
+        return run(args) if args.cmd == "run" else resummarize(args)
     except probe.ProbeError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

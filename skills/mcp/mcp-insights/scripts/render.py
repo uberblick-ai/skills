@@ -1425,7 +1425,7 @@ def trials_html(trials: dict | None, results: dict) -> str:
                     facts.append(("\u2713 " if rule["followed"] else "\u2717 ") + rule["label"])
             if r.get("errors"):
                 facts.append(f'{r["errors"]} errors, {r.get("recovered", 0)} recovered')
-            facts.append(f'{(r.get("tokens") or 0) / 1000:,.0f}k tokens, ${r.get("cost_usd") or 0:.2f}')
+            facts.append(f'{(r.get("tokens") or 0) / 1000:,.0f}k tokens, ${r.get("cost_usd") or 0:.3f}')
             model = str(r.get("model") or "").replace("claude-", "")
             facts_html = " \u00b7 ".join(esc(f) for f in facts)
             steps_html = "".join(steps) or '<li class="step">no calls</li>'
