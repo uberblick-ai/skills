@@ -56,6 +56,7 @@ def is_help(name: str, inp: dict, help_spec: dict) -> bool:
 
 
 def summarize(lines: list[dict], server: str, trial: dict, help_spec: dict) -> dict:
+    lines = [m for m in lines if isinstance(m, dict)]
     prefix = f"mcp__{server}__"
     init = next((m for m in lines if m.get("type") == "system" and m.get("subtype") == "init"), {})
     final = next((m for m in reversed(lines) if m.get("type") == "result"), {})
@@ -66,6 +67,8 @@ def summarize(lines: list[dict], server: str, trial: dict, help_spec: dict) -> d
         if not isinstance(content, list):
             continue
         for c in content:
+            if not isinstance(c, dict):
+                continue
             if m.get("type") == "assistant" and c.get("type") == "tool_use":
                 name = c.get("name", "")
                 short = name[len(prefix):] if name.startswith(prefix) else name
@@ -177,9 +180,11 @@ def run(args) -> int:
         lines = []
         for line in raw.splitlines():
             try:
-                lines.append(json.loads(line))
+                msg = json.loads(line)
             except ValueError:
                 continue
+            if isinstance(msg, dict):  # stream-json can carry bare strings too
+                lines.append(msg)
         with (tdir / f"{trial['id']}.jsonl").open("w", encoding="utf-8") as fh:
             for m in lines:
                 fh.write(json.dumps(probe.scrub(m), ensure_ascii=False) + "\n")
