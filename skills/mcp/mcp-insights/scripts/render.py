@@ -356,6 +356,13 @@ def walk_fields(schema, prefix=""):
             yield from walk_fields(d, f"{prefix}${dname}.")
 
 
+def described_in_text(path: str, text: str) -> bool:
+    """A field explained in the tool description ("page_guid: The GUID of ...", as in a docstring's Args) reaches the
+    model as well as a schema description does."""
+    name = re.escape(path.split(".")[-1].replace("[]", ""))
+    return bool(re.search(rf"(?m)^\s*[-*]?\s*`?{name}`?\s*(\([^)]*\))?\s*:\s*\S", text))
+
+
 def model_facing(tool: dict) -> dict:
     keep = {k: tool[k] for k in ("name", "title", "description", "inputSchema") if k in tool}
     return keep
@@ -566,7 +573,8 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             "output_schema_tokens": estimate_tokens(json.dumps(t["outputSchema"], ensure_ascii=False, separators=(",", ":")))
                                     if t.get("outputSchema") else 0,
             "fields": len(fields),
-            "fields_described": sum(1 for _, p in fields if (p.get("description") or "").strip()),
+            "fields_described": sum(1 for path, p in fields if (p.get("description") or "").strip()
+                                    or described_in_text(path, t.get("description") or "")),
             "max_field_desc": max([len(p.get("description") or "") for _, p in fields] or [0]),
             "annotations": t.get("annotations") or {},
             "waste_bytes": (waste.get(f"tool:{t.get('name')}") or {}).get("bytes", 0)
@@ -1645,16 +1653,14 @@ def pretty_date(stamp) -> str:
 
 
 def tool_grade(p, results) -> str:
-    """A to F per tool from its judged description item, field coverage and size; '–' when the description was not judged."""
-    parts = []
+    """A to F for what the model reads about one tool: its judged description and, if it takes input, its field
+    descriptions. Size and annotations have their own columns and audits; '–' when the description was not judged."""
     g10 = results.get("G10") or {}
-    mine = [it["score"] for it in g10.get("items") or [] if it.get("item") == p["name"]]
-    if not mine:
+    parts = [it["score"] for it in g10.get("items") or [] if it.get("item") == p["name"]]
+    if not parts:
         return "–"
-    parts += mine
-    parts.append(p["fields_described"] / p["fields"] if p["fields"] else 1)
-    parts.append(lognormal_score(p["description_chars"], 1000, 2000))
-    parts.append(1 if "readOnlyHint" in p["annotations"] else 0.5)
+    if p["fields"]:
+        parts.append(p["fields_described"] / p["fields"])
     s = sum(parts) / len(parts)
     return "A" if s >= 0.9 else "B" if s >= 0.8 else "C" if s >= 0.65 else "D" if s >= 0.5 else "F"
 
