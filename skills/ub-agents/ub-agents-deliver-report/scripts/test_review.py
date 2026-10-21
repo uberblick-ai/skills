@@ -29,7 +29,17 @@ def data(issues=(), lessons=(), actions=()):
             "findings": [], "retrospectives": {"errors": [], "in_window": []}}
 
 
+# What GitHub would answer for an issue or pull request, by owner/name#number.
+KNOWN = {"o/r#5": "https://github.com/o/r/pull/5", "o/r#3": "https://github.com/o/r/issues/3",
+         "o/x#9": "https://github.com/o/x/pull/9", "o/r#1": "https://github.com/o/r/pull/1"}
+
+
 class Tests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(review, "item_url", lambda repo, number: KNOWN.get(f"{repo}#{number}"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_evidence_keeps_what_happened_outside_the_loop(self):
         d = {"number": 5, "runs": [run("integrator", "2026-10-14T04:37:00Z", 13, "waste")], "prs": [{"number": 6}]}
         timeline = {"repos/o/n/issues/5/timeline": [], "repos/o/n/issues/6/timeline": [
@@ -148,6 +158,35 @@ class Tests(unittest.TestCase):
                           review.document(registry, day)["cards"][0]["changed"]), (0, False))
         backfilled = review.document(registry, day, first="2026-10-12")
         self.assertEqual((backfilled["changelog_new"], backfilled["cards"][0]["changed"]), (1, True))
+
+    def test_changelog_writes_each_reference_as_a_pill(self):
+        changes = {"o/r#5": {"day": "2026-10-20", "title": "Fix it", "url": "https://github.com/o/r/issues/5",
+                             "why": "It broke; #3 tracks the rest, x#9 and o/x#9 the docs, #404 and PR#5 stay text."},
+                   "abc1234": {"day": "2026-10-19", "title": "Commit", "why": "See #3.",
+                               "url": "https://github.com/o/r/commit/abc1234"}}
+        pr, commit = review.changelog(changes)
+        self.assertEqual(pr["inline"], [
+            {"text": "20 Oct: Fix it (", "marks": {}},
+            {"text": "r#5", "marks": {"link": "https://github.com/o/r/pull/5"}},
+            {"text": "). It broke; ", "marks": {}},
+            {"text": "#3", "marks": {"link": "https://github.com/o/r/issues/3"}},
+            {"text": " tracks the rest, ", "marks": {}},
+            {"text": "x#9", "marks": {"link": "https://github.com/o/x/pull/9"}},
+            {"text": " and ", "marks": {}},
+            {"text": "o/x#9", "marks": {"link": "https://github.com/o/x/pull/9"}},
+            {"text": " the docs, #404 and PR#5 stay text.", "marks": {}}],
+            "the title stays text and the reference is the link, so the web shows a pull request pill")
+        self.assertEqual(commit["inline"], [
+            {"text": "19 Oct: ", "marks": {}},
+            {"text": "Commit", "marks": {"link": "https://github.com/o/r/commit/abc1234"}},
+            {"text": " (abc1234). See ", "marks": {}},
+            {"text": "#3", "marks": {"link": "https://github.com/o/r/issues/3"}},
+            {"text": ".", "marks": {}}])
+
+    def test_changelog_keeps_the_stored_link_when_github_cannot_say(self):
+        changes = {"o/r#7": {"day": "2026-10-20", "title": "T", "why": "W.", "url": "https://github.com/o/r/issues/7"}}
+        self.assertEqual(review.changelog(changes)[0]["inline"][1],
+                         {"text": "r#7", "marks": {"link": "https://github.com/o/r/issues/7"}})
 
 
 if __name__ == "__main__":
