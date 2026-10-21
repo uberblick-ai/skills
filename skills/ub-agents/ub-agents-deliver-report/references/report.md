@@ -119,12 +119,14 @@ same gap recurring is worth fixing.
    denials, PRs merged with lines and files, issues closed and opened, the open
    queue split into to-prepare and prepared, and machines with loops and peak
    parallel runs.
-3. **What to change.** At most four cards, each one lesson: the lever
-   (clearer authority, better wording, fewer instructions, more autonomy), a
-   title, the change in one or two sentences quoting any line it would
-   change, where it lives, what it cost, the causes it targets and the items
-   that are its evidence. Never a new role, label, gate, review round or
-   checklist.
+3. **What to change.** At most four cards, each one lesson the day
+   proposed: the lever (clearer authority, better wording, fewer
+   instructions, more autonomy), a title, the change in one or two
+   sentences quoting any line it would change, where it lives, what it
+   cost, the causes it targets, the items that are its evidence, and, for a
+   lesson still `proposed`, a link to discuss it in Claude Code. Never a new
+   role, label, gate, review round or checklist. The document's Recommended
+   Actions rank lessons across 14 days instead.
 4. **Where extra runs went.** One card per finding, costliest first: the cost
    and class as the label, the concrete example, the cause id with its
    mechanism and state, and the items.
@@ -170,13 +172,20 @@ lesson without `addressed_by`, or more than five actions.
                      "posts": ["https://github.com/owner/name/discussions/1014#discussioncomment-1"]}]}
 ```
 
+Three words keep one meaning each. A **lesson** is a change someone could
+make, kept in the `lessons` registry; the **actions** are the lessons the
+document recommends now, up to five; a **change** is something that
+landed, kept in `changes` and listed in the Changelog.
+
 A lesson is `proposed` until an issue or PR addresses it: `tracked` while that
 is open, `applied` once it merged, `rejected` when a person declines it.
 `addressed_by` names it as `owner/name#number`, and `addressed_as` says
 whether it is a pull request that implements the lesson (`implemented`) or an
-issue that plans it (`planned`, the default). `actions` ranks up to five
-proposed lessons proposed or re-proposed in the last 14 days, most runs saved
-first; an older lesson drops off until a day proposes it again. A change is
+issue that plans it (`planned`, the default). `actions` lists up to five
+lessons still `proposed` that this day or one of the 13 before it proposed,
+most runs saved first; an older lesson drops off until a day proposes it
+again. Write a lesson's `cost` with dates ("5 runs on 11 October"), never
+"today", since it may stay an action for 14 days. A change is
 anything that landed on this day to fix a cause or apply a lesson; `ref` is
 `owner/name#number` or a commit, with `url` for a commit. `records` gives every
 change a `url`, derived from `ref` when the notes give none.
