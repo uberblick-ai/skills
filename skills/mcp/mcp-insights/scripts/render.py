@@ -154,6 +154,9 @@ CATALOG = [
     ("E04", "errors", 2, "auto", "Errors do not leak stack traces",
      "Stack traces cost context and tell the agent nothing it can act on.",
      "Catch exceptions and return a short message with the fix.", ["errors"], "", False),
+    ("E05", "errors", 5, "auto", "Failed calls are flagged as errors",
+     "A result that says \"error\" or \"HTTP 404\" with isError false reads as success to the client, so the agent may report a failure as an answer.",
+     "Set isError: true on every failed call, with the cause and the fix in the text.", ["tools", "errors"], "/server/tools#error-handling", False),
     ("E10", "errors", 8, "judged", "Errors say how to recover",
      "An error that names the fix or the help topic turns a failed call into a corrected one.",
      "Add the recovery step to each error: the valid values, the field, or the tool or topic that helps.", ["errors"], "/server/tools#error-handling", False),
@@ -189,8 +192,8 @@ CATALOG = [
      "Total help size is a proxy for duplication and drift.",
      "Remove duplicated syntax and history from help.", ["resources", "prompts"], "", False),
     ("C07", "context", 5, "metric", "Largest read response fits the budget",
-     "Responses land in context too; a huge read costs more than the whole tool list.",
-     "Page or trim large responses and offer a summary view.", ["tools"], "", False),
+     "Responses land in context too; a huge read costs more than the whole tool list, and one far over budget can fill the context by itself.",
+     "Page or trim large responses and offer a summary view.", ["tools"], "", True),
     ("C08", "context", 3, "metric", "Starts quickly",
      "Slow starts delay every session and time out some clients.",
      "Defer heavy work until the first call that needs it.", ["transport"], "", False),
@@ -222,6 +225,9 @@ CATALOG = [
     ("S11", "safety", 3, "judged", "Risky tools say what is lost and whether it can be undone",
      "An agent asks before acting only when it knows the step is irreversible.",
      "State in the description what the tool removes and how to undo it.", ["tools"], "", False),
+    ("S12", "safety", 5, "judged", "Tools that look like reads cannot write",
+     "A query or get tool that also accepts mutations, or a tool that changes credentials, slips past an agent's and a client's caution.",
+     "Split writes into their own tool with honest annotations, or refuse mutations in the read tool.", ["tools"], "", False),
 ]
 
 CRITICAL = {row[0] for row in CATALOG if row[9]}
@@ -267,6 +273,18 @@ NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 
 def size(obj) -> int:
     return len(json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def looks_like_error(text: str) -> bool:
+    """A successful result whose body is really a failure."""
+    head = text.strip()
+    try:
+        obj = json.loads(head)
+    except ValueError:
+        obj = None
+    if isinstance(obj, dict) and set(obj) & {"error", "errors"} and not set(obj) & {"data", "result", "results", "items"}:
+        return bool(obj.get("error") or obj.get("errors"))
+    return bool(re.match(r"(?i)(error\b|http \d{3}\b(?<!http 200)|failed\b|exception\b|unauthorized|forbidden|not found)", head[:120]))
 
 
 def lognormal_score(value: float, good: float, poor: float) -> float:
@@ -692,6 +710,13 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     traces = [msg for msg in messages if re.search(r"\n\s+at .+:\d+:\d+|Traceback \(most recent call last\)", msg)]
     res("E04", 0 if traces else 1, f"{len(traces)} with traces" if traces else "clean",
         items=[{"item": "error", "score": 0, "evidence": t[:300]} for t in traces[:3]])
+    answered = [c for c in probe.get("calls") or [] if "bytes" in c]
+    if answered:
+        hidden = [c for c in answered if not c.get("isError") and looks_like_error(c.get("text_head") or "")]
+        res("E05", 1 - len(hidden) / len(answered), f"{len(hidden)} of {len(answered)} hidden" if hidden else "all flagged",
+            items=[{"item": c["tool"], "score": 0, "evidence": (c.get("text_head") or "")[:200]} for c in hidden])
+    else:
+        res("E05", 0, na=True, note="no read calls")
 
     # --- context
     def metric(code, value, where="", effective=None):
@@ -917,12 +942,18 @@ def score_categories(results: dict) -> dict:
         rows = [row for row in CATALOG if row[1] == key]
         applicable = [(row, results.get(row[0])) for row in rows if results.get(row[0]) and not results[row[0]]["na"]]
         total_w = sum(row[2] for row, _ in applicable)
-        if not total_w:
-            cats[key] = {"score": None, "name": name, "question": question}
+        # Trials are optional, so they do not count toward coverage.
+        possible = sum(row[2] for row in rows if row[3] != "trial")
+        covered = sum(row[2] for row, _ in applicable if row[3] != "trial")
+        if not total_w or covered < possible / 3:
+            cats[key] = {"score": None, "name": name, "question": question,
+                         "note": "Too few checks applied to score this category." if total_w else ""}
+            for row, res in applicable:
+                res["gain"] = 0.0
             continue
         raw = sum(row[2] * res["score"] for row, res in applicable) / total_w
         score = round(raw * 100)
-        capped = [row[0] for row, res in applicable if row[0] in CRITICAL and res["score"] == 0]
+        capped = [row[0] for row, res in applicable if row[0] in CRITICAL and res["score"] < 0.1]
         if capped:
             score = min(score, 49)
         cats[key] = {"score": score, "name": name, "question": question, "capped_by": capped, "weight": total_w}
@@ -1168,6 +1199,8 @@ def render_html(report: dict) -> str:
         capped = ""
         if c.get("capped_by"):
             capped = f'<p class="capped">Capped at 49 by a failed critical audit: {esc(", ".join(c["capped_by"]))}.</p>'
+        elif c.get("note"):
+            capped = f'<p class="question">{esc(c["note"])}</p>'
         sections.append(
             f'<section class="category" id="{key}"><header class="cat-head">{gauge_svg(c["score"], 72, 6)}'
             f'<div><h2>{esc(name)}</h2><p class="question">{esc(question)}</p>'

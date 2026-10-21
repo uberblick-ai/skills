@@ -734,6 +734,21 @@ def call(args) -> int:
                 if tool.get("outputSchema") and "structuredContent" in res:
                     entry["schema_problems"] = validate(res["structuredContent"], tool["outputSchema"])[:10]
             results.append(entry)
+        # Servers without annotations get no invalid-argument probes in collect;
+        # the tools confirmed as reads here can take them now.
+        probed = {x.get("tool") for x in (record.get("probes") or {}).get("invalid_arguments") or []}
+        extra = []
+        for name in dict.fromkeys(r["tool"] for r in results if "bytes" in r):
+            tool = tools[name]
+            if name in probed:
+                continue
+            bad_args, why = minimal_invalid_args(tool)
+            if bad_args is None:
+                continue
+            msg, ms = conn.request("tools/call", {"name": name, "arguments": bad_args})
+            extra.append({"tool": name, "arguments": bad_args, "why": why, "ms": ms,
+                          "response": error_of(msg) or {"kind": "success", "text": content_text((msg or {}).get("result"))[:1000]}})
+        record.setdefault("probes", {}).setdefault("invalid_arguments", []).extend(extra)
     finally:
         conn.close()
     record["calls"] = results
