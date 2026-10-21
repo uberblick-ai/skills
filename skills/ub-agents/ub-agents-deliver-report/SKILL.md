@@ -5,18 +5,19 @@ description: >-
   when a maintainer asks: how many items the loop delivered on its own, which
   runs were wasted, where a person had to step in, the causes behind them and
   the few changes that would have saved runs. Writes an HTML report, opens it
-  in the browser, leaves a JSON record of the day and can store the day in an
-  Uberblick document's data to track KPIs over time, filling in every day
-  missing since the last one stored. Do not use for a loop role, a PR review
-  or a merge gate.
+  in the browser, leaves a JSON record of the day and, when an Uberblick MCP
+  server is connected, stores the day in an Uberblick document's data to track
+  KPIs over time, filling in every day missing since the last one stored. Do
+  not use for a loop role, a PR review or a merge gate.
 license: MIT
 compatibility: >-
   Requires python3 and an authenticated GitHub CLI (gh); reads GitHub only.
-  Storing the day in an Uberblick document is optional and needs the
-  uberblick MCP server; without it the skill still writes the page.
+  Storing the days in an Uberblick document needs an Uberblick MCP server;
+  the skill stores them whenever one is connected and otherwise still writes
+  the page.
 metadata:
   author: uberblick-ai
-  version: "1.5"
+  version: "1.6"
 ---
 
 # Deliver report
@@ -34,9 +35,11 @@ classes, the page and the records are defined in
 [references/report.md](references/report.md).
 
 1. Decide where the days will be kept and which days to report. Uberblick
-   is available when the `uberblick` MCP tools (`search`, `get_doc`,
+   is available when an Uberblick MCP server is connected, whatever its name,
+   such as `uberblick` or `uberblick-agents`. Its tools (`search`, `get_doc`,
    `get_data`, `update_data`, `create_doc`, `insert_block`, `edit_block`,
-   `delete_block`) are in your tool list.
+   `delete_block`) may be listed by name only; load them before using them,
+   and with more than one server, search each for the document.
    Without them, the page is the whole result: steps 3 and 4 name causes and
    lessons from this day alone, since there is no registry to reuse; skip
    steps 6 and 7, say so in one line of the reply, and add that
@@ -71,8 +74,8 @@ classes, the page and the records are defined in
    python3 scripts/review.py digest DIR/DAY/data.json
    ```
 
-   The day is a calendar day in local time, midnight to midnight; without
-   `--day` it is yesterday. Only runs that started
+   The day is a calendar day in UTC, midnight to midnight, whatever the
+   machine's time zone; without `--day` it is yesterday. Only runs that started
    before the day ended count, so a day reads the same whenever it is
    collected, and a missed day can be filled in later. The digest gives every run of each item that needs a cause with
    its summary and denials, the evidence the runs leave out (commits pushed
