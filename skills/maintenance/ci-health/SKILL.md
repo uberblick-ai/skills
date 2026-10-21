@@ -6,7 +6,8 @@ description: >-
   that fail, the number of tests, optionally coverage and the test-to-code ratio, the changes that
   made CI slower or faster, and the top three actions that would cut the
   wait. Use when a maintainer asks how long CI takes, whether it got slower
-  or what would make it faster, or to record CI figures daily. Works for
+  or what would make it faster, or to record CI figures daily; a run fills
+  in every day missing since the last one stored. Works for
   any repository and language. Not a CI fix, a flaky-test hunt or a merge
   gate.
 license: MIT
@@ -19,7 +20,7 @@ compatibility: >-
   the `ub` command; without either the skill prints a table.
 metadata:
   author: uberblick-ai
-  version: "1.5"
+  version: "1.6"
 ---
 
 # CI health
@@ -29,9 +30,10 @@ from the first job starting to the last one finishing, not the minutes the
 jobs add up to. The wall time chart shows that total only; each job's time
 stays in the data to show which job moved when the total steps. A second
 chart shows how many run attempts on main end red, re-runs included. This skill records
-one day for one repository, keeps the steps that moved the total, with
-their cause, and keeps the three actions that would most cut the wait,
-judged again on every run.
+one repository's days since the last one stored, or yesterday alone when
+nothing is stored yet, keeps the steps that moved the total, with their
+cause, and keeps the three actions that would most cut the wait, judged
+again on every run.
 
 `scripts/ci.py` lives next to this file; call it by its path inside this
 skill's directory. `REPO` is `OWNER/NAME`, `DIR` a scratch directory outside
@@ -60,18 +62,25 @@ the document layout are in [references/data.md](references/data.md).
    the actions are the result; say so in one line. With one, `search` for
    "CI health" in the workspace; when the document found is about this
    repository, call it `DOC` and read with `get_data` its `incidents`, its
-   `actions`, its `applied` marks and its latest `days` records. When no such document exists,
+   `actions`, its `applied` marks and its `days`, saving the `days` as
+   `DIR/days.json`. When no such document exists,
    ask the maintainer once whether to create it, and carry on meanwhile.
 
 2. Collect:
 
    ```sh
-   python3 scripts/ci.py collect --repo REPO [--workflow W] [--start DAY] > DIR/data.json
+   python3 scripts/ci.py collect --repo REPO --after DIR/days.json [--workflow W] [--start DAY] > DIR/data.json
    ```
 
-   The default is yesterday, a UTC day; `--day` picks another. The first time
-   a repository is tracked, backfill with `--since` up to 90 days back, the
-   time GitHub keeps job logs; it reads every run's jobs, so expect minutes.
+   Days are UTC days. With `DOC`, `--after` collects every day after the
+   newest stored one up to yesterday, so a run fills in each day nobody
+   recorded: three days missing means three days collected. With nothing
+   missing it collects yesterday again. GitHub keeps job logs 90 days, so a
+   gap reaches no further back than that. Without `DOC`, or for a document
+   created in step 9, leave `--after` out: the default is yesterday alone.
+   `--day` picks one day instead when the maintainer names it, and `--since`
+   (with `--until`) a longer history only when they ask for one. Collecting
+   reads every run's jobs, so a long span takes minutes.
    Pass `--workflow` when the repository also runs a workflow on only some
    pushes (path filters, a release proof), naming the workflow every push
    runs, so a commit that skipped CI does not read as a fast one. Pass
@@ -90,7 +99,8 @@ the document layout are in [references/data.md](references/data.md).
    python3 scripts/ci.py logs DIR/data.json --out DIR/logs
    ```
 
-   It saves the cleaned log of each job of the last day's last green commit.
+   It saves the cleaned log of each job of the last day's last green commit;
+   `tests` then counts every collected day from its own logs.
    Find the lines where the repository's test runners say how many tests
    ran; the checkout's languages and test setup tell you which runners to
    look for. Write one regular expression per runner whose groups capture
@@ -128,7 +138,7 @@ the document layout are in [references/data.md](references/data.md).
    It fetches the last green commit if the clone lacks it, checks it out in
    a temporary worktree, which it removes afterwards, and adds
    `test_ratio` (with `code_lines` and `test_lines`) to the last day, or to
-   every day with `--every-day`, which a backfill wants, plus
+   every day with `--every-day`, which more than one collected day wants, plus
    `coverage_pct` when the checkout defines `mise run codecov`. Lines are
    counted by `scc`, or `cloc` without it, over the files git tracks, so
    blank and comment lines, prose and data never count; `loc_tool` records
@@ -262,5 +272,6 @@ the document layout are in [references/data.md](references/data.md).
 11. Reply with the total wall time (the 7-day median with its ± and the
     P95), the share of failed runs, the tests, the test ratio and any
     coverage, any new incident with the job that moved, the actions with which are new or dropped, and
-    where the day was stored. When the skill runs on a schedule with
+    where the days were stored, naming the days filled in when there was
+    more than one. When the skill runs on a schedule with
     nothing new, a single line is enough.

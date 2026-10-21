@@ -97,6 +97,26 @@ class Tests(unittest.TestCase):
         self.assertLess(page.index('name="viewport"'), page.index("<title>"))
         self.assertIn("Prüfung — schneller…", page)
 
+    def test_missing_days_since_the_newest_stored_one(self):
+        yesterday = dt.date(2026, 10, 18)
+        stored = {"records": [{"id": "2026-10-15", "value": {"day": "2026-10-15"}},
+                              {"id": "2026-10-11", "value": {"day": "2026-10-11"}}]}
+        self.assertEqual(review.missing(stored, yesterday), ["2026-10-16", "2026-10-17", "2026-10-18"])
+        self.assertEqual(review.missing([], yesterday), ["2026-10-18"], "no corpus: the last day alone")
+        self.assertEqual(review.missing([{"id": "2026-10-18", "value": {"day": "2026-10-18"}}], yesterday),
+                         ["2026-10-18"], "nothing missing: the last day again")
+
+    def test_document_after_a_backfill_counts_every_filled_day_as_new(self):
+        lesson = {"lever": "wording", "title": "Earlier", "change": "C.", "state": "proposed", "day": "2026-10-13"}
+        registry = {"lessons": [{"id": "early", "value": lesson}],
+                    "changes": [{"id": "o/r#1", "value": {"day": "2026-10-13", "title": "A", "why": "W."}},
+                                {"id": "o/r#2", "value": {"day": "2026-10-10", "title": "B", "why": "W."}}]}
+        day = data(actions=["early"])
+        self.assertEqual((review.document(registry, day)["changelog_new"],
+                          review.document(registry, day)["cards"][0]["changed"]), (0, False))
+        backfilled = review.document(registry, day, first="2026-10-12")
+        self.assertEqual((backfilled["changelog_new"], backfilled["cards"][0]["changed"]), (1, True))
+
 
 if __name__ == "__main__":
     unittest.main()
