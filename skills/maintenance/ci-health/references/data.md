@@ -162,7 +162,7 @@ again replaces it.
 
 ## Actions
 
-The top three changes that would most cut the time pushes wait for a green
+Up to three changes that would most cut the time pushes wait for a green
 main, judged again on every run. `ci.py signals` gives the evidence over
 the 7 days ending the last day: pushes a day, failed pushes, the green
 median and P95, and per job its median minutes, how often it ends last on
@@ -185,9 +185,15 @@ The agent writes `actions.json`, at most three, in rank order:
   "title": "Split browser e2e across parallel runners",
   "why": "Browser e2e ends 10.7 min after the other jobs on every green push, 27 pushes a day. Three shards would save about 200 min of waiting a day.",
   "check": "Read .github/workflows/ci.yml and the Playwright config.",
-  "impact_min_per_day": 200}]
+  "impact_min_per_day": 200, "where": ".github/workflows/ci.yml, job e2e",
+  "evidence": [1588, "acme/runners#41"]}]
 ```
 
+`where`, `cost` and `evidence` are optional. `evidence` lists issues and
+pull requests: a number or `#number` in the repository, or
+`owner/name#number`; anything else is refused, and numbers are stored as
+`#number`. `cost` is what the problem costs in a few words; without it the
+card says "about N min of waiting a day" from `impact_min_per_day`.
 `id` and `since` carry over from the stored action an entry keeps; a new
 one gets its `id` from the title and starts on the last collected day.
 `rank` and `updated` are set when stored. Without a document the actions
@@ -196,17 +202,20 @@ them.
 
 `ci.py cards` renders each as a
 card: the area and since when as its label, the title, `why` as its body,
-and a "Discuss in Claude Code" button to `claude://code/new?q=PROMPT`,
+a footer with the evidence, `where · cost · #1588 acme/runners#41`, each
+reference linked to its GitHub address so it shows as a GitHub pill (a
+card with none of the three has no footer), and a "Discuss in Claude Code" button to `claude://code/new?q=PROMPT`,
 which opens a new session in the Claude desktop app with the prompt filled
 in, not sent. The prompt names the repository and the document, the day of
-the data, the recommendation, its evidence and `check`, and asks for a plan
+the data, the recommendation, its evidence, where, cost and issues and
+PRs, and `check`, and asks for a plan
 before any change; the link cannot select a repository by name, only a
 local folder, so the prompt names it.
 
 When the discussion settles on applying the action, the prompt asks that
 session to mark it once a pull request implements it or an issue plans
 it. The card's title and why are struck through, the button goes, and a
-footer that is not struck through names the change, for example `Planned
+footer that is not struck through replaces the evidence and names the change, for example `Planned
 in [acme/app#212](https://github.com/acme/app/issues/212).` A link whose
 text is the `owner/repo#number` reference and whose target is its GitHub
 address shows as a GitHub pill. The session also upserts a record keyed by

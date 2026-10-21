@@ -297,7 +297,8 @@ for line in sys.stdin:
         data = {"repo": "o/r", "branch": "main", "last": "2026-10-03", "jobs": {},
                 "days": [{"day": "2026-10-03", "repo": "o/r", "commits": 9}]}
         actions = [{"id": "shard-e2e", "area": "Wall time", "title": "Shard e2e", "since": "2026-09-20",
-                    "why": "It ends 8 min after the rest.", "check": "Look at ci.yml.", "impact_min_per_day": 90},
+                    "why": "It ends 8 min after the rest.", "check": "Look at ci.yml.", "impact_min_per_day": 90,
+                    "where": "CI / e2e", "evidence": [7, "#8", "o/tools#3"]},
                    {"area": "Reliability", "title": "Fix flaky login spec", "why": "Failed 4 of 30 pushes."}]
         batch = ci.records(data, (), actions)
         stored = batch[-1]
@@ -305,30 +306,41 @@ for line in sys.stdin:
                          ("actions", ["shard-e2e", "fix-flaky-login-spec"]), "the set replaces the stored one")
         kept, new = (r["value"] for r in stored["replaceRecords"])
         self.assertEqual((kept["rank"], kept["since"], kept["updated"]), (1, "2026-09-20", "2026-10-03"))
+        self.assertEqual((kept["where"], kept["evidence"]), ("CI / e2e", ["#7", "#8", "o/tools#3"]),
+                         "numbers become references")
+        self.assertNotIn("evidence", new, "no evidence, none stored")
         self.assertEqual((new["rank"], new["since"]), (2, "2026-10-03"), "a new action starts on the last day")
         self.assertNotIn("actions", [b["collection"] for b in ci.records(data)], "no actions given, none touched")
-        for bad in ([actions[1]] * 2, actions * 2, [dict(actions[1], repo="o/x")], [{"area": "a", "title": "t"}]):
+        for bad in ([actions[1]] * 2, actions * 2, [dict(actions[1], repo="o/x")], [{"area": "a", "title": "t"}],
+                    [dict(actions[1], evidence=["https://example.com"])], [dict(actions[1], evidence=["o/r#x"])]):
             with self.assertRaises(SystemExit):
                 ci.action_rows(data, bad)
 
         blocks = ci.cards(data, actions, doc="d0c")
         self.assertEqual([b["type"] for b in blocks], ["card", "card"])
         head, _, body = blocks[0]["text"].partition("\n\n")
-        self.assertIn("label: Wall time · since 20 Sep 2026\ntitle: Shard e2e\nbutton: [Discuss in Claude Code]", head)
-        self.assertNotIn("footer:", head, "prose takes only http(s) links, so the app link is a button")
+        footer = ("footer: CI / e2e · about 90 min of waiting a day · [#7](https://github.com/o/r/issues/7) "
+                  "[#8](https://github.com/o/r/issues/8) [o/tools#3](https://github.com/o/tools/issues/3)")
+        self.assertIn(f"label: Wall time · since 20 Sep 2026\ntitle: Shard e2e\n{footer}\n"
+                      "button: [Discuss in Claude Code]", head, "the evidence as pills, then the button")
         self.assertEqual(body, "It ends 8 min after the rest.")
-        url = re.search(r"\]\((\S+)\)", head).group(1)
+        self.assertTrue(blocks[1]["text"].startswith("label: Reliability · since 3 Oct 2026\n"
+                                                     "title: Fix flaky login spec\nbutton: "), "no evidence, no footer")
+        self.assertEqual(ci.cost({"cost": "one more runner", "impact_min_per_day": 90}), "one more runner")
+        url = re.search(r"button: \[[^]]+\]\((\S+)\)", head).group(1)
         self.assertTrue(url.startswith("claude://code/new?q="), "a new session in the desktop app")
         prompt = unquote(url.split("q=", 1)[1])
         for part in ("CI Health Report for o/r (Uberblick document d0c)", "Recommendation: Shard e2e.",
-                     "Evidence: It ends 8 min after the rest.", "Look at ci.yml.", "wait for my go-ahead"):
+                     "Evidence: It ends 8 min after the rest.\nWhere: CI / e2e\nCost: about 90 min of waiting a day\n"
+                     "Issues and PRs: o/r#7, o/r#8, o/tools#3\n\nLet's discuss", "Look at ci.yml.", "wait for my go-ahead"):
             self.assertIn(part, prompt)
         records = {"records": [{"id": r["id"], "value": r["value"]} for r in reversed(stored["replaceRecords"])]}
         self.assertEqual([b["text"] for b in ci.cards(data, records, doc="d0c")], [b["text"] for b in blocks],
                          "stored records render the same, in rank order")
         self.assertEqual(ci.cards(data, []), [{"type": "paragraph", "text": "No action proposed yet."}])
         plain = ci.cards(data, actions, doc="d0c", button=False)[0]["text"]
-        self.assertEqual(plain, "label: Wall time · since 20 Sep 2026\ntitle: Shard e2e\n\nIt ends 8 min after the rest.",
+        self.assertEqual(plain, f"label: Wall time · since 20 Sep 2026\ntitle: Shard e2e\n{footer}\n\n"
+                                "It ends 8 min after the rest.",
                          "without buttons, for Uberblick 0.4.3")
 
         for part in ('In Uberblick document d0c, replace the card titled "Shard e2e"', "title: ~~Shard e2e~~",
@@ -352,6 +364,8 @@ for line in sys.stdin:
         doc = ci.create_document(data | {"days": [dict(data["days"][0], wall_min_7d=5.0)]}, (), actions)
         headings = [b["text"] for b in doc["blocks"] if b["type"] == "heading"]
         self.assertEqual(headings, ["Recommended Actions", "Incidents"], "actions above the incidents")
+        intro = doc["blocks"][[b.get("text") for b in doc["blocks"]].index("Recommended Actions") + 1]["text"]
+        self.assertTrue(intro.startswith("Up to three changes"), "no count the cards may not reach")
         self.assertEqual(len([b for b in doc["blocks"] if b["type"] == "card"]), 2)
 
     def test_after_fills_every_day_since_the_newest_stored_one(self):
