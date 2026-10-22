@@ -95,7 +95,9 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    there: commands, screens, settings, as the code has them today, not as
    old docs describe them. For each hot area, direction change and large
    change, open the patch (`git -c gc.auto=0 show SHA`) and the code it
-   touched today before calling it a decision.
+   touched today before calling it a decision. A large docs site is too much
+   to read whole: read its navigation, then the pages and code behind each
+   capability, deepest where the tests are.
 
 4. **Decide** each part as [references/analysis.md](references/analysis.md)
    describes:
@@ -123,7 +125,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    the page it should be.
 
 6. **Check** the drawings, the plan and the claims, installing the
-   renderers once per scratch directory:
+   renderers once per scratch directory (skip both when no page has an
+   `ablauf` or `wireframe` block):
 
    ```sh
    npm install --prefix DIR/node @uberblick/ablauf@0.2.0 @uberblick/wireframe@0.3.0
@@ -160,7 +163,10 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    approval to write it, whether to unpin the starter pages, and for any
    new tags to be created under Workspace settings → Tags (MCP cannot
    create tags). Writes go to a workspace the team shares: wait for the
-   answer. Change the plan as they ask and build the page again.
+   answer. Change the plan as they ask and build the page again. When you
+   run unattended and were told the review counts as approved, write the
+   page anyway, follow what you were told about the starter pages and the
+   tags, and name those choices in the report.
 
 8. **Write to the corpus.** Read the workspace again (step 1) so the writes
    use only tags that exist, then:
@@ -170,31 +176,42 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    python3 scripts/intake.py ub --calls DIR/calls.json --checkout CHECKOUT --out DIR/applied.json
    ```
 
-   `calls` orders the writes: pages, linked pages first, then decision
-   records with `related` naming their page; the pins, group by group, the
-   starter cleanup when the plan unpins the starter pages, the groups'
-   order; last, the links to documents that did not exist yet when the
-   linking one was created (`link_range` on prose, `edit_block` on a table
-   or card). `{"$ref": slug}` and `{"$doc": slug}` stand for the UUID that
-   slug's `create_doc` returned; `{"$block": "slug#n"}`, `{"$rev": …}` and
-   `{"$text": …}` for the id, rev and text of its block n in that answer.
+   `calls` writes in two passes, so every link can name its target. First
+   `create_doc` for every document with its metadata only (pages, then
+   decision records with `related` naming their page); then `insert_block`
+   with each document's blocks, links included; then the pins group by
+   group, the starter cleanup when the plan unpins the starter pages (marked
+   `optional`: a page already unpinned is fine), and the groups' order.
+   `{"$ref": slug}`, `{"$doc": slug}` and `{{uuid:slug}}` stand for the
+   UUID that slug's `create_doc` returned.
 
    `ub` runs them through one `ub mcp serve`. Before the first write it
    refuses when the workspace already has a document with a planned title
    (rename it in the plan, mark it `existing: UUID`, or pass `--adopt` to use
-   the one there). It records the workspace, the calls' hash, the UUIDs and
-   blocks in `DIR/applied.json`, stops at the first refusal (fix it and
-   re-run the same calls with `--resume`), waits for the hub to acknowledge
-   and prints the sidebar as written. With the MCP tools in your list
-   instead, make the same calls in order yourself, substituting from each
-   answer; do the starter cleanup with `unpin_doc` on the two starter pages
-   and `sidebar_group` `delete` on their emptied group.
+   the one there). It records the workspace, the calls and the UUIDs in
+   `DIR/applied.json`, stops at the first refusal (fix it and re-run the
+   same calls with `--resume`), waits for the hub to acknowledge and prints
+   the sidebar as written.
+
+   With the MCP tools instead of `ub`, send the `create_doc` calls in order
+   as they stand, save `{slug: uuid}` from their answers as
+   `DIR/uuids.json`, then
+
+   ```sh
+   python3 scripts/intake.py resolve --calls DIR/calls.json --uuids DIR/uuids.json > DIR/ready.json
+   ```
+
+   prints every remaining call with the UUIDs filled in. Send them one at a
+   time, in order, each `arguments` exactly as printed (`tool` names the
+   tool; `n` is its place, for your notes). Never send pins in parallel: two
+   pins into a group that does not exist yet make two groups. A refused
+   call marked `optional` is fine; stop at any other and fix it.
 
    Tags the catalog still lacks are left off and named. Once a person
    creates them, or to write a changed plan, read the workspace again and
-   pass `--applied DIR/applied.json` to `calls`, with a new `--out` for
-   `ub`: documents already written are not created again, only given their
-   tags and pinned.
+   pass `--applied DIR/applied.json` (or `DIR/uuids.json`) to `calls`, with
+   a new `--out` for `ub`: documents already written are not created again,
+   only given their tags and pinned.
 
 9. **Record the grounding.** When the `uberblick-corpus-sync` skill is
    installed, run it in apply mode on the pages just written (their UUIDs

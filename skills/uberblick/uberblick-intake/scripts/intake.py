@@ -3,12 +3,14 @@
 
     intake.py scan CHECKOUT [--max-commits N] > scan.json      # Markdown, docs site, git churn, tests, labels
     intake.py hot scan.json [--limit 15]                       # the churn and direction changes, readable
-    intake.py tests scan.json [--titles 40]                    # the test focus per area and the e2e journeys
+    intake.py tests scan.json [--titles 80]                    # the test focus per area and the e2e journeys
     intake.py blocks DOC.md                                    # one Uberblick Markdown file as create_doc arguments
-    intake.py check PLAN [--scan scan.json]                    # the plan against the scan and the corpus rules
+    intake.py check PLAN [--scan scan.json] [--checkout PATH] [--tags tags.json]  # the plan against the scan and the corpus rules
     intake.py review PLAN --scan scan.json --out review.html [--open]  # the page a person approves before writes
-    intake.py calls PLAN [--tags tags.json] > calls.json       # the ordered corpus writes, with $ref placeholders
+    intake.py calls PLAN --tags tags.json > calls.json         # the ordered corpus writes, with $ref placeholders
     intake.py ub --calls calls.json --checkout PATH [--out applied.json]  # run them through one `ub mcp serve`
+    intake.py resolve --calls calls.json --uuids uuids.json    # for the MCP tools: the rest, UUIDs filled in
+    intake.py corpus --checkout PATH --dir DIR                 # the workspace's tags, sidebar and documents
 
 `scan` and `check` only read. `ub` writes to the Uberblick workspace the checkout is bound to. See
 references/plan.md for the plan and references/analysis.md for how to read the scan.
@@ -21,6 +23,7 @@ import html
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -1135,10 +1138,12 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
                 warnings.append(f"tags: {t['name']} is marked {t.get('status')}, but the catalog "
                                 f"{'has' if have else 'lacks'} it")
     use = Counter(x.lower() for _d, meta, *_ in plan_paths(plan, base) for x in (meta.get("tags") or []))
+    many = len(plan.get("documents", [])) > 8
     for t in plan["tags"]:
-        if use[t["name"].lower()] < 2:
-            warnings.append(f"tags: {t['name']} is used by {use[t['name'].lower()]} document(s); a tag earns its "
-                            f"place with two or more, unless it names a core area")
+        n = use[t["name"].lower()]
+        if n == 0 or (n == 1 and many):  # in a small corpus one page per area is normal
+            warnings.append(f"tags: {t['name']} is used by {n} document(s); a tag earns its place with two or "
+                            f"more, unless it names a core area")
     for c in plan.get("capabilities", []):
         if c.get("doc") and c["doc"] not in slugs:
             errors.append(f"capabilities: {c.get('name')!r} points to {c['doc']!r}, which is not a document")
@@ -1190,9 +1195,10 @@ def cmd_check(args):
 # --------------------------------------------------------------------------------------------------- corpus writes
 
 def cmd_calls(args):
-    """Ordered tool calls. Values {"$ref": slug} and {"$doc": slug} are replaced by the UUID `ub` (or the agent)
-    got back from that slug's create_doc. Pages come first, linked pages before the pages linking them; then
-    decisions; then the sidebar; then the links a cycle forced out of the text."""
+    """Ordered tool calls in two passes, so every link can name its target. First each document is created with
+    its metadata only (pages, then decision records, which name their page); then each gets its blocks with
+    insert_block, links included; then the sidebar. {"$ref": slug}, {"$doc": slug} and {{uuid:slug}} stand for
+    the UUID that slug's create_doc returned."""
     plan = load(args.plan)
     base = Path(args.plan).resolve().parent
     errors, _ = validate(plan, base)
@@ -1204,70 +1210,14 @@ def cmd_calls(args):
         print("the tag catalog is incomplete (this machine has not synced all of it); tags missing from it are "
               "left off, so read it again once synced", file=sys.stderr)
     parsed = {d["slug"]: (d, meta, blocks, refs) for d, meta, blocks, refs, _ in plan_paths(plan, base)}
-    done_before = load(args.applied).get("uuids", {}) if args.applied else {}
+    done_before = load(args.applied) if args.applied else {}
+    done_before = done_before.get("uuids", done_before)  # applied.json, or {slug: uuid} from the MCP route
     for slug, uuid in done_before.items():
         if slug in parsed and not parsed[slug][0].get("existing"):
             parsed[slug][0]["existing"] = uuid
             parsed[slug][0]["retag"] = True
-    pages = [s for s, (d, *_r) in parsed.items() if d.get("kind", "page") == "page"]
-    order, done, later = [], set(), []
-
-    def visit(slug, stack):
-        if slug in done:
-            return
-        if slug in stack:
-            return
-        stack.add(slug)
-        for r in sorted(parsed[slug][3]):
-            if r in parsed and parsed[r][0].get("kind", "page") == "page":
-                visit(r, stack)
-        stack.discard(slug)
-        done.add(slug)
-        order.append(slug)
-
-    for slug in pages:
-        visit(slug, set())
-    created = {s for s, (d, *_r) in parsed.items() if d.get("existing")}
+    order = sorted(parsed, key=lambda s: parsed[s][0].get("kind", "page") == "decision")
     calls, skipped_tags = [], set()
-
-    def utf16(text):
-        return len(text.encode("utf-16-le")) // 2
-
-    def strip_forward(blocks, slug):
-        """A link to a document not created yet is plain text here. Once every document exists, link_range marks
-        it on prose, and edit_block rewrites a table or card, which carry their links as Markdown in their text.
-        `$block`, `$rev` and `$text` stand for that block as the document's create_doc answered it."""
-        out = []
-        for n, b in enumerate(blocks):
-            b = json.loads(json.dumps(b))
-            here = {"uuid": {"$ref": slug}, "block_id": {"$block": f"{slug}#{n}"}, "rev": {"$rev": f"{slug}#{n}"}}
-            at = 0
-            for r in b.get("inline", []):
-                target = r["marks"].get("docLink")
-                size = utf16(r["text"])
-                if isinstance(target, dict) and target["$doc"] not in created:
-                    later.append({"tool": "link_range", "arguments": {**here, "start": at, "end": at + size,
-                                                                      "doc_id": {"$ref": target["$doc"]}}})
-                    del r["marks"]["docLink"]
-                at += size
-            if b.get("inline") is not None and not any(r["marks"] for r in b["inline"]):
-                del b["inline"]
-            if b["type"] in ("table", "card", "figma"):
-                to_uuid = lambda t: re.sub(r"\]\(ref:([a-z0-9-]+)\)",  # noqa: E731
-                                           lambda m: "](" + "{{uuid:" + m.group(1) + "}})", t)
-                if any(r not in created for r in re.findall(r"\]\(ref:([a-z0-9-]+)\)", b["text"])):
-                    edit = {**here, "old_text": {"$text": f"{slug}#{n}"}, "new_text": to_uuid(b["text"])}
-                    if b["type"] == "table":
-                        # same rows and columns, only cells relinked: the identity map
-                        rows = [r for r in b["text"].splitlines() if not DELIMITER_ROW.match(r)]
-                        cols = len(rows[0].strip().strip("|").split("|"))
-                        edit["table_mapping"] = {"rows": list(range(len(rows))), "columns": list(range(cols))}
-                    later.append({"tool": "edit_block", "arguments": edit})
-                    b["text"] = re.sub(r"\[([^\]]+)\]\(ref:([a-z0-9-]+)\)",
-                                       lambda m: m.group(0) if m.group(2) in created else m.group(1), b["text"])
-                b["text"] = to_uuid(b["text"])
-            out.append(b)
-        return out
 
     def tag_list(meta):
         out = []
@@ -1278,16 +1228,25 @@ def cmd_calls(args):
             out.append(catalog[t.lower()])
         return out
 
-    for slug in order + [s for s in parsed if s not in pages]:
+    def linked(blocks):
+        """`ref:slug` in a table's or card's text becomes the slug's UUID; prose carries {"$doc": slug} marks."""
+        out = []
+        for b in blocks:
+            b = dict(b)
+            if b["type"] in ("table", "card", "figma"):
+                b["text"] = re.sub(r"\]\(ref:([a-z0-9-]+)\)", lambda m: "](" + "{{uuid:" + m.group(1) + "}})",
+                                   b["text"])
+            out.append(b)
+        return out
+
+    for slug in order:
         d, meta, blocks, refs = parsed[slug]
         if d.get("existing"):
             calls.append({"tool": "existing", "slug": slug, "uuid": d["existing"]})
-            created.add(slug)
             if d.get("retag") and tag_list(meta):
                 calls.append({"tool": "set_metadata", "arguments": {"uuid": d["existing"], "tags": tag_list(meta)}})
             continue
-        a = {"title": meta["title"], "description": meta["description"],
-             "blocks": strip_forward(blocks, slug)}
+        a = {"title": meta["title"], "description": meta["description"]}
         tl = tag_list(meta)
         if tl:
             a["tags"] = tl
@@ -1301,48 +1260,68 @@ def cmd_calls(args):
         elif meta.get("tldr"):
             a["tldr"] = meta["tldr"]
         calls.append({"tool": "create_doc", "slug": slug, "arguments": a})
-        created.add(slug)
+    for slug in order:
+        d, meta, blocks, refs = parsed[slug]
+        if not d.get("existing") and blocks:
+            calls.append({"tool": "insert_block", "slug": slug,
+                          "arguments": {"uuid": {"$ref": slug}, "blocks": linked(blocks)}})
     for g in plan["sidebar"].get("groups", []):
         for slug in g.get("docs", []):
             calls.append({"tool": "pin_doc", "arguments": {"uuid": {"$ref": slug}, "group": g["name"]}})
     if plan["sidebar"].get("starter") == "unpin":
-        calls.append({"tool": "starter_cleanup", "arguments": {}})
+        # the starter pages and their group have fixed ids in every workspace; done already is fine
+        calls += [{"tool": "unpin_doc", "optional": True, "arguments": {"uuid": u}} for u in STARTER_DOCS]
+        calls.append({"tool": "sidebar_group", "optional": True,
+                      "arguments": {"group": STARTER_GROUP, "action": "delete"}})
     for i, g in enumerate(plan["sidebar"].get("groups", [])):
         calls.append({"tool": "sidebar_group", "arguments": {"group": g["name"], "action": "move", "index": i}})
-    calls += later
     if skipped_tags:
         print("tags not in the workspace's catalog, left off: " + ", ".join(sorted(skipped_tags)), file=sys.stderr)
     json.dump(calls, sys.stdout, indent=1, ensure_ascii=False)
     print()
 
 
-def resolve(value, uuids, blocks=None):
-    """Replace the placeholders: `$ref`/`$doc` (a slug's UUID), `{{uuid:slug}}` in text, and `$block`, `$rev`,
-    `$text` ("slug#n": block n of that document as its create_doc answered it)."""
+def cmd_resolve(args):
+    """For the MCP tools: the calls with every placeholder whose slug has a UUID replaced, ready to send as they
+    stand. Make the create_doc calls, save {slug: uuid} from their answers, then resolve and send the rest."""
+    calls = load(args.calls)
+    uuids = load(args.uuids)
+    uuids = uuids.get("uuids", uuids)
+    out = []
+    for i, c in enumerate(calls):
+        if c["tool"] in ("create_doc", "existing") and c.get("slug") in uuids:
+            continue
+        try:
+            out.append({"n": i + 1, **c, "arguments": resolve(c.get("arguments", {}), uuids)})
+        except KeyError as e:
+            sys.exit(f"call {i + 1} ({c['tool']}) names {e}, which has no UUID in {args.uuids} yet")
+    json.dump(out, sys.stdout, indent=1, ensure_ascii=False)
+    print()
+
+
+def resolve(value, uuids):
+    """Replace `{"$ref": slug}`, `{"$doc": slug}` and `{{uuid:slug}}` in text with the slug's UUID."""
     if isinstance(value, dict):
         if len(value) == 1 and next(iter(value)) in ("$ref", "$doc"):
             slug = next(iter(value.values()))
             if slug not in uuids:
                 raise KeyError(slug)
             return uuids[slug]
-        if len(value) == 1 and next(iter(value)) in ("$block", "$rev", "$text"):
-            key, where = next(iter(value.items()))
-            slug, n = where.rsplit("#", 1)
-            try:
-                return (blocks or {})[slug][int(n)][("$block", "$rev", "$text").index(key)]
-            except (KeyError, IndexError):
-                raise KeyError(f"{where} (no block {n} recorded for {slug})") from None
-        return {k: resolve(v, uuids, blocks) for k, v in value.items()}
+        return {k: resolve(v, uuids) for k, v in value.items()}
     if isinstance(value, list):
-        return [resolve(v, uuids, blocks) for v in value]
+        return [resolve(v, uuids) for v in value]
     if isinstance(value, str) and "{{uuid:" in value:
-        return re.sub(r"\{\{uuid:([a-z0-9-]+)\}\}", lambda m: uuids[m.group(1)], value)
+        def sub(m):
+            if m.group(1) not in uuids:
+                raise KeyError(m.group(1))
+            return uuids[m.group(1)]
+        return re.sub(r"\{\{uuid:([a-z0-9-]+)\}\}", sub, value)
     return value
 
 
-def block_slug(call):
-    where = (call.get("arguments") or {}).get("block_id")
-    return where["$block"].rsplit("#", 1)[0] if isinstance(where, dict) and "$block" in where else None
+def target_slug(call):
+    where = (call.get("arguments") or {}).get("uuid")
+    return where["$ref"] if isinstance(where, dict) and "$ref" in where else None
 
 
 SETTLE_POLL = 2
@@ -1351,19 +1330,8 @@ STARTER_DOCS = ("2d56b281-5614-43bd-b8d8-edd1c270a85a", "d7ddd0b1-fee9-4ef0-8f1e
 STARTER_GROUP = "57a27e40-0000-4000-8000-000000000001"
 
 
-def starter_cleanup(call):
-    """Unpin the starter pages, then delete their group only when nothing else is pinned in it."""
-    sidebar = json.loads(call("get_sidebar", {}))
-    for g in sidebar.get("groups", []):
-        for d in g.get("docs", []):
-            if d["uuid"] in STARTER_DOCS:
-                call("unpin_doc", {"uuid": d["uuid"]})
-    sidebar = json.loads(call("get_sidebar", {}))
-    for g in sidebar.get("groups", []):
-        if g["id"] == STARTER_GROUP and not g.get("docs"):
-            call("sidebar_group", {"group": g["id"], "action": "delete"})
 READ_TOOLS = {"list_tags", "get_sidebar", "list_docs", "search", "get_doc", "export_markdown", "get_help",
-              "sync_status", "backlinks", "find_decisions", "get_data", "existing"}  # starter_cleanup writes
+              "sync_status", "backlinks", "find_decisions", "get_data", "existing"}
 
 
 class Stop(Exception):
@@ -1383,11 +1351,9 @@ def cmd_ub(args):
     if args.resume and before and before.get("calls") != digests[:before.get("done", 0)]:
         sys.exit(f"the first {before.get('done')} calls in {args.calls} are not the ones {args.out} applied; "
                  f"--resume continues the same calls, changed only after where it stopped")
-    applied = before if args.resume and before else {"uuids": {}, "blocks": {}, "adopted": [], "done": 0,
-                                                     "results": []}
-    applied.setdefault("blocks", {})
+    applied = before if args.resume and before else {"uuids": {}, "adopted": [], "done": 0, "results": []}
     applied.setdefault("adopted", [])
-    uuids, blocks = applied["uuids"], applied["blocks"]
+    uuids = applied["uuids"]
     try:
         server = subprocess.Popen(args.ub.split() + ["mcp", "serve"], cwd=checkout, stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8")
@@ -1449,42 +1415,35 @@ def cmd_ub(args):
                     applied["adopted"].append(c["slug"])
                 applied["done"] = i + 1
                 continue
-            if block_slug(c) in applied["adopted"]:
-                applied["results"].append({"tool": c["tool"], "slug": block_slug(c),
+            if target_slug(c) in applied["adopted"] and c["tool"] == "insert_block":
+                applied["results"].append({"tool": c["tool"], "slug": target_slug(c),
                                            "text": "skipped: the document was adopted, not written by this run"})
                 applied["done"] = i + 1
                 continue
-            if c["tool"] == "starter_cleanup":
-                try:
-                    starter_cleanup(call)
-                except (RuntimeError, ValueError) as e:
-                    failed = f"call {i + 1} (starter_cleanup): {e}"
-                    break
-                applied["done"] = i + 1
-                save()
-                continue
             try:
-                text = call(c["tool"], resolve(c["arguments"], uuids, blocks))
+                text = call(c["tool"], resolve(c.get("arguments", {}), uuids))
             except (RuntimeError, KeyError) as e:
-                failed = f"call {i + 1} ({c['tool']} {c.get('slug') or block_slug(c) or ''}): {e}"
+                if c.get("optional"):
+                    # starter cleanup: a page already unpinned or a group already gone is the state we want
+                    applied["results"].append({"tool": c["tool"], "text": f"optional, not applied: {e}"})
+                    applied["done"] = i + 1
+                    save()
+                    continue
+                failed = f"call {i + 1} ({c['tool']} {c.get('slug') or target_slug(c) or ''}): {e}"
                 break
             if c["tool"] == "create_doc":
                 try:
-                    answer = json.loads(text)
-                    uuids[c["slug"]] = answer["uuid"]
-                    blocks[c["slug"]] = [[b["id"], b["rev"], b["text"]] for b in answer.get("blocks", [])]
+                    uuids[c["slug"]] = json.loads(text)["uuid"]
                 except (ValueError, KeyError):
                     failed = f"call {i + 1}: create_doc answered without a uuid: {text[:200]}"
                     break
-                if len(blocks[c["slug"]]) != len(c["arguments"]["blocks"]):
-                    print(f"{c['slug']}: sent {len(c['arguments']['blocks'])} blocks, the document holds "
-                          f"{len(blocks[c['slug']])}; its later links may land on the wrong block", file=sys.stderr)
             applied["results"].append({"tool": c["tool"], "slug": c.get("slug"),
-                                       "text": text if c["tool"] not in ("create_doc", "pin_doc") else None})
+                                       "text": text if c["tool"] not in ("create_doc", "insert_block", "pin_doc")
+                                       else None})
             applied["done"] = i + 1
             save()
             print(f"{i + 1}/{len(calls)} {c['tool']} {c.get('slug') or ''}".rstrip(), file=sys.stderr)
-        if not failed and any(c["tool"] in ("pin_doc", "starter_cleanup", "sidebar_group") for c in calls):
+        if not failed and any(c["tool"] in ("pin_doc", "unpin_doc", "sidebar_group") for c in calls):
             applied["sidebar"] = json.loads(call("get_sidebar", {}))
             for g in applied["sidebar"].get("groups", []):
                 print(f"sidebar: {g.get('name')}: " + ", ".join(d.get("title", d["uuid"]) for d in g.get("docs", [])),
@@ -1788,6 +1747,8 @@ def cmd_corpus(args):
 
 
 def main():
+    if hasattr(signal, "SIGPIPE"):  # `intake.py hot … | head` ends quietly
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
     s = sub.add_parser("scan", help="read the checkout: Markdown, docs site, git churn, tests")
@@ -1819,6 +1780,9 @@ def main():
                    help="list_tags output, to pass tag ids and leave off tags the catalog lacks")
     k.add_argument("--applied", help="applied.json of an earlier run: those documents are not created again, "
                                      "only given the plan's tags that exist now")
+    v = sub.add_parser("resolve", help="for the MCP tools: the calls with the UUIDs filled in, ready to send")
+    v.add_argument("--calls", required=True)
+    v.add_argument("--uuids", required=True, help="{slug: uuid} from the create_doc answers (or applied.json)")
     w = sub.add_parser("corpus", help="read the workspace's tags, sidebar and documents into DIR")
     w.add_argument("--checkout", required=True)
     w.add_argument("--dir", required=True)
@@ -1835,7 +1799,7 @@ def main():
     u.add_argument("--print", action="store_true", help="print each answer, for reads such as list_tags")
     args = parser.parse_args()
     {"scan": cmd_scan, "hot": cmd_hot, "tests": cmd_tests, "blocks": cmd_blocks, "check": cmd_check,
-     "review": cmd_review, "calls": cmd_calls, "corpus": cmd_corpus,
+     "review": cmd_review, "calls": cmd_calls, "resolve": cmd_resolve, "corpus": cmd_corpus,
      "ub": cmd_ub}[args.command](args)
 
 

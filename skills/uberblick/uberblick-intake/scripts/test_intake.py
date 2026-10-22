@@ -11,6 +11,36 @@ import intake  # noqa: E402
 SCRIPT = Path(__file__).resolve().parent / "intake.py"
 
 
+# A stand-in for `ub mcp serve`: answers the tools intake.py calls and logs each call. The workspace already has
+# a page titled Alpha, and the first unpin_doc fails as it does when the page is unpinned already.
+FAKE_UB = r"""
+import json, sys
+log = open(sys.argv[1], "a")
+unpins = 0
+for line in sys.stdin:
+    m = json.loads(line)
+    if "id" not in m:
+        continue
+    result = {}
+    if m["method"] == "tools/call":
+        name, args = m["params"]["name"], m["params"]["arguments"]
+        log.write(json.dumps({"name": name, "arguments": args}) + "\n"); log.flush()
+        error, text = False, "{}"
+        if name == "list_docs":
+            docs = [] if args.get("kind") else [{"title": "Alpha", "uuid": "uuid-existing"}]
+            text = json.dumps({"workspace": "w", "docs": docs})
+        elif name == "create_doc":
+            text = json.dumps({"uuid": "uuid-" + args["title"]})
+        elif name == "get_sidebar":
+            text = json.dumps({"groups": []})
+        elif name == "unpin_doc":
+            unpins += 1
+            error, text = unpins == 1, "not pinned"
+        result = {"content": [{"type": "text", "text": text}], "isError": error}
+    print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": result}), flush=True)
+"""
+
+
 def doc(title, body, **meta):
     lines = ["---", f"title: {title}", f"description: {meta.pop('description', 'About ' + title)}"]
     for k, v in meta.items():
@@ -160,35 +190,73 @@ class Plan(unittest.TestCase):
                              capture_output=True, text=True, check=True)
         return json.loads(run.stdout), run.stderr
 
-    def test_calls_order_and_cycle(self):
+    def test_calls_in_two_passes(self):
         calls, _ = self.calls()
         tools = [(c["tool"], c.get("slug")) for c in calls]
-        self.assertEqual(tools[:3], [("create_doc", "b"), ("create_doc", "a"), ("create_doc", "d")])
+        # every document exists before any block is written, so each link can name its target
+        self.assertEqual(tools[:6], [("create_doc", "a"), ("create_doc", "b"), ("create_doc", "d"),
+                                     ("insert_block", "a"), ("insert_block", "b"), ("insert_block", "d")])
+        self.assertNotIn("blocks", calls[0]["arguments"])
         self.assertEqual(calls[0]["arguments"]["tags"], ["t1"])
         self.assertEqual(calls[2]["arguments"]["related"], {"$ref": "a"})
         self.assertEqual(calls[2]["arguments"]["kind"], "decision")
         self.assertEqual(calls[2]["arguments"]["status"], "open")
-        # b links to a before a exists: plain text at first, marked with link_range once a exists
-        self.assertNotIn("inline", calls[0]["arguments"]["blocks"][0])
-        self.assertEqual(calls[-1], {"tool": "link_range", "arguments": {
-            "uuid": {"$ref": "b"}, "block_id": {"$block": "b#0"}, "rev": {"$rev": "b#0"}, "start": 8, "end": 13,
-            "doc_id": {"$ref": "a"}}})
-        self.assertEqual(calls[0]["arguments"]["blocks"][0]["text"][8:13], "Alpha")
-        self.assertIn(("starter_cleanup", None), tools)
-        self.assertEqual(intake.resolve(calls[1]["arguments"]["blocks"][0]["inline"][1]["marks"],
-                                        {"b": "uuid-b"}), {"docLink": "uuid-b"})
-        self.assertEqual(intake.resolve(calls[-1]["arguments"], {"a": "A", "b": "B"}, {"b": [["blk", "r1", "x"]]}),
-                         {"uuid": "B", "block_id": "blk", "rev": "r1", "start": 8, "end": 13, "doc_id": "A"})
+        self.assertEqual(calls[3]["arguments"]["uuid"], {"$ref": "a"})
+        self.assertFalse([t for t, _ in tools if t in ("link_range", "edit_block", "starter_cleanup")])
+        optional = [c for c in calls if c.get("optional")]
+        self.assertEqual([c["tool"] for c in optional], ["unpin_doc", "unpin_doc", "sidebar_group"])
+        self.assertEqual(calls[-1]["arguments"], {"group": "More", "action": "move", "index": 1})
+        marks = calls[3]["arguments"]["blocks"][0]["inline"][1]["marks"]
+        self.assertEqual(intake.resolve(marks, {"b": "uuid-b"}), {"docLink": "uuid-b"})
+        with self.assertRaises(KeyError):
+            intake.resolve(calls[3]["arguments"], {"a": "uuid-a"})
 
-    def test_forward_links_in_a_table(self):
+    def test_links_in_a_table(self):
         (self.path.parent / "docs" / "b.md").write_text(doc("Beta", "| x |\n| - |\n| [Alpha](ref:a) |\n",
                                                             tags=["core"], tldr="B."))
         calls, _ = self.calls()
-        self.assertEqual(calls[0]["arguments"]["blocks"][0]["text"], "| x |\n| - |\n| Alpha |")
-        edit = next(c for c in calls if c["tool"] == "edit_block")
-        self.assertEqual(edit["arguments"]["old_text"], {"$text": "b#0"})
-        self.assertEqual(edit["arguments"]["new_text"], "| x |\n| - |\n| [Alpha]({{uuid:a}}) |")
-        self.assertEqual(edit["arguments"]["table_mapping"], {"rows": [0, 1], "columns": [0]})
+        insert = next(c for c in calls if c["tool"] == "insert_block" and c["slug"] == "b")
+        self.assertEqual(insert["arguments"]["blocks"][0]["text"], "| x |\n| - |\n| [Alpha]({{uuid:a}}) |")
+        self.assertEqual(intake.resolve(insert["arguments"], {"a": "A", "b": "B"})["blocks"][0]["text"],
+                         "| x |\n| - |\n| [Alpha](A) |")
+
+    def test_resolve_for_the_mcp_route(self):
+        calls, _ = self.calls()
+        base = self.path.parent
+        (base / "calls.json").write_text(json.dumps(calls))
+        (base / "uuids.json").write_text(json.dumps({"a": "A", "b": "B", "d": "D"}))
+        run = subprocess.run([sys.executable, str(SCRIPT), "resolve", "--calls", str(base / "calls.json"),
+                              "--uuids", str(base / "uuids.json")], capture_output=True, text=True, check=True)
+        ready = json.loads(run.stdout)
+        self.assertEqual(ready[0]["n"], 4)  # the create_doc calls are done
+        self.assertEqual(ready[0]["arguments"]["uuid"], "A")
+        self.assertNotIn("$ref", run.stdout)
+        (base / "uuids.json").write_text(json.dumps({"a": "A"}))
+        run = subprocess.run([sys.executable, str(SCRIPT), "resolve", "--calls", str(base / "calls.json"),
+                              "--uuids", str(base / "uuids.json")], capture_output=True, text=True)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("no UUID", run.stderr)
+
+    def test_ub_skips_optional_failures_and_adopted_documents(self):
+        calls, _ = self.calls()
+        base = self.path.parent
+        (base / "calls.json").write_text(json.dumps(calls))
+        fake = base / "fake_ub.py"
+        fake.write_text(FAKE_UB)
+        log = base / "log.jsonl"
+        run = subprocess.run([sys.executable, str(SCRIPT), "ub", "--calls", str(base / "calls.json"),
+                              "--checkout", str(base), "--out", str(base / "applied.json"), "--adopt",
+                              "--settle", "0", "--ub", f"{sys.executable} {fake} {log}"],
+                             capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        sent = [json.loads(line) for line in log.read_text().splitlines()]
+        tools = [m["name"] for m in sent]
+        self.assertNotIn(("insert_block", "uuid-existing"),
+                         [(m["name"], m["arguments"].get("uuid")) for m in sent])  # adopted: left as it is
+        self.assertEqual(tools.count("unpin_doc"), 2)  # the first failed, which is fine
+        applied = json.loads((base / "applied.json").read_text())
+        self.assertEqual(applied["done"], len(calls))
+        self.assertEqual(applied["adopted"], ["a"])
 
     def test_tags_the_catalog_lacks_are_left_off(self):
         calls, err = self.calls(tags=[])
@@ -201,8 +269,8 @@ class Plan(unittest.TestCase):
         calls, _ = self.calls("--applied", str(applied))
         self.assertEqual([c["tool"] for c in calls[:5]],
                          ["existing", "set_metadata", "existing", "set_metadata", "create_doc"])
-        self.assertEqual(calls[1]["arguments"], {"uuid": "uuid-b", "tags": ["t1"]})
-        self.assertFalse([c for c in calls if c["tool"] == "link_range"])
+        self.assertEqual(calls[1]["arguments"], {"uuid": "uuid-a", "tags": ["t1"]})
+        self.assertFalse([c for c in calls if c["tool"] == "insert_block" and c["slug"] in ("a", "b")])
 
     def test_globs_and_precedence(self):
         self.assertTrue(intake.covers("docs/*.md", "docs/a.md"))
