@@ -237,7 +237,7 @@ class Plan(unittest.TestCase):
         self.assertEqual([(r["call"], r["tool"]) for r in ready], [(1, "create_doc"), (2, "create_doc")])
         self.assertIn("needs the UUID of 'a'", err)
         ready, _ = resolve({"a": "A", "b": "B"})
-        self.assertEqual(ready[0], {"call": 3, "tool": "create_doc", "arguments": {
+        self.assertEqual(ready[0], {"call": 3, "tool": "create_doc", "slug": "d", "arguments": {
             "title": "Which store?", "description": "About Which store?", "kind": "decision",
             "status": "open", "related": "A"}})
         self.assertEqual(ready[1]["call"], 4)  # stops before d's blocks, which wait for d

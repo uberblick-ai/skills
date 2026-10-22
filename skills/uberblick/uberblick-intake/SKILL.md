@@ -58,7 +58,7 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    Through the MCP tools, call `list_tags`, `get_sidebar`, `list_docs` and
    `list_docs` with `kind: decision` (decision records are listed only then),
    and save the `list_tags` answer as it stands (`{"tags": [{"id", "name"}],
-   "complete": …}`) as `DIR/corpus/tags.json`. A fresh
+   "complete": …}`; other keys are fine) as `DIR/corpus/tags.json`. A fresh
    workspace holds two starter pages in an "Uberblick" group. A catalog
    marked `complete: false` has not synced yet: read it again before the
    writes. With neither route, say so in one line: the run ends with the
@@ -71,8 +71,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
 
    ```sh
    python3 scripts/intake.py scan CHECKOUT > DIR/scan.json
-   python3 scripts/intake.py hot DIR/scan.json
-   python3 scripts/intake.py tests DIR/scan.json
+   python3 scripts/intake.py hot DIR/scan.json > DIR/hot.txt
+   python3 scripts/intake.py tests DIR/scan.json > DIR/tests.txt
    ```
 
    `scan` lists every tracked Markdown file with its headings, size, history
@@ -88,6 +88,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    takes seconds to a few minutes, reads committed files and warns about
    uncommitted changes; the pages describe the commit in `ref`. Run git with
    `-c gc.auto=0` when you read further, so the checkout is left as it was.
+   `hot.txt` and `tests.txt` run to tens of kilobytes on a large repository:
+   read them in parts.
 
 3. **Read.** The guesses are a starting point, never the answer. Read the
    README, the docs site's navigation file, every file guessed `product`,
@@ -165,7 +167,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    candidates with their commits, the test focus and the proposed
    repository changes. Tell the person in a few sentences what the corpus
    will hold and where it overlaps a published docs site, then ask once for
-   approval to write it, whether to unpin the starter pages, and for any
+   approval to write it, whether to unpin the starter pages (their emptied
+   "Uberblick" group is deleted; the pages stay in the workspace), and for any
    new tags to be created under Workspace settings → Tags (MCP cannot
    create tags). Writes go to a workspace the team shares: wait for the
    answer. Change the plan as they ask and build the page again. When you
@@ -205,14 +208,17 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    python3 scripts/intake.py resolve --calls DIR/calls.json --uuids DIR/uuids.json
    ```
 
-   The first batch is the pages' `create_doc` calls. Send each `arguments`
-   to the tool named `tool`, add `"slug": "uuid"` from each answer to
-   `DIR/uuids.json` (a plain JSON object), and run `resolve` again: it skips
+   The first batch is the pages' `create_doc` calls; notes on where it
+   stopped go to stderr. Send each `arguments` to the tool named `tool`, add
+   `"slug": "uuid"` from each answer to `DIR/uuids.json` (a plain JSON
+   object; each line names its `slug`), and run `resolve` again: it skips
    what is done and stops before the next call that needs a UUID you have
    not saved yet. Two or three rounds cover a corpus. Send the calls in
    order; the first pin into a group creates it, so never send two pins in
-   parallel while their group does not exist yet. A refused call marked
-   `optional` is fine; stop at any other and fix it. The group moves at the
+   parallel while their group does not exist yet. The starter cleanup is
+   two `unpin_doc` calls and a `sidebar_group` `delete` of the emptied
+   starter group, all marked `optional`: a refused one is fine; stop at
+   any other refusal and fix it. The group moves at the
    end can be left out when `get_sidebar` already shows the plan's order.
    Last, call `sync_status`: the writes are done once nothing is unsynced.
 

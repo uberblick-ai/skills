@@ -71,7 +71,8 @@ into corpus writes.
 }
 ```
 
-- `ref` is the commit the scan read (`scan.json`'s `ref`), `date` today.
+- `ref` is the commit the scan read (`scan.json`'s `ref`; its full hash is
+  `commit`, for links and code checks), `date` today.
 - `capabilities`: what a person can do with the product, each with its
   `evidence` (docs, code, tests) and the `doc` that covers it, or `null`
   and a `why`. The pages follow from this list.

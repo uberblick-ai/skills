@@ -1339,7 +1339,8 @@ def cmd_resolve(args):
             print(f"stopped before call {i + 1} ({c['tool']}), which needs the UUID of {e}: send the calls above, "
                   f"add each create_doc's slug and uuid to {args.uuids}, and run resolve again", file=sys.stderr)
             break
-        print(json.dumps({"call": i + 1, "tool": c["tool"], "arguments": arguments}, ensure_ascii=False))
+        line = {"call": i + 1, "tool": c["tool"], "slug": c.get("slug") or target_slug(c), "arguments": arguments}
+        print(json.dumps({k: v for k, v in line.items() if v is not None}, ensure_ascii=False))
         printed += 1
     else:
         print(f"calls {start + 1} to {len(calls)}: all ready", file=sys.stderr)
