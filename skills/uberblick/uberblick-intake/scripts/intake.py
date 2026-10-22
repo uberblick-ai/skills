@@ -1175,22 +1175,55 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
     if not 2 <= len(groups) <= 7:
         warnings.append(f"sidebar: {len(groups)} groups; 3 to 6 read best")
     pinned = Counter()
+    kinds = {d.get("slug"): d.get("kind", "page") for d in plan["documents"]}
     for g in groups:
-        if len(g.get("docs", [])) > 8:
-            warnings.append(f"sidebar: group {g.get('name')!r} pins {len(g['docs'])}; pin entry points, at most 8")
+        if DOC_TYPE_GROUP.fullmatch(g.get("name", "").strip()):
+            warnings.append(f"sidebar: group {g.get('name')!r} names a kind of document; a group is a domain, "
+                            f"topic or responsibility, and its records and references hang off its entry point")
+        if len(g.get("docs", [])) > MAX_ENTRY_POINTS:
+            warnings.append(f"sidebar: group {g.get('name')!r} pins {len(g['docs'])}; pin the domain's entry "
+                            f"points (1 to {MAX_ENTRY_POINTS}) and link the rest from them")
         for slug in g.get("docs", []):
             pinned[slug] += 1
             if slug not in slugs:
                 errors.append(f"sidebar: {g.get('name')!r} pins {slug!r}, which is not a document")
-    if len(slugs) > 12 and len(pinned) > len(slugs) * 2 / 3:
-        warnings.append(f"sidebar: {len(pinned)} of {len(slugs)} documents pinned; pin entry points, at most two "
-                        f"thirds")
+            elif kinds.get(slug) == "decision":
+                warnings.append(f"sidebar: {slug} is a decision record; records are reached from their domain's "
+                                f"page, pinned only when one is the entry point a person needs")
+    for slug in sorted(set(slugs) - set(reachable(plan, base, pinned))):
+        warnings.append(f"sidebar: {slug} is not reachable from any pinned entry point; link it from its "
+                        f"domain's page")
     for slug, n in pinned.items():
         if n > 1:
             errors.append(f"sidebar: {slug} is pinned {n} times; a document has one pin")
     if plan["sidebar"].get("starter") not in (None, "keep", "unpin"):
         errors.append("sidebar: starter is keep or unpin")
     return errors, warnings
+
+
+DOC_TYPE_GROUP = re.compile(r"(?i)(decisions?|decision records?|adrs?|rfcs?|reference|references|guides?|"
+                            r"how-?tos?|docs|documentation|pages|misc|other|more|everything else)")
+MAX_ENTRY_POINTS = 3
+
+
+def fan_out(plan, base):
+    """slug -> the documents it leads to: its links, and for a page the decision records that name it."""
+    out = defaultdict(set)
+    for d, _meta, _blocks, refs, _err in plan_paths(plan, base):
+        out[d["slug"]] |= set(refs)
+        if d.get("kind") == "decision" and d.get("related"):
+            out[d["related"]].add(d["slug"])
+    return out
+
+
+def reachable(plan, base, start):
+    edges, seen, todo = fan_out(plan, base), set(start), list(start)
+    while todo:
+        for nxt in edges.get(todo.pop(), ()):
+            if nxt not in seen:
+                seen.add(nxt)
+                todo.append(nxt)
+    return seen
 
 
 def cmd_check(args):
@@ -1640,17 +1673,28 @@ def cmd_review(args):
     title_of = {s: v[1].get("title", s) for s, v in by_slug.items()}
     # Sidebar preview
     side = []
+    edges = fan_out(plan, base)
+    pins = [s for g in plan["sidebar"].get("groups", []) for s in g.get("docs", [])]
+
+    def item(slug, sub=False):
+        kind = by_slug.get(slug, ({}, {}, []))[0].get("kind", "page")
+        icon = "◆" if kind == "decision" else "▤"
+        return (f'<a class="si{" sub" if sub else ""}" href="#doc-{esc(slug)}"><span>{icon}</span>'
+                f'{esc(title_of.get(slug, slug))}</a>')
+
     for g in plan["sidebar"].get("groups", []):
         side.append(f'<div class="sg">{esc(g["name"])}</div>')
         for slug in g.get("docs", []):
-            kind = by_slug.get(slug, ({}, {}, []))[0].get("kind", "page")
-            icon = "◆" if kind == "decision" else "▤"
-            side.append(f'<a class="si" href="#doc-{esc(slug)}"><span>{icon}</span>{esc(title_of.get(slug, slug))}</a>')
-    unpinned = [s for s in by_slug if not any(s in g.get("docs", []) for g in plan["sidebar"].get("groups", []))]
-    if unpinned:
-        side.append(f'<div class="sg muted">Not pinned ({len(unpinned)})</div>')
+            side.append(item(slug))
+            # what the entry point fans out to: the documents it links to that have no pin of their own
+            for sub in sorted(edges.get(slug, ()) - set(pins), key=lambda s: title_of.get(s, s)):
+                if sub in by_slug:
+                    side.append(item(sub, sub=True))
+    lost = [s for s in by_slug if s not in reachable(plan, base, pins)]
+    if lost:
+        side.append(f'<div class="sg muted">Not reachable from an entry point ({len(lost)})</div>')
         side += [f'<a class="si muted" href="#doc-{esc(s)}"><span>▤</span>{esc(title_of.get(s, s))}</a>'
-                 for s in unpinned]
+                 for s in lost]
     # Tags
     tag_rows = []
     use = Counter(t.lower() for _d, meta, *_ in parsed for t in (meta.get("tags") or []))

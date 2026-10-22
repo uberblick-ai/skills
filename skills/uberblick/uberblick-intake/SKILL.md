@@ -123,7 +123,9 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    - 2 to 12 tags, reusing the catalog's names first;
    - where a drawing helps: ablauf for a flow with branches or phases,
      wireframe for a screen the page describes;
-   - the sidebar: 3 to 6 groups, entry points pinned, the rest reachable.
+   - the sidebar: 3 to 6 groups, one per domain, topic or responsibility;
+     each pins its entry points, pages that link on to the domain's
+     other pages and records, so every document is reachable from a pin.
 
 5. **Write** `DIR/docs/<slug>.md`, one Uberblick Markdown file per document,
    and `DIR/intake.json`, as [references/plan.md](references/plan.md)
@@ -146,7 +148,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    diagnostics. `check` stops on an error (a Markdown file nobody accounted
    for, a link to no document, a decision answer over 60 words, a tag not in
    the plan) and warns on what usually needs a fix (history or plans in a
-   page, a page over 900 words, a group pinning more than 8). Fix every
+   page, a page over 900 words, a group pinning more than 3 entry points, a
+   document no pin leads to). Fix every
    warning or keep it knowingly.
 
    Then check every page against the code at `ref`: each command, option,

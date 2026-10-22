@@ -304,6 +304,21 @@ class Plan(unittest.TestCase):
         self.assertEqual(calls[1]["arguments"], {"uuid": "uuid-a", "tags": ["t1"]})
         self.assertFalse([c for c in calls if c["tool"] == "insert_block" and c["slug"] in ("a", "b")])
 
+    def test_sidebar_entry_points(self):
+        _, warnings = intake.validate(self.plan, self.path.parent)
+        side = [w for w in warnings if w.startswith("sidebar")]
+        self.assertIn("names a kind of document", " ".join(side))  # "More"
+        self.assertIn("d is a decision record", " ".join(side))
+        self.assertNotIn("not reachable", " ".join(side))
+        self.plan["sidebar"]["groups"] = [{"name": "Storage", "docs": ["a"]}]
+        (self.path.parent / "docs" / "e.md").write_text(doc("Echo", "Alone.\n", tldr="E."))
+        self.plan["documents"].append({"slug": "e", "file": "docs/e.md", "sources": ["README.md"]})
+        _, warnings = intake.validate(self.plan, self.path.parent)
+        # b through a's link, d as a's record; e has no way in
+        self.assertEqual([w for w in warnings if w.startswith("sidebar")],
+                         ["sidebar: 1 groups; 3 to 6 read best",
+                          "sidebar: e is not reachable from any pinned entry point; link it from its domain's page"])
+
     def test_globs_and_precedence(self):
         self.assertTrue(intake.covers("docs/*.md", "docs/a.md"))
         self.assertFalse(intake.covers("docs/*.md", "docs/x/a.md"))

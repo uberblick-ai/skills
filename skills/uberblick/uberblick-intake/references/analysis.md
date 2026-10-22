@@ -169,19 +169,27 @@ page says, not to describe the tests.
 
 ## Sidebar
 
-The sidebar is the first thing a person sees. Pin entry points, not
-everything.
+The sidebar is how a person, or an agent new to the project, finds their way
+in. Its groups are the domains, topics or responsibilities people on the team
+own or work in; its pins are each domain's entry points; everything else is
+reached from them.
 
-- 3 to 6 groups, at most 8 pins each, ordered as a newcomer would read them:
-  a "Start here" group (the overview and the one or two concepts everything
-  else uses), then one group per product area, in the order of the product's
-  own navigation or its main journey, then a group for working on the
-  product if pages for that exist.
-- Pin the page a person opens first in each area, and the decision records
-  that most constrain day-to-day work. Leave the rest unpinned; links and
-  search reach them. With more than a dozen documents, pin at most two
-  thirds of them.
-- Group names are the product's nouns, short, in sentence case.
+- 3 to 6 groups, named for a domain in the product's nouns, short and in
+  sentence case: "Signing", "Self-hosting", "Billing". A group never names a
+  kind of document ("Decisions", "Reference", "Guides"): records and
+  references belong to the domain they constrain.
+- Each group pins its entry points, usually one and at most three: the page
+  a person working in that domain opens first. Order the groups as a
+  newcomer would meet the product, with the overview first in the first
+  group.
+- An entry point fans out. It says what the domain covers and links to each
+  of its sub-docs with a line on what each holds; a sub-doc may lead on to
+  its own. Decision records hang off the page they name in `related`, which
+  shows them there. Every document is reachable from a pin, and `check`
+  names the ones that are not. The review page shows each pin with the
+  documents it leads to.
+- Pin a decision record only when it is itself the entry point a person in
+  that domain needs.
 - The starter pages of a new workspace ("Welcome to Uberblick", "How to Use
   It" in the "Uberblick" group) are unpinned only when the person agrees.
 

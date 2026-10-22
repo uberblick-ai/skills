@@ -17,8 +17,8 @@ into corpus writes.
   ],
   "sidebar": {
     "groups": [
-      {"name": "Start here", "docs": ["overview", "document-lifecycle"]},
-      {"name": "Signing", "docs": ["send-a-document", "sign-a-document"]}
+      {"name": "Documents", "docs": ["overview", "document-lifecycle"]},
+      {"name": "Signing", "docs": ["send-a-document"]}
     ],
     "starter": "unpin"
   },
@@ -81,8 +81,8 @@ into corpus writes.
   tag is lowercase letters and digits joined by hyphens, at most 30
   characters. `"core": true` marks a tag that names a core area, which may
   sit on a single page.
-- `sidebar.groups` in display order, each with the documents it pins in
-  order. A document is pinned once at most; unpinned documents stay
+- `sidebar.groups` in display order, one per domain, each with the entry
+  points it pins in order; the other documents are linked from them. A document is pinned once at most; unpinned documents stay
   reachable through search, links and the decision log. `starter` is
   `unpin` or `keep`: what to do with the workspace's starter pages, decided
   with the person.
