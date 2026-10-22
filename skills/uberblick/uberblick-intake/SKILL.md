@@ -61,7 +61,7 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    "complete": …}`; other keys are fine) as `DIR/corpus/tags.json`. When
    both routes are there, write through `ub` (step 8): one command, with
    the checks and the wait for the hub. A fresh workspace holds two starter
-   pages in an "Uberblick" group and six starter tags (auth, billing, mcp,
+   pages in an "Überblick" group and six starter tags (auth, billing, mcp,
    permissions, rfc, sync); reuse a starter tag only where it fits. A
    catalog marked `complete: false` has not synced yet: read it again
    before the writes. A local workspace (`"hubUrl": null` in
@@ -184,7 +184,7 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    repository changes. Tell the person in a few sentences what the corpus
    will hold and where it overlaps a published docs site, then ask once for
    approval to write it, whether to unpin the starter pages (their emptied
-   "Uberblick" group is deleted; the pages stay in the workspace), and for any
+   "Überblick" group is deleted; the pages stay in the workspace), and for any
    new tags to be created under Workspace settings → Tags (MCP cannot
    create tags). Writes go to a workspace the team shares: wait for the
    answer. Change the plan as they ask and build the page again. When you

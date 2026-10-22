@@ -131,14 +131,19 @@ class Scan(unittest.TestCase):
             (repo / "e2e" / "login.spec.ts").write_text("test('signs in', async () => {});\n"
                                                          "test('signs out', async () => {});\n")
             (repo / "app.ts").write_text("export const a = 1;\n")
+            (repo / "regress").mkdir()
+            (repo / "regress" / "copy-mode-search.sh").write_text("#!/bin/sh\n$TEST_TMUX new -d\n")
+            (repo / "SYNCING.md").write_text("# Syncing\n\n# Remote\n\nAdd it.\n\n# Merge\n\nMerge it.\n")
             run("add", ".")
             run("commit", "-qm", "Switch to the new renderer")
             out = subprocess.run([sys.executable, str(SCRIPT), "scan", d], capture_output=True, text=True,
                                  check=True).stdout
             scan = json.loads(out)
         self.assertEqual({m["path"]: m["guess"] for m in scan["markdown"]},
-                         {"README.md": "product", "AGENTS.md": "harness"})
-        self.assertEqual(scan["tests"]["cases"], {"e2e": 2})
+                         {"README.md": "product", "AGENTS.md": "harness", "SYNCING.md": "technical"})
+        self.assertEqual(next(m for m in scan["markdown"] if m["path"] == "SYNCING.md")["headings"],
+                         ["Remote", "Merge"])  # no H2: the H1 sections below the title
+        self.assertEqual(scan["tests"]["cases"], {"e2e": 2, "cli": 1})
         self.assertEqual(scan["tests"]["e2e"][0]["titles"], ["signs in", "signs out"])
         self.assertTrue(scan["churn"]["hot_files"])
         self.assertEqual(scan["schema_version"], intake.SCHEMA_VERSION)

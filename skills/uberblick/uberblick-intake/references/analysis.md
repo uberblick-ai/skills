@@ -197,8 +197,9 @@ reached from them.
   documents it leads to.
 - Pin a decision record only when it is itself the entry point a person in
   that domain needs.
-- The starter pages of a new workspace ("Welcome to Uberblick", "How to Use
-  It" in the "Uberblick" group) are unpinned only when the person agrees.
+- The starter pages of a new workspace ("Welcome to Überblick", "How to Use
+  It" in the "Überblick" group; the names vary by version, the UUIDs do
+  not) are unpinned only when the person agrees.
 
 ## Repository changes
 

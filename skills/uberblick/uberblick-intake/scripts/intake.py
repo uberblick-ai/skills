@@ -67,7 +67,7 @@ RFC = re.compile(r"(^|/)(rfcs?|proposals?|design[-_]docs?|specs?|plans?)/", re.I
 TECH_NAME = re.compile(r"(^|/)(CONTRIBUTING|DEVELOP(MENT|ING)?|HACKING|BUILD(ING)?|INSTALL(ATION|ING)?|ARCHITECTURE|INTERNALS|"
                        r"RELEASING|RELEASE|DEPLOY(MENT|ING)?|TESTING|STYLE|CODE[_-]STYLE|CODE[_-]REVIEW[^/]*|"
                        r"WRITING[_-]STYLE|DESIGN|MANIFEST|SIGNING|PORTING|BENCHMARKS?|PERFORMANCE|DEBUGGING|"
-                       r"TROUBLESHOOTING)[^/]*$|(^|/)(contributing|development|developers?|internals|architecture|"
+                       r"TROUBLESHOOTING|SYNC(ING)?|UPSTREAM|VENDOR(ING)?|MAINTAIN(ING|ERS?))[^/]*$|(^|/)(contributing|development|developers?|internals|architecture|"
                        r"dev[-_]?docs|reference|api|self-hosting|hosting|deploy(ment)?|operations|ops|infra|docker|playwright|"
                        r"cypress|e2e|tests?|scripts|ci|packaging|helm|k8s|kubernetes|\.devcontainer|"
                        r"benchmarks?|maintainers?)/", re.I)
@@ -116,6 +116,7 @@ TEST_FILE = re.compile(
     r"integrationTest|testDebug|testRelease)/.*\.(kt|java)$)|((Test|Tests|Spec|IT)\.(kt|java|swift|cs|php)$)|"
     r"(_spec\.rb$)|((^|/)test/.*_test\.rb$)|(_test\.exs$)|(\.feature$)|((^|/)(Tests?|UITests?)/.*\.swift$)",
     re.I)
+SHELL_TEST = re.compile(r"(^|/)(regress|regressions?|tests?|t)/[^/]+\.sh$|(^|/)test[-_][^/]*\.sh$|_test\.sh$", re.I)
 E2E_PATH = re.compile(r"(^|/)(e2e|e2e-tests?|end-to-end|playwright|cypress|acceptance|androidTest|"
                       r"androidInstrumentedTest|ui-?tests?|browser-tests?|system-tests?|smoke|"
                       r"maestro|detox|journeys?)(/|$)|\.(e2e|cy)\.[cm]?[jt]sx?$|\.feature$|UITests?/", re.I)
@@ -222,7 +223,8 @@ def md_facts(path, text):
     return {
         "title": title[:120],
         "words": words,
-        "headings": [t[:80] for lvl, t in headings if lvl == 2][:12],
+        "headings": [t[:80] for lvl, t in headings
+                     if lvl == (2 if any(x == 2 for x, _ in headings) else 1) and t != title][:12],
         "fences": dict(fences),
         "images": len(re.findall(r"!\[[^\]]*\]\(", body)) + body.count("<img"),
         "links_md": len(links),
@@ -521,6 +523,14 @@ def scan_tests(checkout, files, workspaces, products=()):
                               "cases": 1, "skipped": 0, "lines": flow.count("\n"), "suites": [],
                               "titles": [(name.group(1) if name else Path(f).stem.replace("_", " "))[:120]]})
                 continue
+        if ext == ".sh" and SHELL_TEST.search(f):
+            # a regression script that runs the built program, as C and Unix projects test: one journey per script
+            script = read(checkout / f, 400_000)
+            stem = re.sub(r"(^test[-_]|[-_]test$)", "", Path(f).stem)
+            tests.append({"path": f, "area": area_of(f, workspaces), "topic": re.split(r"[-_]", stem)[0] or stem,
+                          "kind": "cli", "cases": 1, "skipped": 0, "lines": script.count("\n"), "suites": [],
+                          "titles": [stem.replace("-", " ").replace("_", " ")[:120]]})
+            continue
         is_test = bool(TEST_FILE.search(f)) and not re.search(r"(^|/)(fixtures?|testdata|__snapshots__|"
                                                             r"node_modules|vendor)/", f, re.I)
         if ext not in CODE_EXT and not f.endswith(".feature"):
@@ -1842,7 +1852,7 @@ def cmd_review(args):
                                                                                  key=lambda kv: -kv[1])) + "."),
         "FOCUS": "".join(focus_rows),
         "CHANGES": (f"<ul>{changes}</ul>" if changes else "<p>None.</p>"),
-        "STARTER": {"unpin": "The starter pages (Welcome to Uberblick, How to Use It) are unpinned and their group "
+        "STARTER": {"unpin": "The starter pages (Welcome to Überblick, How to Use It) are unpinned and their group "
                              "removed.",
                     "keep": "The starter pages stay pinned."}.get(plan["sidebar"].get("starter"),
                                                                   "The starter pages are left as they are."),
