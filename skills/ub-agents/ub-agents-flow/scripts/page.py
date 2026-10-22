@@ -19,7 +19,7 @@ LIGHT = {"bg": "#ffffff", "ink": "#17202c", "muted": "#5a6575", "line": "#d3d9e2
          "agent-bg": "#e7eeed", "system": "#4f5d76", "system-bg": "#ebedf3", "rework": "#826954",
          "rework-bg": "#f3f0eb", "stop": "#815f5a", "stop-bg": "#ede6e5", "done": "#536e5a", "done-bg": "#e8ede9"}
 # Past these a document stops reading at a glance.
-BUDGET = {"summary": 60, "phase": 30, "does": 20, "rule": 30}
+BUDGET = {"summary": 60, "phase": 30, "point": 30, "does": 20, "rule": 30}
 
 
 def esc(value):
@@ -92,17 +92,23 @@ def validate(data, flows=None):
                                    "agents.uberblick.ai page"),
                       ("gates", "each phase lists its own gates, numbered from G1"),
                       ("summary", "the summary belongs to the overview"),
-                      ("notes", "notes belong to the overview or to a phase")):
+                      ("notes", "notes belong to a phase")):
         if gone in data:
             raise ValueError(f"{gone} is not a top-level field: {why}")
     warnings = []
     overview = data.get("overview")
     if not isinstance(overview, dict):
-        raise ValueError("overview must hold the summary, the overview flow and the notes for the whole loop")
+        raise ValueError("overview must hold the summary, the overview flow and its points")
     if words(text(overview, "summary", "overview")) > BUDGET["summary"]:
         warnings.append(f"overview: summary is over {BUDGET['summary']} words")
     flow_name(overview, "overview")
-    note_list(overview, "overview")
+    if "notes" in overview:
+        raise ValueError("overview: notes belong to a phase; the overview keeps to the abstract flow")
+    points = overview.get("points")
+    if not isinstance(points, list) or not points or not all(isinstance(p, str) and p.strip() for p in points):
+        raise ValueError("overview: points must list each input and each phase in a sentence")
+    warnings += [f"overview: point {n} is over {BUDGET['point']} words"
+                 for n, point in enumerate(points, 1) if words(point) > BUDGET["point"]]
     roles = data.get("roles")
     if not isinstance(roles, list) or not roles:
         raise ValueError("roles must list every agent in ub-agents.yaml")
@@ -135,8 +141,6 @@ def validate(data, flows=None):
         name = text(phase, "name", "phase")
         if words(text(phase, "summary", name)) > BUDGET["phase"]:
             warnings.append(f"{name}: summary is over {BUDGET['phase']} words")
-        for key in ("starts", "ends"):
-            text(phase, key, name)
         flow = flow_name(phase, name)
         if Path(flow).stem in ("overview", "flow"):
             raise ValueError(f"{name}: {flow} would overwrite the overview's or the combined document's Markdown")
@@ -191,11 +195,8 @@ def documents(data):
     """The overview, then one document per phase, each as (name, title, Uberblick blocks in order)."""
     roles = {r["agent"]: r for r in data["roles"]}
     overview, phase_titles = titles(data)
-    rows = [["Phase", "Starts on", "Ends at", "Agents", "Gates"]]
-    rows += [[f"**{p['name']}**", p["starts"], p["ends"], ", ".join(p["roles"]), str(len(p["gates"]))]
-             for p in data["phases"]]
-    docs = [("overview", overview, [("p", data["overview"]["summary"]), ("ablauf", data["overview"]["flow"]),
-                                    ("table", rows)] + notes(data["overview"]))]
+    docs = [("overview", overview, [("p", data["overview"]["summary"]), ("ablauf", data["overview"]["flow"])]
+             + [("li", point) for point in data["overview"]["points"]])]
     for phase in data["phases"]:
         table = [["Agent", "Starts on", "Does"]]
         table += [[f"**{name}** {roles[name].get('kind', 'any')}", ", ".join(f"`{t}`" for t in roles[name]["triggers"]),

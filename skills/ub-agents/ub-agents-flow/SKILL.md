@@ -81,14 +81,17 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    route, a role that can only stop by reporting blocked.
 
 3. Write `DIR/flow.json` as [references/page.md](references/page.md)
-   describes: the overview with a three-sentence summary and its notes, first
-   one per `queue` setting in use, saying what it does and linking its section
-   of https://agents.uberblick.ai/docs/configuration/queue.html, then the
-   findings that span the loop; the two phases with a sentence each, their
-   roles, their gates numbered from `G1` in the order an item meets them with
-   one plain sentence each, and their own findings; and every role. Write in
+   describes: the overview with a short summary and one sentence per way work
+   enters and per phase, naming no labels; the two phases with a sentence
+   each, their roles, their gates numbered from `G1` in the order an item
+   meets them with one plain sentence each, and their notes, the issue phase's
+   starting with one per `queue` setting in use, saying what it does and
+   linking its section of
+   https://agents.uberblick.ai/docs/configuration/queue.html, then each
+   phase's findings from step 2; and every role. Write in
    the present tense: a route the maintainer has decided is described as
-   running, with no "planned", and no issue or PR number, release or date. Describe the queue as the launcher runs it; where
+   running, with no "planned", and no issue or PR number, release or date.
+   Describe the queue as the launcher runs it; where
    the repository's own instructions say otherwise, add that as a finding.
 
 4. Draw `DIR/overview.flow`, `DIR/issue.flow` and `DIR/pr.flow` as
@@ -97,7 +100,8 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    [assets/issue.flow](assets/issue.flow) and [assets/pr.flow](assets/pr.flow):
    the path an item takes when every gate passes down the middle, rework on
    the left, the stop panel on the right, every gate numbered as in its phase
-   in `flow.json`. The overview adds any way work enters without an issue.
+   in `flow.json`. The overview stays abstract: the ways work enters, one box
+   per phase, and the merge.
 
 5. Render both, installing the renderer once per scratch directory:
 
@@ -130,5 +134,5 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    decides, and anything from the notes that looks like a mistake in the
    config or the instructions. Change nothing on GitHub; offer to open an
    issue only if they ask. When they store the documents in Uberblick, create
-   the phase documents first, then the overview, and link each phase name in
-   its table to that phase's document.
+   the phase documents first, then the overview, and link each phase's name
+   in its summary to that phase's document.

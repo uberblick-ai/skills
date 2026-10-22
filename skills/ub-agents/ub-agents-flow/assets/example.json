@@ -4,10 +4,12 @@
   "ref": "a021eaa",
   "date": "2026-10-20",
   "overview": {
-    "summary": "Four agents carry an issue from needs-preparation to a squash merge in two phases. The launcher checks every start, then each agent checks its own gate before it hands off. Work returns to the implementer through needs-changes and stops for a maintainer through needs-human.",
+    "summary": "Work enters the loop as an issue and leaves it squash-merged. Agents prepare, build, review and merge it; a maintainer steps in where an agent stops or a change touches a guarded path.",
     "flow": "overview.flow",
-    "notes": [
-      "`queue.milestones: order` Priority always wins; at equal priority, issues from earlier milestones, in alphabetical order of their titles, go first. [Queue: Milestones](https://agents.uberblick.ai/docs/configuration/queue.html#milestones)"
+    "points": [
+      "**An issue** enters when a maintainer starts it.",
+      "**Preparation.** The issue-preparer states the behavior and the smallest set of acceptance criteria.",
+      "**Implementation.** The implementer builds one PR, a reviewer on another model checks the exact head, and the integrator runs the final checks and merges."
     ]
   },
   "phases": [
@@ -53,8 +55,9 @@
           ]
         }
       ],
-      "starts": "`needs-preparation`",
-      "ends": "`ready`"
+      "notes": [
+        "`queue.milestones: order` Priority always wins; at equal priority, issues from earlier milestones, in alphabetical order of their titles, go first. [Queue: Milestones](https://agents.uberblick.ai/docs/configuration/queue.html#milestones)"
+      ]
     },
     {
       "name": "Implementation and PR phase",
@@ -124,8 +127,6 @@
           ]
         }
       ],
-      "starts": "`ready`",
-      "ends": "Squash-merged",
       "notes": [
         "The implementer has no needs-human outcome: it stops by reporting blocked, which leaves an Action needed comment until a maintainer runs ub-agents retry."
       ]

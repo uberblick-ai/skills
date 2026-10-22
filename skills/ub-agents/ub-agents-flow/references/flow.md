@@ -53,10 +53,12 @@ legend
 
 ## Conventions for a loop flow
 
-- Three flows. `overview.flow` is the whole loop in one column: every agent
-  as a box between the labels that start it, no gates, rework on the left,
-  `needs-human` on the right, and a `text` in a `phase` column beside the
-  first node of each phase. `issue.flow` starts at an
+- Three flows. `overview.flow` is the abstract loop: an `end tone=muted`
+  node per way work enters, side by side in the top row (a person's issue, an
+  agent's follow-up or sub-issue, a bot's pull request), a `box` per phase
+  named after it with its agents as the caption, and an
+  `end tone=done "Merged"`. No labels, gates, edge labels, rework or stop
+  panel: the phase documents carry those. `issue.flow` starts at an
   `end created tone=muted "Issue created"` node with an edge to the entry
   label (`needs-preparation`) saying who adds it, and runs to the label the
   implementer starts on, ending in an `end` node such as "Implementation picks
@@ -64,8 +66,8 @@ legend
   flow draws the launcher's gate before its first agent, numbered `G1`.
 - Work that enters without an issue, such as a bot's pull requests that
   `trusted-pr-authors` lets run or a label another tool adds that triggers an
-  agent, gets its own `end` node in a column beside the main one in the
-  overview, with an edge to the label and on to the agent it starts.
+  agent, gets its own input in the overview, with an edge straight to the
+  phase it enters.
 
 - Three columns: `rework` on the left for labels that send work back, `main`
   for the path an item takes when every gate passes, `stop` on the right for

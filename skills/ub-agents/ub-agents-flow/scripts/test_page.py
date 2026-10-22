@@ -51,8 +51,7 @@ class PageTests(unittest.TestCase):
                        lambda d: d["phases"][0]["gates"].reverse(),
                        lambda d: d["phases"][0].update(flow="issue.txt"),
                        lambda d: d["phases"][1].update(flow="issue.flow"),
-                       lambda d: d["phases"][1].update(flow="overview.flow"),
-                       lambda d: d["phases"][0].pop("starts")):
+                       lambda d: d["phases"][1].update(flow="overview.flow")):
             data = copy.deepcopy(self.data)
             change(data)
             with self.assertRaises(ValueError):
@@ -76,6 +75,8 @@ class PageTests(unittest.TestCase):
             lambda d: d.update(gates=[]),
             lambda d: d.pop("overview"),
             lambda d: d["overview"].pop("flow"),
+            lambda d: d["overview"].update(points=[]),
+            lambda d: d["overview"].update(notes=["a note"]),
             lambda d: d["roles"][0].update(outcomes={}),
             lambda d: d["roles"].append(copy.deepcopy(d["roles"][0])),
             lambda d: d.pop("phases"),
@@ -91,9 +92,10 @@ class PageTests(unittest.TestCase):
         self.assertEqual([name for name, _, _ in docs], ["overview", "issue", "pr"])
         overview, issue, pr = (page.markdown(title, blocks, self.flows) for _, title, blocks in docs)
         self.assertTrue(overview.startswith("# How the loop runs in uberblick-ai/ub-agents\n"))
-        self.assertIn("| **Issue phase** | `needs-preparation` | `ready` | issue-preparer | 3 |", overview)
-        self.assertIn("## Notes\n\n- `queue.milestones: order` Priority always wins", overview)
-        self.assertEqual(overview.count(":::card"), 0)
+        self.assertIn("\n- **An issue** enters when a maintainer starts it.\n- **Preparation.**", overview)
+        for absent in (":::card", "| ", "## Notes"):
+            self.assertNotIn(absent, overview)
+        self.assertIn("## Notes\n\n- `queue.milestones: order` Priority always wins", issue)
         self.assertTrue(issue.startswith("# The loop in uberblick-ai/ub-agents: issue phase\n"))
         self.assertEqual(issue.count(":::card\n"), 3)
         self.assertEqual(pr.count(":::card\n"), 5)
@@ -120,7 +122,7 @@ class PageTests(unittest.TestCase):
         self.assertIn("Reads a \\| b", page.markdown(title, blocks, self.flows))
 
     def test_page_draws_each_document_and_escapes_text(self):
-        self.data["overview"]["notes"] = ["<script>alert(1)</script> and `code`"]
+        self.data["overview"]["points"] = ["<script>alert(1)</script> and `code`"]
         html = page.render(page.documents(self.data), self.svgs, self.data["repository"])
         self.assertEqual(html.count("<article>"), 3)
         self.assertEqual(html.count('<figure class="ablauf"><svg'), 3)
