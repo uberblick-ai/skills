@@ -1,0 +1,13 @@
+flow v0
+# uberblick-ai/ub-agents: the whole loop, from an issue to the merge.
+
+columns main
+
+end issue col=main tone=muted "An issue"
+box preparation "states the behavior and the smallest set of acceptance criteria"
+box implementation "one PR, reviewed by another model, merged by the integrator"
+end merged tone=done "Squash-merged"
+
+issue --> preparation
+preparation --> implementation
+implementation --> merged

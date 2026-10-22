@@ -1,0 +1,46 @@
+flow v0
+# uberblick-ai/ub-agents, implementation and PR phase: from ready to merged.
+
+columns rework main stop
+
+pill ready col=main tone=done "ready (issue)"
+decision g1 tone=system "G1 Launcher: may it start?"
+box implementer "branch, code, checks, draft PR"
+decision g3 tone=system "G2 Checks green, PR ready?"
+pill needs-review tone=agent
+box reviewer "different model, exact head commit"
+decision g4 tone=system "G3 Criteria met?"
+pill ready-to-merge tone=done
+box integrator "base merge, final checks"
+decision g5 tone=system "G4 Green Test on head, policy?"
+end merged "Squash-merged, issue closed"
+
+pill needs-changes col=rework row=g4 tone=rework
+
+panel human col=stop row=g5 tone=stop
+  pill needs-human
+  strong "G5 A maintainer merges"
+  muted "agent config, CI, outside input"
+  muted "or CLI changes"
+
+ready --> g1
+g1 --> implementer : yes, before every run
+implementer --> g3
+g3 --> needs-review : handed-off
+needs-review --> reviewer
+reviewer --> g4
+g4 --> ready-to-merge : approved
+ready-to-merge --> integrator
+integrator --> g5
+g5 --> merged : merged
+
+g4 --> needs-changes tone=rework : changes-requested
+g5 --> needs-changes tone=rework to=bottom : changes-requested
+needs-changes --> implementer tone=rework from=top to=left label=end : revise the same PR
+
+g5 --> human tone=stop : maintainer-merge
+
+legend
+  decision tone=system "gate, numbered as in the cards"
+  pill tone=done "GitHub label"
+  panel tone=stop "a person decides"
