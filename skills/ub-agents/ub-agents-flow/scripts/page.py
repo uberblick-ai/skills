@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Build the loop flow report from flow.json and one ablauf flow per phase: Uberblick Markdown and a page; reads only."""
+"""Build the loop flow documents from flow.json and its ablauf flows: an overview and one document per phase,
+as Uberblick Markdown and a page; reads only."""
 import argparse
 import html
 import json
@@ -17,8 +18,8 @@ LIGHT = {"bg": "#ffffff", "ink": "#17202c", "muted": "#5a6575", "line": "#d3d9e2
          "surface": "#ffffff", "neutral": "#59616c", "neutral-bg": "#e1e3e6", "agent": "#3e6563",
          "agent-bg": "#e7eeed", "system": "#4f5d76", "system-bg": "#ebedf3", "rework": "#826954",
          "rework-bg": "#f3f0eb", "stop": "#815f5a", "stop-bg": "#ede6e5", "done": "#536e5a", "done-bg": "#e8ede9"}
-# Past these the report no longer fits two pages.
-BUDGET = {"summary": 60, "phase": 30, "does": 20, "rule": 30, "gates": 8}
+# Past these a document stops reading at a glance.
+BUDGET = {"summary": 60, "phase": 30, "does": 20, "rule": 30}
 
 
 def esc(value):
@@ -42,19 +43,66 @@ def words(value):
     return len(value.split())
 
 
+def gate_list(gates, where):
+    """A phase's gates, numbered G1, G2, ... in the order an item meets them."""
+    if not isinstance(gates, list) or not gates:
+        raise ValueError(f"{where}: gates must list at least one gate")
+    for n, gate in enumerate(gates, 1):
+        gid = text(gate, "id", f"{where} gate")
+        if gid != f"G{n}":
+            raise ValueError(f"{where}: gate {gid!r} must be G{n}; number each phase's gates from G1 in order")
+        for key in ("name", "at"):
+            text(gate, key, f"{where} {gid}")
+        if gate.get("decides") not in DECIDERS:
+            raise ValueError(f"{where} {gid}: decides must be one of {', '.join(sorted(DECIDERS))}")
+        sources = gate.get("sources")
+        if not isinstance(sources, list) or not sources:
+            raise ValueError(f"{where} {gid}: sources must name the files (path:line) the gate comes from")
+        for source in sources:
+            if not isinstance(source, str) or not SOURCE.match(source):
+                raise ValueError(f"{where} {gid}: source {source!r} must be path or path:line or path:start-end")
+    return [g["id"] for g in gates]
+
+
+def note_list(obj, where):
+    notes = obj.get("notes", [])
+    if not isinstance(notes, list) or not all(isinstance(n, str) and n.strip() for n in notes):
+        raise ValueError(f"{where}: notes must be nonempty sentences")
+    return notes
+
+
+def flow_name(obj, where):
+    name = text(obj, "flow", where)
+    if not name.endswith(".flow") or "/" in name:
+        raise ValueError(f"{where}: flow must name an ablauf .flow file next to flow.json")
+    return name
+
+
 def validate(data, flows=None):
     """Raise on a malformed report; return warnings about consistency and length."""
-    if data.get("schema_version") != 1:
-        raise ValueError("schema_version must be 1")
+    if data.get("schema_version") != 2:
+        raise ValueError("schema_version must be 2")
     repo = text(data, "repository", "report")
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
         raise ValueError("repository must be OWNER/NAME")
     text(data, "ref", "report")
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text(data, "date", "report")):
         raise ValueError("date must be YYYY-MM-DD")
+    for gone, why in (("settings", "a limit that holds work is a gate, and a queue rule is a note linking its "
+                                   "agents.uberblick.ai page"),
+                      ("gates", "each phase lists its own gates, numbered from G1"),
+                      ("summary", "the summary belongs to the overview"),
+                      ("notes", "notes belong to the overview or to a phase")):
+        if gone in data:
+            raise ValueError(f"{gone} is not a top-level field: {why}")
     warnings = []
-    if words(text(data, "summary", "report")) > BUDGET["summary"]:
-        warnings.append(f"summary is over {BUDGET['summary']} words")
+    overview = data.get("overview")
+    if not isinstance(overview, dict):
+        raise ValueError("overview must hold the summary, the overview flow and the notes for the whole loop")
+    if words(text(overview, "summary", "overview")) > BUDGET["summary"]:
+        warnings.append(f"overview: summary is over {BUDGET['summary']} words")
+    flow_name(overview, "overview")
+    note_list(overview, "overview")
     roles = data.get("roles")
     if not isinstance(roles, list) or not roles:
         raise ValueError("roles must list every agent in ub-agents.yaml")
@@ -79,73 +127,50 @@ def validate(data, flows=None):
             for label in added:
                 if label not in triggered and label not in stops:
                     warnings.append(f"{role['agent']}: outcome {outcome} adds {label}, which starts no agent")
-    gates = data.get("gates")
-    if not isinstance(gates, list) or not gates:
-        raise ValueError("gates must list at least one gate")
-    if len(gates) > BUDGET["gates"]:
-        warnings.append(f"{len(gates)} gates; merge related ones to stay within {BUDGET['gates']}")
-    ids = []
-    for gate in gates:
-        gid = text(gate, "id", "gate")
-        if not GATE_ID.match(gid) or gid in ids:
-            raise ValueError(f"gate id {gid!r} must be G1, G2, ... and unique")
-        ids.append(gid)
-        for key in ("name", "at"):
-            text(gate, key, gid)
-        if gate.get("decides") not in DECIDERS:
-            raise ValueError(f"{gid}: decides must be one of {', '.join(sorted(DECIDERS))}")
-        if words(text(gate, "rule", gid)) > BUDGET["rule"]:
-            warnings.append(f"{gid}: rule is over {BUDGET['rule']} words")
-        sources = gate.get("sources")
-        if not isinstance(sources, list) or not sources:
-            raise ValueError(f"{gid}: sources must name the files (path:line) the gate comes from")
-        for source in sources:
-            if not isinstance(source, str) or not SOURCE.match(source):
-                raise ValueError(f"{gid}: source {source!r} must be path or path:line or path:start-end")
-    if "settings" in data:
-        raise ValueError("settings are gone: a limit that holds work is a gate, and a queue rule is a note "
-                         "linking its agents.uberblick.ai page")
-    for note in data.get("notes", []):
-        if not isinstance(note, str) or not note.strip():
-            raise ValueError("notes must be nonempty sentences")
     phases = data.get("phases")
     if not isinstance(phases, list) or not phases:
         raise ValueError("phases must list the issue phase and the implementation and PR phase")
-    placed = {"roles": [], "gates": []}
+    placed, files = [], {overview["flow"]}
     for phase in phases:
         name = text(phase, "name", "phase")
         if words(text(phase, "summary", name)) > BUDGET["phase"]:
             warnings.append(f"{name}: summary is over {BUDGET['phase']} words")
-        if not text(phase, "flow", name).endswith(".flow"):
-            raise ValueError(f"{name}: flow must name an ablauf .flow file next to flow.json")
-        for key, known in (("roles", seen), ("gates", set(ids))):
-            listed = labels(phase.get(key, []), f"{name}: {key}")
-            if key == "roles" and not listed:
-                raise ValueError(f"{name}: roles must name the agents of this phase")
-            unknown = [v for v in listed if v not in known]
-            if unknown:
-                raise ValueError(f"{name}: unknown {key} {', '.join(unknown)}")
-            placed[key] += listed
-    for key, every in (("roles", [r["agent"] for r in roles]), ("gates", ids)):
-        missing = [v for v in every if v not in placed[key]]
-        twice = sorted({v for v in placed[key] if placed[key].count(v) > 1})
-        if missing or twice:
-            raise ValueError(f"every {key[:-1]} belongs to exactly one phase: "
-                             + "; ".join(filter(None, [missing and f"missing {', '.join(missing)}",
-                                                       twice and f"twice {', '.join(twice)}"])))
+        for key in ("starts", "ends"):
+            text(phase, key, name)
+        flow = flow_name(phase, name)
+        if Path(flow).stem in ("overview", "flow"):
+            raise ValueError(f"{name}: {flow} would overwrite the overview's or the combined document's Markdown")
+        if flow in files:
+            raise ValueError(f"{name}: {flow} is already another document's flow")
+        files.add(flow)
+        listed = labels(phase.get("roles", []), f"{name}: roles")
+        if not listed:
+            raise ValueError(f"{name}: roles must name the agents of this phase")
+        unknown = [v for v in listed if v not in seen]
+        if unknown:
+            raise ValueError(f"{name}: unknown roles {', '.join(unknown)}")
+        placed += listed
+        gate_list(phase.get("gates"), name)
+        for gate in phase["gates"]:
+            if words(text(gate, "rule", f"{name} {gate['id']}")) > BUDGET["rule"]:
+                warnings.append(f"{name} {gate['id']}: rule is over {BUDGET['rule']} words")
+        note_list(phase, name)
+    missing = [r["agent"] for r in roles if r["agent"] not in placed]
+    twice = sorted({v for v in placed if placed.count(v) > 1})
+    if missing or twice:
+        raise ValueError("every role belongs to exactly one phase: "
+                         + "; ".join(filter(None, [missing and f"missing {', '.join(missing)}",
+                                                   twice and f"twice {', '.join(twice)}"])))
     if flows is not None:
-        # A gate is drawn as a node; a number in an edge label alone is easy to miss.
-        drawn = {name: {gid for line in source.splitlines() if not EDGE.search(line)
-                        for gid in re.findall(r"\bG\d+\b", line)}
-                 for name, source in flows.items()}
-        every = set().union(*drawn.values())
-        warnings += [f"{gid} is in no flow" for gid in ids if gid not in every]
-        warnings += [f"the {name} flow shows {gid}, which is not a gate"
-                     for name, shown in drawn.items() for gid in sorted(shown - set(ids))]
         for phase in phases:
-            shown = drawn.get(phase["name"], set())
-            warnings += [f"{gid} is not in the {phase['name']} flow" for gid in phase.get("gates", [])
-                         if gid in every and gid not in shown]
+            # A gate is drawn as a node; a number in an edge label alone is easy to miss.
+            source = flows.get(phase["flow"], "")
+            shown = {gid for line in source.splitlines() if not EDGE.search(line)
+                     for gid in re.findall(r"\bG\d+\b", line)}
+            ids = [g["id"] for g in phase["gates"]]
+            warnings += [f"{phase['name']}: {gid} is not in {phase['flow']}" for gid in ids if gid not in shown]
+            warnings += [f"{phase['name']}: {phase['flow']} shows {gid}, which is not one of its gates"
+                         for gid in sorted(shown - set(ids))]
     return warnings
 
 
@@ -154,64 +179,67 @@ def cell(value):
     return str(value).replace("|", "\\|").replace("\n", " ")
 
 
-def blocks(data, svgs):
-    """The report as Uberblick document blocks, in order; Markdown and HTML both come from these."""
-    repo, ref = data["repository"], data["ref"]
+def titles(data):
+    """Each document's title: the overview's, then each phase's."""
+    repo = data["repository"]
+    phase = {p["flow"]: p.get("title") or f"The loop in {repo}: {p['name'][0].lower()}{p['name'][1:]}"
+             for p in data["phases"]}
+    return data["overview"].get("title") or f"How the loop runs in {repo}", phase
+
+
+def documents(data):
+    """The overview, then one document per phase, each as (name, title, Uberblick blocks in order)."""
     roles = {r["agent"]: r for r in data["roles"]}
-    gates = {g["id"]: g for g in data["gates"]}
-
-    def link(source):
-        path, start, end = SOURCE.match(source).groups()
-        anchor = f"#L{start}" + (f"-L{end}" if end else "") if start else ""
-        return f"[{source}](https://github.com/{repo}/blob/{ref}/{path}{anchor})"
-
-    out = [("h1", f"How the loop runs in {repo}"),
-           ("p", f"`ub-agents.yaml` at `{ref}` · {data['date']} · {len(data['roles'])} agents · {len(data['gates'])} gates"),
-           ("p", data["summary"])]
+    overview, phase_titles = titles(data)
+    rows = [["Phase", "Starts on", "Ends at", "Agents", "Gates"]]
+    rows += [[f"**{p['name']}**", p["starts"], p["ends"], ", ".join(p["roles"]), str(len(p["gates"]))]
+             for p in data["phases"]]
+    docs = [("overview", overview, [("p", data["overview"]["summary"]), ("ablauf", data["overview"]["flow"]),
+                                    ("table", rows)] + notes(data["overview"]))]
     for phase in data["phases"]:
-        rows = [["Agent", "Starts on", "Does", "Outcome → label"]]
-        for name in phase["roles"]:
-            r = roles[name]
-            does = r["does"] + (f" {link(r['instructions'])}" if r.get("instructions") else "")
-            outcomes = "; ".join(f"{o} → " + (" ".join(f"`{a}`" for a in added) or "*no label*")
-                                 for o, added in r["outcomes"].items())
-            rows.append([f"**{name}** {r.get('kind', 'any')}", " ".join(f"`{t}`" for t in r["triggers"]), does, outcomes])
-        out += [("phase", phase["name"]), ("p", phase["summary"]),
-                ("ablauf", svgs.get(phase["name"], "")), ("table", rows)]
-        for gid in phase.get("gates", []):
-            g = gates[gid]
-            out.append(("card", {"label": f"{gid} · {g['at']} · {g['decides']} decides", "title": g["name"],
-                                 "body": g["rule"],
-                                 "footer": " · ".join(link(s) for s in g["sources"])}))
-    if data.get("notes"):
-        out += [("h2", "Notes")] + [("li", n) for n in data["notes"]]
-    out.append(("p", "*Generated by the ub-agents-flow skill. Read-only: nothing on GitHub changed.*"))
-    return out
+        table = [["Agent", "Starts on", "Does"]]
+        table += [[f"**{name}** {roles[name].get('kind', 'any')}", ", ".join(f"`{t}`" for t in roles[name]["triggers"]),
+                   roles[name]["does"]] for name in phase["roles"]]
+        out = [("p", phase["summary"]), ("ablauf", phase["flow"]), ("table", table)]
+        out += [("card", {"label": f"{g['id']} · {g['at']} · {g['decides']} decides", "title": g["name"],
+                          "body": g["rule"]}) for g in phase["gates"]]
+        docs.append((Path(phase["flow"]).stem, phase_titles[phase["flow"]], out + notes(phase)))
+    return docs
 
 
-def markdown(data, flows):
+def notes(obj):
+    return [("h2", "Notes")] + [("li", n) for n in obj["notes"]] if obj.get("notes") else []
+
+
+def combined(data):
+    """All documents as one: the overview, then each phase under its own heading."""
+    (_, title, out), *phases = documents(data)
+    for (_, _, blocks), phase in zip(phases, data["phases"]):
+        out = out + [("phase", phase["name"])] + [("h3", v) if k == "h2" else (k, v) for k, v in blocks]
+    return [("flow", title, out)]
+
+
+def markdown(title, blocks, flows):
     """Uberblick Markdown: headings, paragraphs, ablauf fences, GFM tables, cards and list items."""
-    parts, phase = [], 0
-    for kind, value in blocks(data, {}):
-        if kind == "h1":
-            parts.append(f"# {value}")
-        elif kind in ("h2", "phase"):
+    parts = [f"# {title}"]
+    for kind, value in blocks:
+        if kind in ("h2", "phase"):
             parts.append(f"## {value}")
+        elif kind == "h3":
+            parts.append(f"### {value}")
         elif kind == "p":
             parts.append(value)
         elif kind == "li":
             parts.append(f"- {value}")
         elif kind == "ablauf":
-            parts.append("```ablauf\n" + flows[data["phases"][phase]["name"]].strip() + "\n```")
-            phase += 1
+            parts.append("```ablauf\n" + flows[value].strip() + "\n```")
         elif kind == "table":
             head, *rows = value
             parts.append("\n".join(["| " + " | ".join(cell(c) for c in head) + " |",
                                     "|" + "---|" * len(head)]
                                    + ["| " + " | ".join(cell(c) for c in row) + " |" for row in rows]))
         elif kind == "card":
-            parts.append(":::card\n" + "".join(f"{k}: {value[k]}\n" for k in ("label", "title", "footer"))
-                         + "\n" + value["body"] + "\n:::")
+            parts.append(f":::card\nlabel: {value['label']}\ntitle: {value['title']}\n\n{value['body']}\n:::")
     text = "\n\n".join(parts)
     return re.sub(r"\n(- [^\n]*)\n\n(?=- )", r"\n\1\n", text) + "\n"
 
@@ -230,46 +258,48 @@ def inline(value):
     return re.sub("\x00(\\d+)\x00", lambda m: codes[int(m.group(1))], value).replace("\n", "<br>")
 
 
-def render(data, svgs):
-    """The page: the same blocks styled like an Uberblick document, each ablauf fence drawn."""
-    html_blocks, items = [], []
-    for kind, value in blocks(data, svgs):
-        if kind != "li" and items:
+def render(docs, svgs, repository):
+    """The page: each document's blocks styled like an Uberblick document, each ablauf fence drawn."""
+    articles = []
+    for _, title, blocks in docs:
+        html_blocks, items = [f"<h1>{inline(title)}</h1>"], []
+        for kind, value in blocks:
+            if kind != "li" and items:
+                html_blocks.append("<ul>" + "".join(items) + "</ul>")
+                items = []
+            if kind in ("h2", "h3"):
+                html_blocks.append(f"<{kind}>{inline(value)}</{kind}>")
+            elif kind == "phase":
+                html_blocks.append(f'<h2 class="phase">{inline(value)}</h2>')
+            elif kind == "p":
+                html_blocks.append(f"<p>{inline(value)}</p>")
+            elif kind == "li":
+                items.append(f"<li>{inline(value)}</li>")
+            elif kind == "ablauf":
+                html_blocks.append(f'<figure class="ablauf">{svgs.get(value, "")}</figure>')
+            elif kind == "table":
+                head, *rows = value
+                html_blocks.append("<table><thead><tr>" + "".join(f"<th>{inline(c)}</th>" for c in head)
+                                   + "</tr></thead><tbody>"
+                                   + "".join("<tr>" + "".join(f"<td>{inline(c)}</td>" for c in row) + "</tr>"
+                                             for row in rows)
+                                   + "</tbody></table>")
+            elif kind == "card":
+                html_blocks.append(f'<div class="card"><div class="card-label">{inline(value["label"])}</div>'
+                                   f'<div class="card-title">{inline(value["title"])}</div>'
+                                   f'<div class="card-body">{inline(value["body"])}</div></div>')
+        if items:
             html_blocks.append("<ul>" + "".join(items) + "</ul>")
-            items = []
-        if kind == "h1":
-            html_blocks.append(f'<h1>{inline(value)}</h1>')
-        elif kind == "h2":
-            html_blocks.append(f'<h2>{inline(value)}</h2>')
-        elif kind == "phase":
-            html_blocks.append(f'<h2 class="phase">{inline(value)}</h2>')
-        elif kind == "p":
-            html_blocks.append(f"<p>{inline(value)}</p>")
-        elif kind == "li":
-            items.append(f"<li>{inline(value)}</li>")
-        elif kind == "ablauf":
-            html_blocks.append(f'<figure class="ablauf">{value}</figure>')
-        elif kind == "table":
-            head, *rows = value
-            html_blocks.append("<table><thead><tr>" + "".join(f"<th>{inline(c)}</th>" for c in head) + "</tr></thead><tbody>"
-                               + "".join("<tr>" + "".join(f"<td>{inline(c)}</td>" for c in row) + "</tr>" for row in rows)
-                               + "</tbody></table>")
-        elif kind == "card":
-            html_blocks.append(f'<div class="card"><div class="card-label">{inline(value["label"])}</div>'
-                               f'<div class="card-title">{inline(value["title"])}</div>'
-                               f'<div class="card-body">{inline(value["body"])}</div>'
-                               f'<div class="card-footer">{inline(value["footer"])}</div></div>')
-    if items:
-        html_blocks.append("<ul>" + "".join(items) + "</ul>")
-    body = "\n".join(html_blocks)
+        articles.append("<article>\n" + "\n".join(html_blocks) + "\n</article>")
+    body = "\n".join(articles)
     light = "".join(f"--ab-{k}:{v};" for k, v in LIGHT.items())
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Loop flow · {esc(data["repository"])}</title>
+<title>Loop flow · {esc(repository)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
 <style>
-/* Uberblick's document tokens and block styles, so the page reads like the document flow.md imports as. */
+/* Uberblick's document tokens and block styles, so the page reads like the documents the Markdown imports as. */
 :root{{--background:oklch(0.96 0.008 75);--foreground:oklch(0.145 0 0);--card:oklch(0.97 0.005 75);--muted:oklch(0.97 0 0);
 --muted-foreground:oklch(0.511 0 0);--border:oklch(0.922 0 0);--prose-text:oklch(0.3 0 0);--radius:0.625rem;color-scheme:light dark}}
 @media (prefers-color-scheme:dark){{:root{{--background:oklch(0.145 0 0);--foreground:oklch(0.985 0 0);--card:oklch(0.205 0 0);
@@ -277,26 +307,28 @@ def render(data, svgs):
 *{{box-sizing:border-box}}
 body{{margin:0;background:var(--background);color:var(--prose-text);font:16px/27px Geist,system-ui,sans-serif}}
 main{{max-width:72ch;margin:0 auto;padding:40px 16px 64px}}
-h1,h2{{color:var(--foreground);font-weight:600}}
+h1,h2,h3{{color:var(--foreground);font-weight:600}}
 h1{{font-size:36px;line-height:42px;letter-spacing:-0.021em;margin:0 0 .35em}}
-h2{{font-size:22px;line-height:28px;letter-spacing:-0.012em;margin:1.9em 0 .45em}}
+h2{{font-size:22px;line-height:28px;letter-spacing:-0.012em;margin:1.9em 0 .45em}}h3{{font-size:18px;line-height:24px;margin:1.5em 0 .4em}}
+article+article{{margin-top:64px;padding-top:40px;border-top:1px solid var(--border)}}
 p{{margin:.5em 0}}a{{color:inherit}}strong{{color:var(--foreground);font-weight:600}}
 code{{white-space:nowrap;font:.875em "Geist Mono",ui-monospace,monospace;background:var(--muted);border:1px solid var(--border);border-radius:4px;padding:0 4px}}
 .ablauf{{margin:12px 0;text-align:center;overflow-x:auto}}.ablauf svg{{max-width:100%;height:auto}}
 table{{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;line-height:20px}}
 th,td{{text-align:left;vertical-align:top;padding:6px 8px;border:1px solid var(--border)}}th{{color:var(--foreground);font-weight:600;background:var(--muted)}}
 .card{{margin:12px 0;padding:20px 24px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);break-inside:avoid}}
-.card-label,.card-footer{{color:var(--muted-foreground);font-size:12px;line-height:16px;font-weight:500;text-transform:uppercase;letter-spacing:.08em}}
+.card-label{{color:var(--muted-foreground);font-size:12px;line-height:16px;font-weight:500;text-transform:uppercase;letter-spacing:.08em}}
 .card-title{{margin-top:6px;color:var(--foreground);font-size:18px;line-height:24px;font-weight:600}}
-.card-body{{margin-top:12px}}.card-footer{{margin-top:12px;letter-spacing:.06em}}.card-footer a{{text-transform:none}}
+.card-body{{margin-top:12px}}
 ul{{margin:.5em 0;padding-left:1.4em}}
 @page{{size:A4;margin:12mm}}
 @media print{{:root{{--background:#fff;--foreground:oklch(0.145 0 0);--card:oklch(0.97 0.005 75);--muted:oklch(0.97 0 0);
 --muted-foreground:oklch(0.511 0 0);--border:oklch(0.922 0 0);--prose-text:oklch(0.3 0 0)}}
 main{{max-width:none;padding:0}}body{{font-size:11px;line-height:16px}}h1{{font-size:22px;line-height:26px}}
-h2{{font-size:15px;line-height:20px;margin:1.2em 0 .3em}}.phase~.phase{{break-before:page;margin-top:0}}
+h2{{font-size:15px;line-height:20px;margin:1.2em 0 .3em}}h3{{font-size:13px;line-height:18px;margin:1em 0 .3em}}
+article+article{{break-before:page;margin-top:0;padding-top:0;border:0}}.phase{{break-before:page;margin-top:0}}
 .ablauf svg{{max-height:120mm;width:auto}}.ablauf{{{light}}}table{{font-size:10px;line-height:14px}}th,td{{padding:3px 6px}}
-.card{{padding:8px 12px;margin:6px 0}}.card-label,.card-footer{{font-size:8.5px;line-height:12px}}.card-title{{font-size:12px;line-height:16px;margin-top:2px}}.card-body{{margin-top:4px}}.card-footer{{margin-top:4px}}}}
+.card{{padding:8px 12px;margin:6px 0}}.card-label{{font-size:8.5px;line-height:12px}}.card-title{{font-size:12px;line-height:16px;margin-top:2px}}.card-body{{margin-top:4px}}}}
 </style></head><body><main>
 {body}
 </main></body></html>
@@ -305,33 +337,40 @@ h2{{font-size:15px;line-height:20px;margin:1.2em 0 .3em}}.phase~.phase{{break-be
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("report", type=Path, help="flow.json; each phase's .flow and its .svg sit next to it")
-    p.add_argument("--out", type=Path, required=True, help="the page; the Uberblick Markdown goes next to it as .md")
+    p.add_argument("report", type=Path, help="flow.json; each .flow and its .svg sit next to it")
+    p.add_argument("--out", type=Path, required=True,
+                   help="the page; the Uberblick Markdown goes next to it, one file per document")
+    p.add_argument("--combine", action="store_true",
+                   help="write one document, the overview followed by every phase, as flow.md")
     p.add_argument("--open", action="store_true", help="open the page in the default browser")
     args = p.parse_args(argv)
     try:
         data = json.loads(args.report.read_text(encoding="utf-8"))
-        warnings = validate(data)
+        validate(data)
         flows, svgs = {}, {}
-        for phase in data["phases"]:
-            flow = args.report.parent / phase["flow"]
-            flows[phase["name"]] = flow.read_text(encoding="utf-8")
+        for name in [data["overview"]["flow"]] + [phase["flow"] for phase in data["phases"]]:
+            flow = args.report.parent / name
+            flows[name] = flow.read_text(encoding="utf-8")
             svg = flow.with_suffix(".svg")
             if not svg.exists():
-                raise ValueError(f"no {svg.name}: render {flow.name} with render.mjs first")
-            svgs[phase["name"]] = svg.read_text(encoding="utf-8")
-            if not svgs[phase["name"]].lstrip().startswith("<svg"):
-                raise ValueError(f"{flow.with_suffix('.svg')} is not an SVG; render {flow.name} first")
+                raise ValueError(f"no {svg.name}: render {name} with render.mjs first")
+            svgs[name] = svg.read_text(encoding="utf-8")
+            if not svgs[name].lstrip().startswith("<svg"):
+                raise ValueError(f"{svg} is not an SVG; render {name} first")
         warnings = validate(data, flows)
     except (OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)
-    args.out.write_text(render(data, svgs), encoding="utf-8")
-    args.out.with_suffix(".md").write_text(markdown(data, flows), encoding="utf-8")
+    docs = combined(data) if args.combine else documents(data)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(render(docs, svgs, data["repository"]), encoding="utf-8")
     print(args.out)
-    print(args.out.with_suffix(".md"))
+    for name, title, blocks in docs:
+        md = args.out.parent / f"{name}.md"
+        md.write_text(markdown(title, blocks, flows), encoding="utf-8")
+        print(md)
     if args.open:
         webbrowser.open(args.out.resolve().as_uri())
     return 0

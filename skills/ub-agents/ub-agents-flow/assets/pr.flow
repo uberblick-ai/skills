@@ -4,25 +4,27 @@ flow v0
 columns rework main stop
 
 pill ready col=main tone=done "ready (issue)"
+decision g1 tone=system "G1 Launcher: may it start?"
 box implementer "branch, code, checks, draft PR"
-decision g3 tone=system "G3 Checks green, PR ready?"
+decision g3 tone=system "G2 Checks green, PR ready?"
 pill needs-review tone=agent
 box reviewer "different model, exact head commit"
-decision g4 tone=system "G4 Criteria met?"
+decision g4 tone=system "G3 Criteria met?"
 pill ready-to-merge tone=done
 box integrator "base merge, final checks"
-decision g5 tone=system "G5 Green Test on head, policy?"
+decision g5 tone=system "G4 Green Test on head, policy?"
 end merged "Squash-merged, issue closed"
 
 pill needs-changes col=rework row=g4 tone=rework
 
 panel human col=stop row=g5 tone=stop
   pill needs-human
-  strong "G6 A maintainer merges"
+  strong "G5 A maintainer merges"
   muted "agent config, CI, outside input"
   muted "or CLI changes"
 
-ready --> implementer : G1 checks every run
+ready --> g1
+g1 --> implementer : yes, before every run
 implementer --> g3
 g3 --> needs-review : handed-off
 needs-review --> reviewer

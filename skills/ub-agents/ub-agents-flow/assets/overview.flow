@@ -1,0 +1,47 @@
+flow v0
+# uberblick-ai/ub-agents: the whole loop, from a new issue to the merge.
+
+columns phase rework main stop
+
+end created col=main tone=muted "Issue created"
+pill needs-preparation tone=muted
+box issue-preparer "states behavior and acceptance criteria"
+pill ready tone=done
+box implementer "branch, code, checks, draft PR"
+pill needs-review tone=agent
+box reviewer "different model, exact head commit"
+pill ready-to-merge tone=done
+box integrator "base merge, final checks"
+end merged "Squash-merged, issue closed"
+
+text p1 col=phase row=needs-preparation "Issue phase"
+text p2 col=phase row=ready "Implementation and PR phase"
+
+pill needs-changes col=rework row=reviewer tone=rework
+
+panel human col=stop row=issue-preparer span=2 tone=stop
+  pill needs-human
+  strong "A maintainer answers"
+  muted "removes needs-human,"
+  muted "re-adds the trigger"
+pill human2 col=stop row=integrator tone=stop "needs-human"
+
+created --> needs-preparation : a maintainer adds the label
+needs-preparation --> issue-preparer
+issue-preparer --> ready : prepared
+ready --> implementer
+implementer --> needs-review : handed-off
+needs-review --> reviewer
+reviewer --> ready-to-merge : approved
+ready-to-merge --> integrator
+integrator --> merged : merged
+
+reviewer --> needs-changes tone=rework : changes-requested
+integrator --> needs-changes tone=rework from=left to=bottom : changes-requested
+needs-changes --> implementer tone=rework from=top to=left label=end : revise the same PR
+issue-preparer --> human tone=stop : needs-human
+integrator --> human2 tone=stop : maintainer-merge
+
+legend
+  pill tone=done "GitHub label"
+  panel tone=stop "a person decides"

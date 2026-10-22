@@ -13,7 +13,7 @@ end delivery "Implementation picks it up"
 
 panel human col=stop row=g2 tone=stop
   pill needs-human
-  strong "G6 A maintainer decides"
+  strong "G3 A maintainer answers"
   muted "answers on the issue,"
   muted "removes needs-human"
 

@@ -3,7 +3,9 @@
 [ablauf](https://ablauf.uberblick.ai) draws a flow from text. The author
 places every node; the renderer sizes the grid, routes the edges and reports
 every problem with its line number. It never moves anything, so the drawing is
-what you wrote. The report has one flow per phase; the worked examples are
+what you wrote. Each document has one flow: the overview's and one per
+phase. The worked examples are
+[../assets/overview.flow](../assets/overview.flow),
 [../assets/issue.flow](../assets/issue.flow) and
 [../assets/pr.flow](../assets/pr.flow). Uberblick draws the same source from
 an `ablauf` fence.
@@ -24,7 +26,7 @@ end merged "Squash-merged, issue closed"
 pill needs-changes col=rework row=g4 tone=rework
 panel human col=stop row=g2 span=7 tone=stop
   pill needs-human
-  strong "G6 A maintainer decides"
+  strong "G3 A maintainer answers"
   muted "removes needs-human, re-adds the trigger"
 
 g2 --> ready : prepared
@@ -51,12 +53,21 @@ legend
 
 ## Conventions for a loop flow
 
-- Two flows. `issue.flow` starts at an `end created tone=muted "Issue created"`
-  node with an edge to the entry label (`needs-preparation`) saying who adds
-  it, and runs to the label the implementer starts on, ending in an `end` node such as
-  "Implementation picks it up". `pr.flow` starts from that label and ends at
-  the merge. Leave launcher gates in the issue flow and mention them in the PR
-  flow's first edge label.
+- Three flows. `overview.flow` is the whole loop in one column: every agent
+  as a box between the labels that start it, no gates, rework on the left,
+  `needs-human` on the right, and a `text` in a `phase` column beside the
+  first node of each phase. `issue.flow` starts at an
+  `end created tone=muted "Issue created"` node with an edge to the entry
+  label (`needs-preparation`) saying who adds it, and runs to the label the
+  implementer starts on, ending in an `end` node such as "Implementation picks
+  it up". `pr.flow` starts from that label and ends at the merge. Each phase
+  flow draws the launcher's gate before its first agent, numbered `G1`.
+- Work that enters without an issue, such as a bot's pull requests that
+  `trusted-pr-authors` lets run or a label another tool adds that triggers an
+  agent, gets its own `end` node in a column beside the main one in the
+  overview, with an edge to the label and on to the agent it starts. Draw a
+  route that is decided but not yet in the config with dashed edges (`-.->`)
+  and "(planned)" in its node.
 
 - Three columns: `rework` on the left for labels that send work back, `main`
   for the path an item takes when every gate passes, `stop` on the right for
@@ -67,12 +78,12 @@ legend
   something before it does its work (a contract still valid, a PR it must not
   duplicate), draw that gate between two boxes: the agent's box, the gate, then
   a box for the work itself, such as `box implement "builds the one PR"`.
-- Every gate in `flow.json` appears in the drawing with its number as the
+- Every gate of a phase appears in its drawing with its number as the
   first word of its text (`G2 ...`), as a `decision` with `tone=system`, or
   inside the stop panel for a gate a person decides, never only in an edge
   label, where it reads as a step rather than a check (`page.py` warns). A
-  launcher gate that applies to every run goes once, before the first agent,
-  with an edge label that says so.
+  launcher gate that applies to every run goes once per phase, before the
+  first agent, with an edge label that says so.
 - Pills: the entry label `tone=muted`, labels that lead to the next agent
   `tone=agent` or `tone=done`, rework labels `tone=rework`, stop labels inside
   a `tone=stop` panel.

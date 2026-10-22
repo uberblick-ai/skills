@@ -1,9 +1,15 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "repository": "uberblick-ai/ub-agents",
   "ref": "a021eaa",
   "date": "2026-10-20",
-  "summary": "Four agents carry an issue from needs-preparation to a squash merge in two phases. The launcher checks every start, then each agent checks its own gate before it hands off. Work returns to the implementer through needs-changes and stops for a maintainer through needs-human.",
+  "overview": {
+    "summary": "Four agents carry an issue from needs-preparation to a squash merge in two phases. The launcher checks every start, then each agent checks its own gate before it hands off. Work returns to the implementer through needs-changes and stops for a maintainer through needs-human.",
+    "flow": "overview.flow",
+    "notes": [
+      "`queue.milestones: order` Priority always wins; at equal priority, issues from earlier milestones, in alphabetical order of their titles, go first. [Queue: Milestones](https://agents.uberblick.ai/docs/configuration/queue.html#milestones)"
+    ]
+  },
   "phases": [
     {
       "name": "Issue phase",
@@ -13,9 +19,42 @@
         "issue-preparer"
       ],
       "gates": [
-        "G1",
-        "G2"
-      ]
+        {
+          "id": "G1",
+          "name": "Launcher",
+          "at": "before every run",
+          "decides": "launcher",
+          "rule": "The trigger label is on the item, from a maintainer when approvals are on, and nothing holds it: no stop label, no open blocker, retries left.",
+          "sources": [
+            "ub-agents.yaml:100-107",
+            ".agents/issue-preparer.md:26-29"
+          ]
+        },
+        {
+          "id": "G2",
+          "name": "Preparation",
+          "at": "issue-preparer",
+          "decides": "agent",
+          "rule": "The behavior and the smallest set of acceptance criteria are stated; an unexplained scope change or a PR-only prerequisite goes to `needs-human`.",
+          "sources": [
+            ".agents/issue-preparer.md:8-20",
+            ".agents/issue-preparer.md:32-39"
+          ]
+        },
+        {
+          "id": "G3",
+          "name": "A maintainer answers",
+          "at": "needs-human",
+          "decides": "person",
+          "rule": "A maintainer answers on the issue, removes `needs-human` and re-adds `needs-preparation`.",
+          "sources": [
+            ".agents/ub_agents.md:26-29",
+            "ub-agents.yaml:107"
+          ]
+        }
+      ],
+      "starts": "`needs-preparation`",
+      "ends": "`ready`"
     },
     {
       "name": "Implementation and PR phase",
@@ -27,10 +66,68 @@
         "integrator"
       ],
       "gates": [
-        "G3",
-        "G4",
-        "G5",
-        "G6"
+        {
+          "id": "G1",
+          "name": "Launcher",
+          "at": "before every run",
+          "decides": "launcher",
+          "rule": "The trigger label is on the item, from a maintainer when approvals are on, and nothing holds it: no stop label, no open blocker, retries left.",
+          "sources": [
+            "ub-agents.yaml:100-107",
+            ".agents/issue-preparer.md:26-29"
+          ]
+        },
+        {
+          "id": "G2",
+          "name": "Handoff",
+          "at": "implementer",
+          "decides": "agent",
+          "rule": "Every check passes, the head merges cleanly and the PR is ready; otherwise it stays a draft and the run reports blocked.",
+          "sources": [
+            ".agents/implementer.md:3-7",
+            ".agents/implementer.md:21-35",
+            ".agents/implementer.md:48-52"
+          ]
+        },
+        {
+          "id": "G3",
+          "name": "Review",
+          "at": "reviewer",
+          "decides": "agent",
+          "rule": "Another model approves the exact head against the acceptance criteria; otherwise `changes-requested` sends it back to `needs-changes`.",
+          "sources": [
+            ".agents/reviewer.md:3-17",
+            ".agents/reviewer.md:24-25",
+            "ub-agents.yaml:80"
+          ]
+        },
+        {
+          "id": "G4",
+          "name": "Merge",
+          "at": "integrator",
+          "decides": "agent",
+          "rule": "A green Test run and every owed review cover the exact head and the policy lets agents merge; guarded paths go to a maintainer.",
+          "sources": [
+            ".agents/ub_agents.md:8-24",
+            ".agents/integrator.md:19-46"
+          ]
+        },
+        {
+          "id": "G5",
+          "name": "A maintainer merges",
+          "at": "needs-human",
+          "decides": "person",
+          "rule": "A maintainer answers or merges, removes `needs-human` and re-adds the trigger of the role that acts next.",
+          "sources": [
+            ".agents/ub_agents.md:26-29",
+            "ub-agents.yaml:107"
+          ]
+        }
+      ],
+      "starts": "`ready`",
+      "ends": "Squash-merged",
+      "notes": [
+        "The implementer has no needs-human outcome: it stops by reporting blocked, which leaves an Action needed comment until a maintainer runs ub-agents retry."
       ]
     }
   ],
@@ -109,79 +206,5 @@
   ],
   "stop_labels": [
     "needs-human"
-  ],
-  "gates": [
-    {
-      "id": "G1",
-      "name": "Launcher",
-      "at": "before every run",
-      "decides": "launcher",
-      "rule": "The trigger label is on the item, from a maintainer when approvals are on, and nothing holds it: no stop label, no open blocker, retries left.",
-      "sources": [
-        "ub-agents.yaml:100-107",
-        ".agents/issue-preparer.md:26-29"
-      ]
-    },
-    {
-      "id": "G2",
-      "name": "Preparation",
-      "at": "issue-preparer",
-      "decides": "agent",
-      "rule": "The behavior and the smallest set of acceptance criteria are stated; an unexplained scope change or a PR-only prerequisite goes to `needs-human`.",
-      "sources": [
-        ".agents/issue-preparer.md:8-20",
-        ".agents/issue-preparer.md:32-39"
-      ]
-    },
-    {
-      "id": "G3",
-      "name": "Handoff",
-      "at": "implementer",
-      "decides": "agent",
-      "rule": "Every check passes, the head merges cleanly and the PR is ready; otherwise it stays a draft and the run reports blocked.",
-      "sources": [
-        ".agents/implementer.md:3-7",
-        ".agents/implementer.md:21-35",
-        ".agents/implementer.md:48-52"
-      ]
-    },
-    {
-      "id": "G4",
-      "name": "Review",
-      "at": "reviewer",
-      "decides": "agent",
-      "rule": "Another model approves the exact head against the acceptance criteria; otherwise `changes-requested` sends it back to `needs-changes`.",
-      "sources": [
-        ".agents/reviewer.md:3-17",
-        ".agents/reviewer.md:24-25",
-        "ub-agents.yaml:80"
-      ]
-    },
-    {
-      "id": "G5",
-      "name": "Merge",
-      "at": "integrator",
-      "decides": "agent",
-      "rule": "A green Test run and every owed review cover the exact head and the policy lets agents merge; guarded paths go to a maintainer.",
-      "sources": [
-        ".agents/ub_agents.md:8-24",
-        ".agents/integrator.md:19-46"
-      ]
-    },
-    {
-      "id": "G6",
-      "name": "Maintainer",
-      "at": "needs-human",
-      "decides": "person",
-      "rule": "A maintainer answers or merges, removes `needs-human` and re-adds the trigger of the role that acts next.",
-      "sources": [
-        ".agents/ub_agents.md:26-29",
-        "ub-agents.yaml:107"
-      ]
-    }
-  ],
-  "notes": [
-    "`queue.milestones: order` Priority always wins; at equal priority, issues from earlier milestones, in alphabetical order of their titles, go first. [Queue: Milestones](https://agents.uberblick.ai/docs/configuration/queue.html#milestones)",
-    "The implementer has no needs-human outcome: it stops by reporting blocked, which leaves an Action needed comment until a maintainer runs ub-agents retry."
   ]
 }
