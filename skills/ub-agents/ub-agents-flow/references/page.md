@@ -44,6 +44,13 @@ is uberblick-ai/ub-agents.
           "sources": [".agents/reviewer.md:3-17", "ub-agents.yaml:80"]
         }
       ],
+      "sections": [
+        {
+          "heading": "Dependabot pull requests",
+          "text": "One or two sentences on where this work enters the phase and what it skips.",
+          "items": ["**Merge.** One sentence per rule that differs for this work."]
+        }
+      ],
       "notes": [
         "`queue.dependencies: wait` One or two sentences on what it does. [Queue: Dependencies](https://agents.uberblick.ai/docs/configuration/queue.html#dependencies)",
         "One sentence per surprise or inconsistency found in this phase."
@@ -65,21 +72,22 @@ is uberblick-ai/ub-agents.
 }
 ```
 
-- `ref` is the commit the files were read at, so every source links to the
+- `ref` is the commit the files were read at, so every source points at the
   lines as they were. `date` is today.
 - `overview` holds the summary of the whole loop, its drawing and its
-  `points`: one sentence per way work enters, then one per phase, in the
-  drawing's order, and a last one on where a person steps in at any point
-  (unclear intent, work too big for one PR, a decision only a maintainer can
-  make). It names no labels and has no table or notes; those belong
-  to the phases. An optional `title` replaces "How the loop runs in
+  `points`. The summary opens with what the repository uses the loop for and,
+  where it changed the workflow `ub-agents init` writes, says so in a few
+  words. The `points` are one sentence per way work enters, then one per
+  phase, in the drawing's order, and a last one on where a person steps in at
+  any point (unclear intent, work too big for one PR, a decision only a
+  maintainer can make). It names no labels and has no table or notes; those
+  belong to the phases. An optional `title` replaces "How the loop runs in
   OWNER/NAME".
 - `phases` are the issue phase and the implementation and PR phase, in that
-  order. `flow` names the phase's ablauf
-  source next to `flow.json`; its Markdown takes the same name, so a phase
-  flow is never `overview.flow` or `flow.flow`. An optional `title` replaces
-  "The loop in OWNER/NAME: issue phase". Every role belongs to exactly one
-  phase.
+  order. `flow` names the phase's ablauf source next to `flow.json`; its
+  Markdown takes the same name, so a phase flow is never `overview.flow` or
+  `flow.flow`. An optional `title` replaces "The loop in OWNER/NAME: issue
+  phase". Every role belongs to exactly one phase.
 - `roles` lists every agent in `ub-agents.yaml`, in the order work passes
   through them. `kind` is the agent's `kind` (`issue`, `pr`) or `any` when
   unset. `runtime` is optional. `outcomes` maps every declared outcome to the
@@ -97,6 +105,11 @@ is uberblick-ai/ub-agents.
   to; leave the detail to the sources. `sources` are paths relative to the
   repository root, with a line or a line range where the rule is written;
   they ground the gate and stay in `flow.json`, out of the documents.
+- `sections` are optional, per phase, each a heading with a paragraph, a list
+  or both, placed before the notes. Use one for work that enters the phase
+  without an issue, such as a trusted bot's pull requests, when its rules
+  differ: what it skips, what review it owes, how it merges, how often it goes
+  back.
 - `notes` are optional, per phase. There is no table
   of settings: a limit that holds work back is part of a gate (`max-attempts`,
   stop labels and approvals sit in the launcher's gate), and timeouts and

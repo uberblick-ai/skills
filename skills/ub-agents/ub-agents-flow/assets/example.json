@@ -4,7 +4,7 @@
   "ref": "a021eaa",
   "date": "2026-10-20",
   "overview": {
-    "summary": "Work enters the loop as an issue and leaves it squash-merged. Agents prepare, build, review and merge it; a maintainer steps in where an agent stops or a change touches a guarded path.",
+    "summary": "ub-agents develops itself with its own loop. Work enters as an issue and leaves it squash-merged; agents prepare, build, review and merge it, and a maintainer steps in where an agent stops or a change touches a guarded path. Each phase has its own document with its gates.",
     "flow": "overview.flow",
     "points": [
       "**An issue** enters when a maintainer starts it.",

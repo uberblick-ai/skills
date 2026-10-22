@@ -74,25 +74,27 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
      merges of certain paths or scope decisions.
 
    Merge what one agent checks into one gate unless the maintainer asks for
-   every check. Sort every agent and gate into a phase: issue agents (`kind: issue`, such
-   as the issue-preparer and an optional issue-reviewer) up to the label the
-   implementer starts on, the rest after it. Note anything that does not fit: an outcome label no agent picks up, an
-   agent no outcome reaches, a rule in the instructions the config cannot
-   route, a role that can only stop by reporting blocked.
+   every check. Sort every agent and gate into a phase: issue agents (`kind:
+   issue`, such as the issue-preparer and an optional issue-reviewer) up to
+   the label the implementer starts on, the rest after it. Note anything that
+   does not fit: an outcome label no agent picks up, an agent no outcome
+   reaches, a rule in the instructions the config cannot route, a role that
+   can only stop by reporting blocked.
 
 3. Write `DIR/flow.json` as [references/page.md](references/page.md)
    describes: the overview with a short summary, one sentence per way work
-   enters and per phase, and one on where a person steps in; the two phases with a sentence
-   each, their roles, their gates numbered from `G1` in the order an item
-   meets them with one plain sentence each, and their notes, the issue phase's
-   starting with one per `queue` setting in use, saying what it does and
-   linking its section of
+   enters and per phase, and one on where a person steps in; the two phases
+   with a sentence each, their roles, their gates numbered from `G1` in the
+   order an item meets them with one plain sentence each, and their notes, the
+   issue phase's starting with one per `queue` setting in use, saying what it
+   does and linking its section of
    https://agents.uberblick.ai/docs/configuration/queue.html, then each
-   phase's findings from step 2; and every role. Write in
-   the present tense: a route the maintainer has decided is described as
-   running, with no "planned", and no issue or PR number, release or date.
-   Describe the queue as the launcher runs it; where
-   the repository's own instructions say otherwise, add that as a finding.
+   phase's findings from step 2; a section for work that enters a phase
+   without an issue when its rules differ; and every role. Write in the
+   present tense: a route the maintainer has decided is described as running,
+   with no "planned", and no issue or PR number, release or date. Describe the
+   queue as the launcher runs it; where the repository's own instructions say
+   otherwise, add that as a finding.
 
 4. Draw `DIR/overview.flow`, `DIR/issue.flow` and `DIR/pr.flow` as
    [references/flow.md](references/flow.md) describes, starting from
@@ -103,7 +105,7 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    in `flow.json`. The overview stays abstract: the ways work enters, one box
    per phase, and the merge.
 
-5. Render both, installing the renderer once per scratch directory:
+5. Render all three, installing the renderer once per scratch directory:
 
    ```sh
    npm install --prefix DIR/ablauf @uberblick/ablauf@0.2.0
@@ -123,16 +125,18 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    Markdown, and `DIR/flow.html`, the same blocks styled like Uberblick
    documents with each `ablauf` fence drawn. When the maintainer asks for one
    document, add `--combine`: it writes `DIR/flow.md` instead, the overview
-   followed by each phase under its own heading. Fix every warning it prints (an outcome label
-   that starts nothing, a gate missing from the drawings, a text over its word
-   budget) unless it is a real finding about the loop, which belongs in
-   `notes`. Printed, each document starts a new A4 page, light even from a
-   dark screen.
+   followed by each phase under its own heading. Fix every warning it prints
+   (an outcome label that starts nothing, a gate missing from the drawings, a
+   text over its word budget) unless it is a real finding about the loop,
+   which belongs in `notes`. Printed, each document starts a new A4 page,
+   light even from a dark screen.
 
 7. Tell the maintainer where the page and the Markdown are, then in a few
    sentences: the path an item takes in each phase, the gates where a person
    decides, and anything from the notes that looks like a mistake in the
    config or the instructions. Change nothing on GitHub; offer to open an
-   issue only if they ask. When they store the documents in Uberblick, create
-   the phase documents first, then the overview, and link each phase's name
-   in its summary to that phase's document.
+   issue only if they ask. When they store the documents in Uberblick, read
+   the repository's own rules for writing corpus pages first and follow them.
+   Create the phase documents first, then the overview, and link each phase's
+   name in its summary to that phase's document. When updating documents a
+   maintainer has edited, read them first and keep their edits.

@@ -71,6 +71,23 @@ def note_list(obj, where):
     return notes
 
 
+def section_list(obj, where):
+    """A phase's extra sections, such as work that enters it without an issue."""
+    sections = obj.get("sections", [])
+    if not isinstance(sections, list):
+        raise ValueError(f"{where}: sections must be a list")
+    for section in sections:
+        heading = text(section, "heading", f"{where} section")
+        items = section.get("items", [])
+        if not isinstance(items, list) or not all(isinstance(i, str) and i.strip() for i in items):
+            raise ValueError(f"{where}: {heading}: items must be nonempty sentences")
+        if not section.get("text") and not items:
+            raise ValueError(f"{where}: {heading} needs text, items or both")
+        if "text" in section:
+            text(section, "text", f"{where}: {heading}")
+    return sections
+
+
 def flow_name(obj, where):
     name = text(obj, "flow", where)
     if not name.endswith(".flow") or "/" in name:
@@ -158,6 +175,7 @@ def validate(data, flows=None):
         for gate in phase["gates"]:
             if words(text(gate, "rule", f"{name} {gate['id']}")) > BUDGET["rule"]:
                 warnings.append(f"{name} {gate['id']}: rule is over {BUDGET['rule']} words")
+        section_list(phase, name)
         note_list(phase, name)
     missing = [r["agent"] for r in roles if r["agent"] not in placed]
     twice = sorted({v for v in placed if placed.count(v) > 1})
@@ -204,6 +222,9 @@ def documents(data):
         out = [("p", phase["summary"]), ("ablauf", phase["flow"]), ("table", table)]
         out += [("card", {"label": f"{g['id']} · {g['at']} · {g['decides']} decides", "title": g["name"],
                           "body": g["rule"]}) for g in phase["gates"]]
+        for section in phase.get("sections", []):
+            out += [("h2", section["heading"])] + ([("p", section["text"])] if section.get("text") else [])
+            out += [("li", item) for item in section.get("items", [])]
         docs.append((Path(phase["flow"]).stem, phase_titles[phase["flow"]], out + notes(phase)))
     return docs
 

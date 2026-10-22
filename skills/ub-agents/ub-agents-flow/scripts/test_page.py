@@ -105,6 +105,18 @@ class PageTests(unittest.TestCase):
             self.assertEqual(md.count("```ablauf\nflow v0\n"), 1)
             self.assertNotIn("footer:", md)
 
+    def test_a_phase_section_comes_before_its_notes(self):
+        self.data["phases"][1]["sections"] = [{"heading": "Dependabot pull requests", "text": "They enter at the integrator.",
+                                               "items": ["**Merge.** Minor updates merge."]}]
+        self.assertEqual(page.validate(self.data, self.flows), [])
+        _, title, blocks = page.documents(self.data)[2]
+        self.assertIn("## Dependabot pull requests\n\nThey enter at the integrator.\n\n- **Merge.** Minor updates merge."
+                      "\n\n## Notes", page.markdown(title, blocks, self.flows))
+        for bad in ([{"heading": "Empty"}], [{"text": "No heading"}], [{"heading": "x", "items": [""]}], {}):
+            self.data["phases"][1]["sections"] = bad
+            with self.assertRaises(ValueError):
+                page.validate(self.data)
+
     def test_combined_is_one_document(self):
         [(name, title, blocks)] = page.combined(self.data)
         md = page.markdown(title, blocks, self.flows)
