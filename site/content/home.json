@@ -19,6 +19,11 @@
   ],
   "changes": [
     ["2026-10-20", "Skill", "ub-agents-flow 0.1: how your loop runs in two phases, drawn with ablauf, every gate numbered and traced to its source, as Uberblick Markdown and a page."],
+    ["2026-10-21", "Skill", "ub-agents-deliver-report 1.9: the Changelog's issues and PRs show as GitHub pills, with the right issue or pull request icon."],
+    ["2026-10-21", "Skill", "ub-agents-deliver-report 1.8: the page's What to change cards open a Claude Code discussion too, and costs carry dates instead of \"today\"."],
+    ["2026-10-21", "Skill", "ci-health 1.7: each action card's footer shows its evidence: where it applies, what it costs and the issues and PRs behind it, as GitHub pills."],
+    ["2026-10-21", "Skill", "ub-agents-deliver-report 1.7: a new delivery report document starts with its charts, without a KPI table."],
+    ["2026-10-21", "Skill", "ub-agents-deliver-report 1.6: a day runs midnight to midnight UTC on every machine, and the day is stored whenever an Uberblick server is connected."],
     ["2026-10-19", "Skill", "ub-agents-deliver-report 1.5 and ci-health 1.6: a run fills in every day missing since the last one stored, not just yesterday."],
     ["2026-10-18", "Site", "The ub-agents-unblock page shows a short example run: the overview, one question with its recommendation, and what changed on GitHub."],
     ["2026-10-16", "Skill", "ub-agents-deliver-report 1.4 and backlog-grooming 1.2: report pages declare UTF-8, so umlauts and dashes show correctly when the page is opened from disk."],

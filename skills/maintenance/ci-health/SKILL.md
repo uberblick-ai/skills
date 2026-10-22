@@ -20,7 +20,7 @@ compatibility: >-
   the `ub` command; without either the skill prints a table.
 metadata:
   author: uberblick-ai
-  version: "1.6"
+  version: "1.7"
 ---
 
 # CI health
@@ -32,7 +32,7 @@ stays in the data to show which job moved when the total steps. A second
 chart shows how many run attempts on main end red, re-runs included. This skill records
 one repository's days since the last one stored, or yesterday alone when
 nothing is stored yet, keeps the steps that moved the total, with their
-cause, and keeps the three actions that would most cut the wait, judged
+cause, and keeps up to three actions that would most cut the wait, judged
 again on every run.
 
 `scripts/ci.py` lives next to this file; call it by its path inside this
@@ -215,8 +215,11 @@ the document layout are in [references/data.md](references/data.md).
    rank order, in the shape `references/data.md` gives: `area`, `title`
    (the change), `why` (the evidence and the expected saving, two or three
    sentences), `check` (what to read in the repository before changing
-   anything), `impact_min_per_day`, and for a kept action its `id` and
-   `since`.
+   anything), `impact_min_per_day`, `where` (the workflow file or job it
+   changes), `evidence` (the issues and PRs behind it, if any: a number in
+   the repository or `owner/name#number`), and for a kept action its `id`
+   and `since`. `cost` replaces the footer's "about N min of waiting a day"
+   when the cost reads better in other words.
 
 8. Without `DOC`, reply with the summary table, any incidents and the
    actions; stop here.
@@ -256,7 +259,9 @@ the document layout are in [references/data.md](references/data.md).
     --doc DOC [--applied DIR/applied.json]` and replace the cards under the "Recommended Actions" heading,
     or its "No action proposed yet." paragraph, with its blocks; a document
     without that heading gets it after the last chart, with the paragraph
-    `create` writes below it. Each card's button opens a new Claude Code
+    `create` writes below it. Each card's footer carries the evidence:
+    where the change applies, what the problem costs and the issues and PRs
+    behind it, as GitHub pills. Its button opens a new Claude Code
     session with a prompt to discuss the action before changing anything.
     When that discussion settles on applying it, the prompt has the session
     strike the card through, with the pull request or issue as a GitHub
