@@ -16,12 +16,15 @@ SCRIPT = Path(__file__).resolve().parent / "intake.py"
 FAKE_UB = r"""
 import json, sys
 log = open(sys.argv[1], "a")
-unpins = 0
+one_block = len(sys.argv) > 2  # an older ub: insert_block takes one block after a block id
+unpins, blocks = 0, 0
 for line in sys.stdin:
     m = json.loads(line)
     if "id" not in m:
         continue
     result = {}
+    if m["method"] == "tools/list" and one_block:
+        result = {"tools": [{"name": "insert_block", "inputSchema": {"properties": {"uuid": {}, "type": {}}}}]}
     if m["method"] == "tools/call":
         name, args = m["params"]["name"], m["params"]["arguments"]
         log.write(json.dumps({"name": name, "arguments": args}) + "\n"); log.flush()
@@ -33,6 +36,10 @@ for line in sys.stdin:
             text = json.dumps({"uuid": "uuid-" + args["title"]})
         elif name == "get_sidebar":
             text = json.dumps({"groups": []})
+        elif name == "insert_block" and one_block:
+            blocks += 1
+            error = "blocks" in args
+            text = json.dumps({"block": {"id": f"b{blocks}"}})
         elif name == "unpin_doc":
             unpins += 1
             error, text = unpins == 1, "not pinned"
@@ -297,6 +304,36 @@ class Plan(unittest.TestCase):
         applied = json.loads((base / "applied.json").read_text())
         self.assertEqual(applied["done"], len(calls))
         self.assertEqual(applied["adopted"], ["a"])
+
+    def test_one_block_at_a_time(self):
+        calls, _ = self.calls()
+        base = self.path.parent
+        (base / "calls.json").write_text(json.dumps(calls))
+        (base / "fake_ub.py").write_text(FAKE_UB)
+        log = base / "log.jsonl"
+        run = subprocess.run([sys.executable, str(SCRIPT), "ub", "--calls", str(base / "calls.json"),
+                              "--checkout", str(base), "--out", str(base / "applied.json"), "--settle", "0",
+                              "--adopt", "--ub", f"{sys.executable} {base / 'fake_ub.py'} {log} one"],
+                             capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        inserts = [m["arguments"] for m in map(json.loads, log.read_text().splitlines())
+                   if m["name"] == "insert_block"]
+        self.assertTrue(inserts and all("blocks" not in a and "type" in a for a in inserts))
+        by_doc = {}
+        for n, a in enumerate(inserts, 1):
+            by_doc.setdefault(a["uuid"], []).append((n, a.get("after_block_id")))
+        for chain in by_doc.values():  # the first at the top, each next after the block before it
+            self.assertEqual([after for _, after in chain], [None] + [f"b{n}" for n, _ in chain[:-1]])
+        uuids = base / "uuids.json"
+        uuids.write_text(json.dumps({c["slug"]: "u-" + c["slug"] for c in calls if c["tool"] == "create_doc"}))
+        run = subprocess.run([sys.executable, str(SCRIPT), "resolve", "--calls", str(base / "calls.json"),
+                              "--uuids", str(uuids), "--one-block"], capture_output=True, text=True, check=True)
+        lines = [json.loads(line) for line in run.stdout.splitlines()]
+        first = next(c for c in calls if c["tool"] == "insert_block")
+        parts = [x for x in lines if x["call"] == calls.index(first) + 1]
+        self.assertEqual([x["arguments"]["type"] for x in parts][::-1],
+                         [b["type"] for b in first["arguments"]["blocks"]])  # last block first, each at the top
+        self.assertTrue(any(x.get("optional") for x in lines))
 
     def test_tags_the_catalog_lacks_are_left_off(self):
         calls, err = self.calls(tags=[])

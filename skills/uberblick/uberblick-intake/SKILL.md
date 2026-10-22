@@ -229,7 +229,11 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    `"slug": "uuid"` from each answer to `DIR/uuids.json` (a plain JSON
    object; each line names its `slug`), and run `resolve` again: it skips
    what is done and stops before the next call that needs a UUID you have
-   not saved yet. Two or three rounds cover a corpus. Send the calls in
+   not saved yet. Two or three rounds cover a corpus. If the server's
+   `insert_block` takes one block and no `blocks` (an older `ub`; `ub`
+   itself handles this), add `--one-block`: each insert goes in at the top,
+   so they come last block first, and sending them in order puts the page
+   together. Send the calls in
    order; the first pin into a group creates it, so never send two pins in
    parallel while their group does not exist yet. The starter cleanup is
    two `unpin_doc` calls and a `sidebar_group` `delete` of the emptied

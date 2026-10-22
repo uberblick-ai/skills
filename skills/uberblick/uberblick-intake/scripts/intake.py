@@ -68,7 +68,8 @@ TECH_NAME = re.compile(r"(^|/)(CONTRIBUTING|DEVELOP(MENT|ING)?|HACKING|BUILD(ING
                        r"RELEASING|RELEASE|DEPLOY(MENT|ING)?|TESTING|STYLE|CODE[_-]STYLE|CODE[_-]REVIEW[^/]*|"
                        r"WRITING[_-]STYLE|DESIGN|MANIFEST|SIGNING|PORTING|BENCHMARKS?|PERFORMANCE|DEBUGGING|"
                        r"TROUBLESHOOTING)[^/]*$|(^|/)(contributing|development|developers?|internals|architecture|"
-                       r"dev[-_]?docs|reference|api|self-hosting|hosting|deploy(ment)?|operations|ops|infra|"
+                       r"dev[-_]?docs|reference|api|self-hosting|hosting|deploy(ment)?|operations|ops|infra|docker|playwright|"
+                       r"cypress|e2e|tests?|scripts|ci|packaging|helm|k8s|kubernetes|\.devcontainer|"
                        r"benchmarks?|maintainers?)/", re.I)
 TECH_HEADINGS = re.compile(r"^(install(ation|ing)?|build(ing)?|dependencies|(binary )?packages|from (release )?(tarball|source|version control)|compil(e|ing)|development|setup|set up|local development|"
                            r"testing|running tests|architecture|internals|api( reference)?|configuration|"
@@ -1108,8 +1109,6 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
                 if m:
                     warnings.append(f"{where}: {m.group(0)!r} reads as history or plans; the corpus states the "
                                     f"product as it is: {text[:70]!r}")
-                if "Überblick" in text:
-                    errors.append(f"{where}: the product is Uberblick, without an umlaut")
         if not d.get("sources") and not d.get("tests"):
             warnings.append(f"{where}: no sources or tests; every page is grounded in the repository")
     for t, n in titles.items():
@@ -1132,9 +1131,11 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
             if sec.get("action") == "convert" and SETUP_HEADING.match(sec.get("heading") or ""):
                 warnings.append(f"markdown: {m.get('path')} § {sec.get('heading')} is how to get the product running; "
                                 f"keep it as Markdown and link it from the page")
-            if sec.get("action") == "convert" and sec.get("doc") not in slugs:
-                errors.append(f"markdown: {m.get('path')} § {sec.get('heading')} converts into {sec.get('doc')!r}, "
-                              f"which is not a document")
+            targets = sec.get("doc") if isinstance(sec.get("doc"), list) else [sec.get("doc")]
+            for slug in targets if sec.get("action") == "convert" else []:
+                if not isinstance(slug, str) or slug not in slugs:
+                    errors.append(f"markdown: {m.get('path')} § {sec.get('heading')} converts into {slug!r}, "
+                                  f"which is not a document")
     if checkout:
         for m in plan["markdown"]:
             if not m.get("sections") or not (checkout / m.get("path", "")).is_file():
@@ -1386,13 +1387,26 @@ def cmd_resolve(args):
             print(f"stopped before call {i + 1} ({c['tool']}), which needs the UUID of {e}: send the calls above, "
                   f"add each create_doc's slug and uuid to {args.uuids}, and run resolve again", file=sys.stderr)
             break
-        line = {"call": i + 1, "tool": c["tool"], "slug": c.get("slug") or target_slug(c), "arguments": arguments}
-        print(json.dumps({k: v for k, v in line.items() if v is not None}, ensure_ascii=False))
+        line = {"call": i + 1, "tool": c["tool"], "slug": c.get("slug") or target_slug(c), "arguments": arguments,
+                "optional": c.get("optional")}
+        for part in one_block(line) if args.one_block else [line]:
+            print(json.dumps({k: v for k, v in part.items() if v is not None}, ensure_ascii=False))
         printed += 1
     else:
         print(f"calls {start + 1} to {len(calls)}: all ready", file=sys.stderr)
     if not printed and start < len(calls):
         sys.exit("nothing to send: a slug has no UUID in the file")
+
+
+def one_block(line):
+    """An insert_block with `blocks` as single inserts for a server that takes one block per call. Each goes in at
+    the top, so they are sent last block first and need no block ids from earlier answers."""
+    arguments = line["arguments"]
+    if line["tool"] != "insert_block" or "blocks" not in arguments:
+        return [line]
+    blocks = arguments["blocks"]
+    return [{**line, "part": f"{n}/{len(blocks)}", "arguments": {"uuid": arguments["uuid"], **blocks[n - 1]}}
+            for n in range(len(blocks), 0, -1)]
 
 
 def resolve(value, uuids):
@@ -1485,6 +1499,9 @@ def cmd_ub(args):
         ask("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                            "clientInfo": {"name": "uberblick-intake", "title": "Uberblick intake", "version": "1.0"}})
         server.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
+        tools = {t["name"]: t for t in ask("tools/list", {}).get("tools", [])}
+        # an older ub inserts one block per call, after a block id it answered with
+        one_at_a_time = "blocks" not in tools.get("insert_block", {}).get("inputSchema", {}).get("properties", {"blocks": 1})
         pending = [c for c in calls[applied["done"]:] if c["tool"] == "create_doc" and c["slug"] not in uuids]
         if pending or any(c["tool"] not in READ_TOOLS for c in calls):
             listing = json.loads(call("list_docs", {}))
@@ -1517,8 +1534,16 @@ def cmd_ub(args):
                 applied["done"] = i + 1
                 continue
             try:
-                text = call(c["tool"], resolve(c.get("arguments", {}), uuids))
-            except (RuntimeError, KeyError) as e:
+                arguments = resolve(c.get("arguments", {}), uuids)
+                if c["tool"] == "insert_block" and one_at_a_time and "blocks" in arguments:
+                    after = None
+                    for block in arguments["blocks"]:
+                        one = {"uuid": arguments["uuid"], **block, **({"after_block_id": after} if after else {})}
+                        text = call("insert_block", one)
+                        after = json.loads(text)["block"]["id"]
+                else:
+                    text = call(c["tool"], arguments)
+            except (RuntimeError, KeyError, ValueError) as e:
                 if c.get("optional"):
                     # starter cleanup: a page already unpinned or a group already gone is the state we want
                     applied["results"].append({"tool": c["tool"], "text": f"optional, not applied: {e}"})
@@ -1890,6 +1915,8 @@ def main():
     v = sub.add_parser("resolve", help="for the MCP tools: the calls with the UUIDs filled in, ready to send")
     v.add_argument("--calls", required=True)
     v.add_argument("--uuids", required=True, help="{slug: uuid} from the create_doc answers (or applied.json)")
+    v.add_argument("--one-block", action="store_true",
+                   help="the server's insert_block takes one block, no `blocks`: print one insert per block")
     w = sub.add_parser("corpus", help="read the workspace's tags, sidebar and documents into DIR")
     w.add_argument("--checkout", required=True)
     w.add_argument("--dir", required=True)
