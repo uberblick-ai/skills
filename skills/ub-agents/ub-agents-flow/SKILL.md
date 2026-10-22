@@ -86,7 +86,9 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    of https://agents.uberblick.ai/docs/configuration/queue.html, then the
    findings that span the loop; the two phases with a sentence each, their
    roles, their gates numbered from `G1` in the order an item meets them with
-   one plain sentence each, and their own findings; and every role. Describe the queue as the launcher runs it; where
+   one plain sentence each, and their own findings; and every role. Write in
+   the present tense: a route the maintainer has decided is described as
+   running, with no "planned", and no issue or PR number, release or date. Describe the queue as the launcher runs it; where
    the repository's own instructions say otherwise, add that as a finding.
 
 4. Draw `DIR/overview.flow`, `DIR/issue.flow` and `DIR/pr.flow` as

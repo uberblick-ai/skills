@@ -100,6 +100,11 @@ is uberblick-ai/ub-agents.
   Findings follow, in the overview when they span the loop and in the phase
   they concern otherwise.
 
+Write every text in the present tense, as the loop runs. A route the
+maintainer has decided counts as running, even when the config does not have it
+yet: describe it as it works, never as planned. Leave out history and
+provenance: no issue or PR number, release, date or "since" clause.
+
 Text fields are inline Markdown as Uberblick reads it: `code`, **bold**,
 *italic* and https links.
 

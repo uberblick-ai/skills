@@ -65,9 +65,7 @@ legend
 - Work that enters without an issue, such as a bot's pull requests that
   `trusted-pr-authors` lets run or a label another tool adds that triggers an
   agent, gets its own `end` node in a column beside the main one in the
-  overview, with an edge to the label and on to the agent it starts. Draw a
-  route that is decided but not yet in the config with dashed edges (`-.->`)
-  and "(planned)" in its node.
+  overview, with an edge to the label and on to the agent it starts.
 
 - Three columns: `rework` on the left for labels that send work back, `main`
   for the path an item takes when every gate passes, `stop` on the right for
