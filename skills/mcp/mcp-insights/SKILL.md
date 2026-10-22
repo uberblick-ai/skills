@@ -23,6 +23,10 @@ metadata:
 
 Scripts collect facts, you judge the text, and the renderer computes the
 scores, so numbers are reproducible and every judgement shows its evidence.
+The review works from the outside: it calls tools and judges how they
+behave, above all when something goes wrong. It does not debug the server,
+read its implementation or look for the cause of a failure; that is the
+maintainer's part once the report shows what an agent meets.
 The report is the result; the suggestions at its end are a starting point
 for the maintainer. Each score shows how much of its category was checked,
 so a quick automatic run is not mistaken for a full review.
@@ -183,23 +187,23 @@ or it is not counted. Judge what the server needs: a one-tool server is not
 marked down for lacking a workflow or help topics. Write concrete fixes: for
 a description, the rewritten text ready to paste, keeping every guarantee
 the old text gave (what refuses before writing, partial writes, recovery).
-Set `"repo": true` only when you read the server's source; then suggestions
-can name files and carry an effort estimate. Quote wasted spans under `density`, so context cost counts
+For behaviour, say what the agent should see (refused with an error naming
+the row), not how to build it. Quote wasted spans under `density`, so context cost counts
 waste rather than length. For a server with many formats or a large help
 surface, judge one content family at a time (a syntax, a block type, a
 workflow), one sub-agent per family when you can start them: each reads the
-help and, when the server's repository is at hand, the implementation, and
-reports the copies that drift, editing that is not taught, writes that should
-fail, and internals that leak. Read each trial's transcript in `DIR/trials/` and
+help for its family and reports the copies that drift, editing that is not
+taught, and internals that leak. Read each trial's transcript in `DIR/trials/` and
 record whether it succeeded under `trials`; a trial with `verify` is graded
 by its check unless you record otherwise.
 
 Some audits match on names or patterns (S01, G08); the report tags them
-heuristic, so check what the tool does before citing one. When a finding
-comes from the server's SDK rather than its own code (the JSON Schema draft
-it emits, the wording of its input validation errors, a protocol error
-code), list it under `sdk` in `findings.json` with the reason: the report
-tags it and ranks its suggestion lower, because the fix is an SDK upgrade.
+heuristic, so read the tool's description, or call it in a sandbox, before
+citing one. When a response is recognisably an SDK's default (its standard
+wording for a schema rejection, the draft-07 `$schema` line it emits), you
+may list the audit under `sdk` in `findings.json` with the reason: the
+report tags it and ranks its suggestion lower. Go by the response alone;
+don't trace a finding into the server's code.
 
 ## 6. Render
 

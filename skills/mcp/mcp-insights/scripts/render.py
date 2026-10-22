@@ -799,7 +799,7 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             f"{sum(x['score'] for x in out_calls):.0f} of {len(out_calls)} calls", items=out_calls)
     else:
         res("P13", 0, na=True, untested=any(t.get("outputSchema") for t in tools), note="no calls to tools with an output schema")
-    # Prefer the probe that reached the server's own handler; the other is usually the SDK's answer.
+    # Prefer a missing item under the server's own template: that is the miss an agent actually makes.
     own = probes.get("resource_not_found_template") or {}
     rnf = own.get("response") or (probes.get("resource_not_found") or {}).get("response")
     if "resources" not in caps or rnf is None:
@@ -807,8 +807,8 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     else:
         want = -32602 if lifecycle == "modern" else -32002
         code = rnf.get("code")
-        where = (f"Asked for {own['uri']}, which fits the server's template, so its own handler answered. " if own else
-                 "Asked for a URI no template matches; an SDK often answers that before the server's code runs. ")
+        where = (f"Asked for {own['uri']}, a missing item under the server's own resource template, as an agent would. " if own else
+                 "Asked for a URI outside the server's resources; the server lists no template to try a closer miss. ")
         res("P15", 1 if code == want or (lifecycle == "dual" and code in (-32002, -32602)) else 0.5 if rnf.get("kind") in ("protocol", "tool") else 0,
             f"code {code}" if code is not None else rnf.get("kind", "?"),
             note=f"{where}Expected {want} for this lifecycle. {rnf.get('message', '')[:200]}")
@@ -1329,7 +1329,6 @@ def fix_effects(results: dict, cats: dict, targets: list[str], saves: int | None
     return effects
 
 
-EFFORT = {"S": 1, "M": 2, "L": 3}
 # What a client hides when it hands tools to the model: the wire, server metadata, annotations and output schemas.
 CLIENT_UNSEEN = ["P02", "P03", "P04", "P05", "P06", "P07", "P08", "P09", "P10", "P13", "P14", "P15", "P16", "P17", "P18",
                  "G04", "G05", "G06", "S01", "S04", "C08", "E03"]
@@ -1337,8 +1336,7 @@ ALIASES = {"C07": "C13"}  # audits renamed since older findings were written
 
 
 def recommendations(results: dict, findings: dict, cats: dict) -> list[dict]:
-    # Effort is only knowable with the source; from the outside, suggestions rank by their effect alone.
-    repo = bool((findings or {}).get("repo"))
+    # The review judges behaviour from the outside, so suggestions rank by their effect alone.
     recs = []
     covered = set()
     by_code = {row[0]: row for row in CATALOG}
@@ -1356,7 +1354,7 @@ def recommendations(results: dict, findings: dict, cats: dict) -> list[dict]:
         cat = rec.get("category") or (by_code[audits[0]][1] if audits else "guidance")
         recs.append({**rec, "audits": audits, "targets_audits": targets, "category": cat,
                      "effects": fix_effects(results, cats, targets, per_turn_saving(rec.get("saves"))),
-                     "effort": rec.get("effort", "M"), "source": "agent"})
+                     "source": "agent"})
     for row in CATALOG:
         code = row[0]
         res = results.get(code)
@@ -1370,7 +1368,7 @@ def recommendations(results: dict, findings: dict, cats: dict) -> list[dict]:
         action = re.split(r"(?<=[.;])\s", row[6])[0].rstrip(".;")
         recs.append({"title": action, "category": row[1], "audits": [code], "targets_audits": targets,
                      "targets": list(dict.fromkeys(str(it.get("item")) for it in failing))[:8],
-                     "why": row[5], "fix": row[6], "effort": "M" if row[3] == "metric" else "S",
+                     "why": row[5], "fix": row[6],
                      "evidence": "; ".join(f"{it.get('item')}: {it.get('evidence', '')}" for it in failing[:3]),
                      "effects": fix_effects(results, cats, targets), "source": "catalog"})
     for rec in recs:
@@ -1390,14 +1388,12 @@ def recommendations(results: dict, findings: dict, cats: dict) -> list[dict]:
     for rec in recs:
         rec["gain"] = round(sum(rec["effects"].values()), 1)
         joint_gain = sum((rec.get("joint_effects") or {}).values()) / (len(rec.get("lifts_cap_with") or []) + 1)
-        # A fix that lifts a critical cap goes first; the rest rank by points per effort.
+        # A fix that lifts a critical cap goes first; the rest rank by points.
         rec["rank_value"] = ((1000 if rec["lifts_cap"] or rec.get("lifts_cap_with") else 0)
-                             + max(rec["gain"], joint_gain) / (EFFORT.get(rec["effort"], 2) if repo else 1)
-                             - (100 if rec["sdk"] else 0))
+                             + max(rec["gain"], joint_gain) - (100 if rec["sdk"] else 0))
         if rec["sdk"]:
-            rec["why"] = (rec.get("why") or "") + " This comes from the SDK, so it is fixed by upgrading it rather than in the server's code."
-        if not repo:
-            rec.pop("effort", None)
+            rec["why"] = ((rec.get("why") or "") + " This matches the SDK's default behaviour, so an SDK upgrade may fix it "
+                          "rather than a change to the server's own code.")
         effects = ", ".join(f"+{v:g} {cat_names.get(k, k)}" for k, v in sorted(rec["effects"].items(), key=lambda kv: -kv[1]))
         if rec.get("lifts_cap_with"):
             joint = ", ".join(f"+{v:g} {cat_names.get(k, k)}" for k, v in sorted(rec["joint_effects"].items(), key=lambda kv: -kv[1]))
@@ -1593,12 +1589,11 @@ def render_html(report: dict) -> str:
         if rec.get("lifts_cap"):
             effects.insert(0, '<span class="pill crit">lifts a cap</span>')
         saves = f'<span class="pill">{esc(rec["saves"])}</span>' if rec.get("saves") else ""
-        effort = f'<span class="pill effort">Effort {esc(rec["effort"])}</span>' if rec.get("effort") else ""
         where = f'<p class="fix-where"><span>Where</span>{esc(", ".join(rec["targets"]))}</p>' if rec.get("targets") else ""
         check = f'<p class="fix-where"><span>Done when</span>{esc(rec["check"])}</p>' if rec.get("check") else ""
         fixes.append(
             f'<article class="fix"><div class="fix-rank">{i}</div><div class="fix-body">'
-            f'<div class="fix-meta">{"".join(effects)}{saves}{effort}</div>'
+            f'<div class="fix-meta">{"".join(effects)}{saves}</div>'
             f'<h3>{esc(rec["title"])}</h3><p>{esc(rec.get("why", ""))}</p>{where}'
             f'<details class="fix-detail"><summary>The suggestion</summary><pre>{esc(rec.get("fix", ""))}</pre>{check}</details>'
             f'<div class="fix-actions"><button type="button" data-copy="{esc(rec.get("fix", ""))}">Copy suggestion</button>'
@@ -1680,8 +1675,6 @@ def render_html(report: dict) -> str:
         badges.append(f'{meta["trial_count"]} agent trials')
     if meta.get("calls"):
         badges.append(f'{meta["calls"]} read call{"" if meta["calls"] == 1 else "s"}')
-    if meta.get("repo"):
-        badges.append("repo")
     template = TEMPLATE.read_text(encoding="utf-8")
     fill = {
         "TITLE": esc(f"MCP Insights: {meta['server_title']}"),
@@ -1699,9 +1692,8 @@ def render_html(report: dict) -> str:
         "FIXES_LEAD": esc("The five changes with the largest expected effect on the scores; those that lift a cap come first. "
                           "Each gain is the category re-scored as if the audits the suggestion names passed, or, for a size fix "
                           "with a stated saving, as if the text were that much smaller: what a complete fix would earn, not a forecast. "
-                          + ("Based on the source checkout, with effort estimates." if meta.get("repo") else
-                             "Made from the outside, without the source: they describe what the agent saw and what it should see instead, "
-                             "so check them against the code before acting.")),
+                          "They describe what an agent saw and what it should see instead, judged from the outside; "
+                          "finding the cause and the change in code is the maintainer's part."),
         "TREEMAP": treemap_svg(m.get("tools") or []) if m.get("tools") else '<p class="empty">No tools.</p>',
         "TREEMAP_NOTE": esc(f"{fmt_tokens(m.get('tool_list_model_tokens'))} reach the model (name, title, description and input schema of every tool"
                             + ("), as the client shows them; the server's own tools/list was not visible." if meta.get("via") else
@@ -2017,7 +2009,7 @@ def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) ->
     # but labelled, and its suggestion goes last.
     for code, why in ((findings or {}).get("sdk") or {}).items():
         if code in results:
-            results[code] = {**results[code], "sdk": True, "note": " ".join(x for x in (results[code].get("note"), f"From the SDK: {why}") if x)}
+            results[code] = {**results[code], "sdk": True, "note": " ".join(x for x in (results[code].get("note"), f"SDK default: {why}") if x)}
     cats = score_categories(results)
     recs = recommendations(results, findings, cats)
     init = probe.get("initialize") or {}
@@ -2068,7 +2060,6 @@ def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) ->
             "judged": bool(n_judged), "review_mode": review_mode, "trial_count": n_trials,
             "token_estimator": TOKEN_ESTIMATOR,
             "calls": len([c for c in probe.get("calls") or [] if "bytes" in c]),
-            "repo": bool((findings or {}).get("repo")),
         },
         "categories": cats,
         "audits": results,

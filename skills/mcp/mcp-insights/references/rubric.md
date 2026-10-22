@@ -45,7 +45,6 @@ topics.
 
 ```json
 {
-  "repo": false,
   "judged": {
     "G10": {"items": [{"item": "get_doc", "score": 0.5, "evidence": "\"Returns the doc.\" says nothing about ...", "fix": "Rewritten description ..."},
                       {"item": "search", "score": 1, "evidence": "Says what it matches, what each hit carries, and that unknown tags refuse."}],
@@ -76,10 +75,10 @@ topics.
 }
 ```
 
-`repo` is true only when you read the server's source. Without it,
-suggestions stay at the surface the agent saw (descriptions, errors,
-responses) and carry no effort estimate; with it, they can name files and
-add `"effort": "S" | "M" | "L"`.
+Suggestions stay at the surface the agent saw: descriptions, errors,
+responses and what was stored. They say what the agent should see instead,
+not where in the code or how to build it, and carry no effort estimate,
+because the review does not read the server's source.
 
 A recommendation's `audits` are what it moves: an audit id, or
 `AUDIT:item` when it fixes one item, such as `G10:get_doc`. The report
@@ -125,9 +124,9 @@ does not, unless you record another outcome. Blocked and declined trials do
 not count toward "tasks completed". Trials are
 shown beside the scores and never change them, because which trials run is
 the reviewer's choice. `secrets.dismiss` clears a redacted value that is not
-a real secret; it needs a reason. `sdk` names audits whose finding comes from
-the server's SDK, with the reason; the report labels them, and a suggestion
-whose audits all come from the SDK ranks below the server's own fixes.
+a real secret; it needs a reason. `sdk` names audits whose response matches
+the SDK's default, with the reason; the report labels them, and a suggestion
+whose audits all match the SDK's defaults ranks below the server's own fixes.
 
 ## trials.json
 
