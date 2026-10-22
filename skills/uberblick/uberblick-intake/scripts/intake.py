@@ -1510,7 +1510,7 @@ def cmd_ub(args):
                            "clientInfo": {"name": "uberblick-intake", "title": "Uberblick intake", "version": "1.0"}})
         server.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
         tools = {t["name"]: t for t in ask("tools/list", {}).get("tools", [])}
-        # an older ub inserts one block per call, after a block id it answered with
+        # ub before 0.4.9 inserts one block per call, after a block id it answered with
         one_at_a_time = "blocks" not in tools.get("insert_block", {}).get("inputSchema", {}).get("properties", {"blocks": 1})
         pending = [c for c in calls[applied["done"]:] if c["tool"] == "create_doc" and c["slug"] not in uuids]
         if pending or any(c["tool"] not in READ_TOOLS for c in calls):
@@ -1852,7 +1852,7 @@ def cmd_review(args):
                                                                                  key=lambda kv: -kv[1])) + "."),
         "FOCUS": "".join(focus_rows),
         "CHANGES": (f"<ul>{changes}</ul>" if changes else "<p>None.</p>"),
-        "STARTER": {"unpin": "The starter pages (Welcome to Überblick, How to Use It) are unpinned and their group "
+        "STARTER": {"unpin": "The starter pages (Welcome to Uberblick, How to Use It) are unpinned and their group "
                              "removed.",
                     "keep": "The starter pages stay pinned."}.get(plan["sidebar"].get("starter"),
                                                                   "The starter pages are left as they are."),

@@ -14,8 +14,8 @@ steps (a numbered list says it) or for internal architecture (that stays
 Markdown).
 
 - Read the syntax first: the `ablauf` help topic (`get_help` with
-  `{"topic": "ablauf"}`, or the resource `uberblick://help/ablauf`). An
-  older server has no such topic; then read
+  `{"topic": "ablauf"}`, or the resource `uberblick://help/ablauf`). `ub`
+  before 0.4.9 has no such topic; then read
   [the primer](https://github.com/uberblick-ai/ablauf/blob/v0.2.0/spike/PRIMER.md)
   (`curl -sL` the raw file if a web fetch fails).
 - Draw what the code does: states and transitions from the model or the

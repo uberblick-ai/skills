@@ -61,8 +61,9 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    "complete": …}`; other keys are fine) as `DIR/corpus/tags.json`. When
    both routes are there, write through `ub` (step 8): one command, with
    the checks and the wait for the hub. A fresh workspace holds two starter
-   pages in an "Überblick" group and six starter tags (auth, billing, mcp,
-   permissions, rfc, sync); reuse a starter tag only where it fits. A
+   pages in an "Uberblick" group ("Überblick" before ub 0.4.9) and six
+   starter tags (auth, billing, mcp, permissions, rfc, sync); reuse a
+   starter tag only where it fits. A
    catalog marked `complete: false` has not synced yet: read it again
    before the writes. A local workspace (`"hubUrl": null` in
    `.uberblick.json`) syncs with the hub `ub open` serves on this machine:
@@ -184,7 +185,7 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    repository changes. Tell the person in a few sentences what the corpus
    will hold and where it overlaps a published docs site, then ask once for
    approval to write it, whether to unpin the starter pages (their emptied
-   "Überblick" group is deleted; the pages stay in the workspace), and for any
+   "Uberblick" group is deleted; the pages stay in the workspace), and for any
    new tags to be created under Workspace settings → Tags (MCP cannot
    create tags). Writes go to a workspace the team shares: wait for the
    answer. Change the plan as they ask and build the page again. When you
@@ -230,8 +231,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    object; each line names its `slug`), and run `resolve` again: it skips
    what is done and stops before the next call that needs a UUID you have
    not saved yet. Two or three rounds cover a corpus. If the server's
-   `insert_block` takes one block and no `blocks` (an older `ub`; `ub`
-   itself handles this), add `--one-block`: each insert goes in at the top,
+   `insert_block` takes one block and no `blocks` (`ub` before 0.4.9;
+   `intake.py ub` handles this itself), add `--one-block`: each insert goes in at the top,
    so they come last block first, and sending them in order puts the page
    together. Send the calls in
    order; the first pin into a group creates it, so never send two pins in
