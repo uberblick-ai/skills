@@ -8,9 +8,10 @@ description: >-
   instruction files) numbered and highlighted, with the roles and the queue
   rules. Combines them into one document on request. Writes Uberblick Markdown
   and a matching page to read or print, and reports where an existing corpus
-  says otherwise. Use when a maintainer asks how their loop works, what the flow or the
-  gates look like, or wants an overview of the agents. Reads only. Not for a
-  loop role.
+  says otherwise. Stores the documents in the corpus when an Uberblick MCP
+  server is connected. Use when a maintainer asks how their loop works, what
+  the flow or the gates look like, or wants an overview of the agents.
+  Changes nothing on GitHub. Not for a loop role.
 license: MIT
 compatibility: >-
   Requires python3 and Node.js 22.18 or newer with npm, to install the
@@ -83,11 +84,15 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    reaches, a rule in the instructions the config cannot route, a role that
    can only stop by reporting blocked.
 
-3. Read the corpus, if there is one. When an Uberblick MCP server is
-   connected for REPO, search it for documents on the loop, the agents or the
-   delivery workflow (`search`, `list_docs`) and read each one
-   (`export_markdown` or `get_doc`). Without a server there is no corpus to
-   read; skip this step. Compare what the documents say with what steps 1
+3. Read the corpus, if there is one. The corpus is available when an
+   Uberblick MCP server is connected, whatever its name, such as `uberblick`
+   or `uberblick-agents`. Its tools may be listed by name only; load them
+   before using them, and with more than one server, search each. Search for
+   documents on the loop, the agents or the delivery workflow (`search`,
+   `list_docs`), including the ones an earlier run of this skill wrote, and
+   read each one (`export_markdown` or `get_doc`). Read the repository's own
+   rules for writing corpus pages too, if it has any (in `AGENTS.md` or the
+   files it points to). Without a server there is no corpus; skip this step. Compare what the documents say with what steps 1
    and 2 found, and keep a list of the differences that matter: a gate, a
    route, a label, an agent, a rule or a person's decision that the corpus
    describes otherwise or leaves out, each with the document, what it says
@@ -145,13 +150,21 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    which belongs in `notes`. Printed, each document starts a new A4 page,
    light even from a dark screen.
 
-8. Tell the maintainer where the page and the Markdown are, then in a few
-   sentences: the path an item takes in each phase, the gates where a person
-   decides, and anything from the notes that looks like a mistake in the
-   config or the instructions. Then list the differences from step 3, one
-   line each, or say that the corpus matches or that there is none. Change nothing on GitHub; offer to open an
-   issue only if they ask. When they store the documents in Uberblick, read
-   the repository's own rules for writing corpus pages first and follow them.
-   Create the phase documents first, then the overview, and link each phase's
-   name in its summary to that phase's document. When updating documents a
-   maintainer has edited, read them first and keep their edits.
+8. Store the documents in the corpus whenever there is one, unless the
+   maintainer asked for files only. Follow the repository's rules for corpus
+   pages from step 3. When step 3 found the documents an earlier run wrote,
+   update them in place: change only the blocks whose facts changed, and keep
+   every edit a maintainer made (wording, added or removed blocks, links).
+   Otherwise create them: the phase documents first, then the overview, with
+   each phase's name in the overview's summary linked to its document. With
+   `--combine`, store the one document. Check that every write was applied
+   and synced, and name any that was not. Without a corpus, the Markdown files
+   are the result.
+
+9. Tell the maintainer which documents were created or updated, or where the
+   page and the Markdown are, then in a few sentences: the path an item takes
+   in each phase, the gates where a person decides, and anything from the
+   notes that looks like a mistake in the config or the instructions. Then
+   list the differences from step 3, one line each, or say that the corpus
+   matched or that there is none. Change nothing on GitHub; offer to open an
+   issue only if they ask.
