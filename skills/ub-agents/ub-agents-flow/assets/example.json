@@ -9,7 +9,8 @@
     "points": [
       "**An issue** enters when a maintainer starts it.",
       "**Preparation.** The issue-preparer states the behavior and the smallest set of acceptance criteria.",
-      "**Implementation.** The implementer builds one PR, a reviewer on another model checks the exact head, and the integrator runs the final checks and merges."
+      "**Implementation.** The implementer builds one PR, a reviewer on another model checks the exact head, and the integrator runs the final checks and merges.",
+      "**At any point** an agent that meets unclear intent, work too big for one PR or a decision only a maintainer can make stops with `needs-human`."
     ]
   },
   "phases": [

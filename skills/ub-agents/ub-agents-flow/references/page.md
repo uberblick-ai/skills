@@ -69,7 +69,9 @@ is uberblick-ai/ub-agents.
   lines as they were. `date` is today.
 - `overview` holds the summary of the whole loop, its drawing and its
   `points`: one sentence per way work enters, then one per phase, in the
-  drawing's order. It names no labels and has no table or notes; those belong
+  drawing's order, and a last one on where a person steps in at any point
+  (unclear intent, work too big for one PR, a decision only a maintainer can
+  make). It names no labels and has no table or notes; those belong
   to the phases. An optional `title` replaces "How the loop runs in
   OWNER/NAME".
 - `phases` are the issue phase and the implementation and PR phase, in that

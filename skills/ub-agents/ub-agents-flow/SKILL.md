@@ -81,8 +81,8 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    route, a role that can only stop by reporting blocked.
 
 3. Write `DIR/flow.json` as [references/page.md](references/page.md)
-   describes: the overview with a short summary and one sentence per way work
-   enters and per phase, naming no labels; the two phases with a sentence
+   describes: the overview with a short summary, one sentence per way work
+   enters and per phase, and one on where a person steps in; the two phases with a sentence
    each, their roles, their gates numbered from `G1` in the order an item
    meets them with one plain sentence each, and their notes, the issue phase's
    starting with one per `queue` setting in use, saying what it does and
