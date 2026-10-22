@@ -244,6 +244,9 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    any other refusal and fix it. The group moves at the
    end can be left out when `get_sidebar` already shows the plan's order.
    Last, call `sync_status`: the writes are done once nothing is unsynced.
+   A local workspace has no hub until `ub open` runs in the checkout, so
+   there the writes are done once applied; say they sync while `ub open`
+   runs, and leave starting it to the person.
 
    Tags the catalog still lacks are left off and named. Once a person
    creates them, or to write a changed plan, read the workspace again and

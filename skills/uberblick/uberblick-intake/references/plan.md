@@ -101,7 +101,10 @@ into corpus writes.
   entry, an exact path or a glob (`dir/**`, `*.mdx`); an exact path wins over
   a glob. `action` is `convert` (with `doc`, one slug or a list), `keep` or
   `skip`. A file that is part product, part technical adds `sections`, one
-  per heading with its own `action` (and `doc` when it converts).
+  per heading with its own `action` (and `doc` when it converts). A
+  section that is `keep` stays in the file; a heading with no entry
+  follows the file's `action`, so list every setup heading the scan names
+  in `keep_sections` (and the ones nested under them) as `keep`.
 - `candidates`: every decision candidate considered, including the ones
   left out, with the commits (`sha`, short) and `create` naming the decision
   document or `null`.

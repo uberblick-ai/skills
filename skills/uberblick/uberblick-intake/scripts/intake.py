@@ -970,7 +970,7 @@ def load(path):
 MAX_DESCRIPTION = 300
 MAX_TLDR = 300
 HISTORY = re.compile(r"\b(planned|will (be|soon|eventually)|coming soon|roadmap|todo|tbd|not yet|"
-                     r"since (v?\d|version|release|the)|as of (v?\d|version|20\d\d)|in v\d+(\.\d+)*|deprecated in|"
+                     r"since (v?\d|version|release|the (v?\d|version|release|last|first))|as of (v?\d|version|20\d\d)|in v\d+(\.\d+)*|deprecated in|"
                      r"(added|introduced|removed|changed) in (v?\d|version)|"
                      r"20\d\d-\d\d-\d\d|github\.com/[^\s)]+/(pull|issues)/\d+|(^|\s)#\d{2,}\b)", re.I)
 DECISION_TYPES = ("paragraph", "code", "table", "list-item")
@@ -1598,9 +1598,13 @@ def cmd_ub(args):
             if not status.get("unsyncedChanges") and not status.get("inFlightUpdates"):
                 break
             if (status.get("hub") or {}).get("status") == "hub-down":
-                print(f"ub: no hub is reachable ({(status.get('hub') or {}).get('reason')}); the writes are in this "
-                      f"machine's replica and reach the hub when a server next runs in {checkout} with it up",
-                      file=sys.stderr)
+                if local_workspace(checkout):
+                    print(f"ub: the writes are applied in this local workspace; `ub open` in {checkout} serves its "
+                          f"hub, and they sync while it runs", file=sys.stderr)
+                else:
+                    print(f"ub: no hub is reachable ({(status.get('hub') or {}).get('reason')}); the writes are in "
+                          f"this machine's replica and reach the hub when a server next runs in {checkout} with it up",
+                          file=sys.stderr)
                 break
             if time.monotonic() > deadline:
                 print(f"ub: the hub has not acknowledged {status.get('unsyncedChanges')} change(s) after "
