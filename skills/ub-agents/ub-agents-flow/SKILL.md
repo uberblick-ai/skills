@@ -156,7 +156,9 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    update them in place: change only the blocks whose facts changed, and keep
    every edit a maintainer made (wording, added or removed blocks, links).
    Otherwise create them: the phase documents first, then the overview, with
-   each phase's name in the overview's summary linked to its document. With
+   each phase's name in the overview's summary linked to its document. Tag
+   every document with the corpus's tag for workflow documents, such as
+   `workflow`, when it has one; never invent a tag. With
    `--combine`, store the one document. Check that every write was applied
    and synced, and name any that was not. Without a corpus, the Markdown files
    are the result.
