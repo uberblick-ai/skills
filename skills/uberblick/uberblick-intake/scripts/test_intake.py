@@ -224,18 +224,50 @@ class Plan(unittest.TestCase):
         calls, _ = self.calls()
         base = self.path.parent
         (base / "calls.json").write_text(json.dumps(calls))
-        (base / "uuids.json").write_text(json.dumps({"a": "A", "b": "B", "d": "D"}))
-        run = subprocess.run([sys.executable, str(SCRIPT), "resolve", "--calls", str(base / "calls.json"),
-                              "--uuids", str(base / "uuids.json")], capture_output=True, text=True, check=True)
-        ready = json.loads(run.stdout)
-        self.assertEqual(ready[0]["n"], 4)  # the create_doc calls are done
+
+        def resolve(uuids):
+            if uuids is not None:
+                (base / "uuids.json").write_text(json.dumps(uuids))
+            run = subprocess.run([sys.executable, str(SCRIPT), "resolve", "--calls", str(base / "calls.json"),
+                                  "--uuids", str(base / "uuids.json")], capture_output=True, text=True, check=True)
+            return [json.loads(line) for line in run.stdout.splitlines()], run.stderr
+
+        # nothing answered yet: the pages, then a stop at the record that names its page
+        ready, err = resolve(None)
+        self.assertEqual([(r["call"], r["tool"]) for r in ready], [(1, "create_doc"), (2, "create_doc")])
+        self.assertIn("needs the UUID of 'a'", err)
+        ready, _ = resolve({"a": "A", "b": "B"})
+        self.assertEqual(ready[0], {"call": 3, "tool": "create_doc", "arguments": {
+            "title": "Which store?", "description": "About Which store?", "kind": "decision",
+            "status": "open", "related": "A"}})
+        self.assertEqual(ready[1]["call"], 4)  # stops before d's blocks, which wait for d
+        self.assertEqual(len(ready), 3)
+        ready, err = resolve({"a": "A", "b": "B", "d": "D"})
+        self.assertEqual(ready[0]["call"], 4)
         self.assertEqual(ready[0]["arguments"]["uuid"], "A")
-        self.assertNotIn("$ref", run.stdout)
-        (base / "uuids.json").write_text(json.dumps({"a": "A"}))
-        run = subprocess.run([sys.executable, str(SCRIPT), "resolve", "--calls", str(base / "calls.json"),
-                              "--uuids", str(base / "uuids.json")], capture_output=True, text=True)
+        self.assertNotIn("text", ready[0]["arguments"]["blocks"][0])  # the inline runs carry it
+        self.assertEqual(ready[-1]["call"], len(calls))
+        self.assertIn("all ready", err)
+
+    def test_a_decided_record_is_created_with_its_answer(self):
+        self.plan["documents"][2]["status"] = "decided"
+        self.plan["documents"][2]["answer"] = {"who": "Ann", "when": "2026-01-02", "where": "https://x.test/adr"}
+        self.path.write_text(json.dumps(self.plan))
+        calls, _ = self.calls()
+        create = next(c for c in calls if c.get("slug") == "d")
+        self.assertEqual(create["arguments"]["blocks"][0]["text"], "We use SQLite because it is local.")
+        self.assertFalse([c for c in calls if c["tool"] == "insert_block" and c["slug"] == "d"])
+        (self.path.parent / "docs" / "d.md").write_text(doc("Which store?", "See [Beta](ref:b).\n"))
+        self.plan["documents"].append({"slug": "e", "file": "docs/d.md", "kind": "decision", "status": "decided",
+                                       "answer": self.plan["documents"][2]["answer"]})
+        (self.path.parent / "docs" / "e.md").write_text(doc("Other?", "Yes.\n"))
+        self.plan["documents"][3]["file"] = "docs/e.md"
+        (self.path.parent / "docs" / "d.md").write_text(doc("Which store?", "Like [Other](ref:e).\n"))
+        self.path.write_text(json.dumps(self.plan))
+        run = subprocess.run([sys.executable, str(SCRIPT), "calls", str(self.path), "--tags",
+                              str(self.path.parent / "tags.json")], capture_output=True, text=True)
         self.assertNotEqual(run.returncode, 0)
-        self.assertIn("no UUID", run.stderr)
+        self.assertIn("links to e, created after it", run.stderr)
 
     def test_ub_skips_optional_failures_and_adopted_documents(self):
         calls, _ = self.calls()
@@ -290,6 +322,12 @@ class Plan(unittest.TestCase):
         self.assertIn("source src/gone.py:1-4 does not exist", " ".join(errors))
         self.assertTrue(any("marked new, but the catalog has it" in w for w in warnings))
         self.assertTrue(any("extra is used by 0" in w for w in warnings))
+        (repo / "README.md").write_text("# N\n\n### Install\n")
+        self.plan["markdown"][0]["sections"] = [{"heading": "Install", "action": "keep"},
+                                                {"heading": "Usage", "action": "keep"}]
+        _, warnings = intake.validate(self.plan, self.path.parent, None, repo)
+        self.assertEqual([w for w in warnings if "heading" in w],
+                         ["markdown: README.md has no heading 'Usage'; a section names one exactly as the file has it"])
 
     def test_unknown_container(self):
         with self.assertRaisesRegex(ValueError, "no Uberblick container"):

@@ -956,6 +956,9 @@ def plan_paths(plan, base):
         try:
             meta, blocks, refs = parse_doc(path.read_text(encoding="utf-8"))
             out.append((d, meta, blocks, refs, None))
+        except FileNotFoundError:
+            out.append((d, {}, [], set(), f"{d.get('file')}: not found next to the plan ({base}); `file` is "
+                                          f"relative to intake.json, as in docs/<slug>.md"))
         except (OSError, ValueError) as e:
             out.append((d, {}, [], set(), f"{d.get('file')}: {e}"))
     return out
@@ -1121,10 +1124,27 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
             if sec.get("action") == "convert" and sec.get("doc") not in slugs:
                 errors.append(f"markdown: {m.get('path')} § {sec.get('heading')} converts into {sec.get('doc')!r}, "
                               f"which is not a document")
+    if checkout:
+        for m in plan["markdown"]:
+            if not m.get("sections") or not (checkout / m.get("path", "")).is_file():
+                continue
+            have = {h.strip() for h in re.findall(r"^#{1,6}\s+(.*?)\s*#*\s*$", read(checkout / m["path"]), re.M)}
+            for sec in m["sections"]:
+                if sec.get("heading") not in have:
+                    warnings.append(f"markdown: {m['path']} has no heading {sec.get('heading')!r}; a section names "
+                                    f"one exactly as the file has it")
     if scan:
         for doc in scan["markdown"]:
             if not entry_for(plan["markdown"], doc["path"]):
                 errors.append(f"markdown: {doc['path']} is not accounted for (convert, keep or skip)")
+        focus = {f.get("topic"): f for f in plan.get("tests", {}).get("focus", [])}
+        journeys = sorted(((sum(t.get(k, 0) for k in ("e2e", "e2e-api", "cli")), t["topic"])
+                           for t in scan.get("tests", {}).get("topics", [])), reverse=True)
+        for n, topic in journeys[:8]:
+            f = focus.get(topic)
+            if n >= 10 and (not f or not (f.get("doc") or f.get("why"))):
+                warnings.append(f"tests.focus: {topic} has about {n} journey cases and no page; cover it, or give "
+                                f"the row a `why` (internal, reference only)")
     for c in plan.get("candidates", []):
         if c.get("create") and c["create"] not in slugs:
             errors.append(f"candidates: {c.get('question')!r} creates {c['create']!r}, which is not a document")
@@ -1141,7 +1161,7 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
     many = len(plan.get("documents", [])) > 8
     for t in plan["tags"]:
         n = use[t["name"].lower()]
-        if n == 0 or (n == 1 and many):  # in a small corpus one page per area is normal
+        if n == 0 or (n == 1 and many and not t.get("core")):  # in a small corpus one page per area is normal
             warnings.append(f"tags: {t['name']} is used by {n} document(s); a tag earns its place with two or "
                             f"more, unless it names a core area")
     for c in plan.get("capabilities", []):
@@ -1216,7 +1236,19 @@ def cmd_calls(args):
         if slug in parsed and not parsed[slug][0].get("existing"):
             parsed[slug][0]["existing"] = uuid
             parsed[slug][0]["retag"] = True
-    order = sorted(parsed, key=lambda s: parsed[s][0].get("kind", "page") == "decision")
+    def decided(d):
+        return d.get("kind") == "decision" and (d.get("status") or ("decided" if d.get("answer") else "open")) \
+            == "decided"
+
+    # pages, then open records, then decided ones: a decided record is created with its answer (Uberblick refuses
+    # an empty one), so every document its answer links to must exist first
+    order = sorted(parsed, key=lambda s: (parsed[s][0].get("kind", "page") == "decision", decided(parsed[s][0])))
+    for i, slug in enumerate(order):
+        d, _meta, _blocks, refs = parsed[slug]
+        later = sorted(r for r in refs if r in order[i:] and not parsed[r][0].get("existing")) if decided(d) else []
+        if later:
+            sys.exit(f"{slug}: a decided record is created with its answer, which links to {', '.join(later)}, "
+                     f"created after it; link a page instead, or leave the record open")
     calls, skipped_tags = [], set()
 
     def tag_list(meta):
@@ -1229,13 +1261,16 @@ def cmd_calls(args):
         return out
 
     def linked(blocks):
-        """`ref:slug` in a table's or card's text becomes the slug's UUID; prose carries {"$doc": slug} marks."""
+        """`ref:slug` in a table's or card's text becomes the slug's UUID; prose carries {"$doc": slug} marks.
+        A block with inline runs drops its `text`: the runs replace it, and the calls stay half the size."""
         out = []
         for b in blocks:
             b = dict(b)
             if b["type"] in ("table", "card", "figma"):
                 b["text"] = re.sub(r"\]\(ref:([a-z0-9-]+)\)", lambda m: "](" + "{{uuid:" + m.group(1) + "}})",
                                    b["text"])
+            elif b.get("inline"):
+                del b["text"]
             out.append(b)
         return out
 
@@ -1257,12 +1292,14 @@ def cmd_calls(args):
                 a["related"] = {"$ref": d["related"]}
             if d.get("answer"):
                 a["answer"] = d["answer"]
+            if decided(d) and blocks:
+                a["blocks"] = linked(blocks)
         elif meta.get("tldr"):
             a["tldr"] = meta["tldr"]
         calls.append({"tool": "create_doc", "slug": slug, "arguments": a})
     for slug in order:
         d, meta, blocks, refs = parsed[slug]
-        if not d.get("existing") and blocks:
+        if not d.get("existing") and blocks and not decided(d):
             calls.append({"tool": "insert_block", "slug": slug,
                           "arguments": {"uuid": {"$ref": slug}, "blocks": linked(blocks)}})
     for g in plan["sidebar"].get("groups", []):
@@ -1282,21 +1319,32 @@ def cmd_calls(args):
 
 
 def cmd_resolve(args):
-    """For the MCP tools: the calls with every placeholder whose slug has a UUID replaced, ready to send as they
-    stand. Make the create_doc calls, save {slug: uuid} from their answers, then resolve and send the rest."""
+    """For the MCP tools: the next calls that can be sent, one per line, with every placeholder whose slug has a
+    UUID filled in. It skips the create_doc calls already answered and stops before the first call that names a
+    slug with no UUID yet: send what it printed, add the new UUIDs to the file, and run it again."""
     calls = load(args.calls)
-    uuids = load(args.uuids)
+    uuids = load(args.uuids) if Path(args.uuids).exists() else {}
     uuids = uuids.get("uuids", uuids)
-    out = []
-    for i, c in enumerate(calls):
+    start = 0
+    for i, c in enumerate(calls):  # everything up to the last answered create_doc was sent already
         if c["tool"] in ("create_doc", "existing") and c.get("slug") in uuids:
+            start = i + 1
+    printed = 0
+    for i, c in enumerate(calls[start:], start):
+        if c["tool"] == "existing":
             continue
         try:
-            out.append({"n": i + 1, **c, "arguments": resolve(c.get("arguments", {}), uuids)})
+            arguments = resolve(c.get("arguments", {}), uuids)
         except KeyError as e:
-            sys.exit(f"call {i + 1} ({c['tool']}) names {e}, which has no UUID in {args.uuids} yet")
-    json.dump(out, sys.stdout, indent=1, ensure_ascii=False)
-    print()
+            print(f"stopped before call {i + 1} ({c['tool']}), which needs the UUID of {e}: send the calls above, "
+                  f"add each create_doc's slug and uuid to {args.uuids}, and run resolve again", file=sys.stderr)
+            break
+        print(json.dumps({"call": i + 1, "tool": c["tool"], "arguments": arguments}, ensure_ascii=False))
+        printed += 1
+    else:
+        print(f"calls {start + 1} to {len(calls)}: all ready", file=sys.stderr)
+    if not printed and start < len(calls):
+        sys.exit("nothing to send: a slug has no UUID in the file")
 
 
 def resolve(value, uuids):

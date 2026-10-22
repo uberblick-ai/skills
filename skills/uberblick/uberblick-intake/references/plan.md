@@ -78,7 +78,8 @@ into corpus writes.
 - `tags`: every tag a document uses, `status` `existing` when `list_tags`
   has it (case ignored) and `new` otherwise. Name the catalog's spelling. A
   tag is lowercase letters and digits joined by hyphens, at most 30
-  characters.
+  characters. `"core": true` marks a tag that names a core area, which may
+  sit on a single page.
 - `sidebar.groups` in display order, each with the documents it pins in
   order. A document is pinned once at most; unpinned documents stay
   reachable through search, links and the decision log. `starter` is
@@ -92,7 +93,8 @@ into corpus writes.
   or `decided`) and, only when a person's answer is on record, `answer:
   {who, when, where}`: an ADR's deciders, its date and its URL at `ref`.
   Without `status`, a record with `answer` is `decided` and one without is
-  `open`. A document already in the corpus takes `existing: UUID`: it
+  `open`. A decided record is written with its answer in one call, so its
+  answer links only to pages or to records listed before it. A document already in the corpus takes `existing: UUID`: it
   is not created again, but can be pinned and linked.
 - `markdown`: every Markdown file the scan found is covered by exactly one
   entry, an exact path or a glob (`dir/**`, `*.mdx`); an exact path wins over
@@ -103,7 +105,9 @@ into corpus writes.
   left out, with the commits (`sha`, short) and `create` naming the decision
   document or `null`.
 - `tests.focus`: the topics that carry the suite's weight, from
-  `intake.py tests`, each with the page that reflects it or `null`.
+  `intake.py tests`, each with the page that reflects it, or `null` and a
+  `why` (internal, reference only). `check` warns about a topic with many
+  journey cases and neither.
 - `repo_changes`: proposals only; the skill makes none unless asked.
 
 ## A document file

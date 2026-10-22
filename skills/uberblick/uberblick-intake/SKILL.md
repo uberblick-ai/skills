@@ -43,7 +43,9 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
 
 1. **Find the corpus.** The corpus is reachable when Uberblick MCP tools are
    in your tool list (whatever the server is called; load tools listed by
-   name only), or through `ub` in a checkout bound to a workspace:
+   name only), or through `ub` in a checkout bound to a workspace
+   (`command -v ub` finds it, and the checkout or a parent holds
+   `.uberblick.json`):
 
    ```sh
    python3 scripts/intake.py corpus --checkout CHECKOUT --dir DIR/corpus
@@ -55,7 +57,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    checkout, pass that directory as `--checkout` here and to `ub`.
    Through the MCP tools, call `list_tags`, `get_sidebar`, `list_docs` and
    `list_docs` with `kind: decision` (decision records are listed only then),
-   and save the `list_tags` answer as `DIR/corpus/tags.json`. A fresh
+   and save the `list_tags` answer as it stands (`{"tags": [{"id", "name"}],
+   "complete": …}`) as `DIR/corpus/tags.json`. A fresh
    workspace holds two starter pages in an "Uberblick" group. A catalog
    marked `complete: false` has not synced yet: read it again before the
    writes. With neither route, say so in one line: the run ends with the
@@ -110,7 +113,9 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
      evidence and the page that covers it, or why none does;
    - the pages: one per product area or concept a person acts on, small,
      with the scenarios that matter to a person, deeper where tests and
-     docs show the team's weight;
+     docs show the team's weight. A capability with its own journey tests
+     or docs section and no page is a gap to fill, not a saving: coverage
+     matters more than finishing fast;
    - the decision records: existing ADRs, and the few history candidates
      that meet all four criteria, `open` unless a person decided them;
    - 2 to 12 tags, reusing the catalog's names first;
@@ -193,25 +198,30 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    same calls with `--resume`), waits for the hub to acknowledge and prints
    the sidebar as written.
 
-   With the MCP tools instead of `ub`, send the `create_doc` calls in order
-   as they stand, save `{slug: uuid}` from their answers as
-   `DIR/uuids.json`, then
+   With the MCP tools instead of `ub`, `resolve` hands you the calls in
+   batches, one per line, each with the UUIDs it can fill in:
 
    ```sh
-   python3 scripts/intake.py resolve --calls DIR/calls.json --uuids DIR/uuids.json > DIR/ready.json
+   python3 scripts/intake.py resolve --calls DIR/calls.json --uuids DIR/uuids.json
    ```
 
-   prints every remaining call with the UUIDs filled in. Send them one at a
-   time, in order, each `arguments` exactly as printed (`tool` names the
-   tool; `n` is its place, for your notes). Never send pins in parallel: two
-   pins into a group that does not exist yet make two groups. A refused
-   call marked `optional` is fine; stop at any other and fix it.
+   The first batch is the pages' `create_doc` calls. Send each `arguments`
+   to the tool named `tool`, add `"slug": "uuid"` from each answer to
+   `DIR/uuids.json` (a plain JSON object), and run `resolve` again: it skips
+   what is done and stops before the next call that needs a UUID you have
+   not saved yet. Two or three rounds cover a corpus. Send the calls in
+   order; the first pin into a group creates it, so never send two pins in
+   parallel while their group does not exist yet. A refused call marked
+   `optional` is fine; stop at any other and fix it. The group moves at the
+   end can be left out when `get_sidebar` already shows the plan's order.
+   Last, call `sync_status`: the writes are done once nothing is unsynced.
 
    Tags the catalog still lacks are left off and named. Once a person
    creates them, or to write a changed plan, read the workspace again and
    pass `--applied DIR/applied.json` (or `DIR/uuids.json`) to `calls`, with
-   a new `--out` for `ub`: documents already written are not created again,
-   only given their tags and pinned.
+   a new `--out` for `ub` (or a new uuids file for `resolve`): documents
+   already written are not created again, only given their tags with
+   `set_metadata` and pinned.
 
 9. **Record the grounding.** When the `uberblick-corpus-sync` skill is
    installed, run it in apply mode on the pages just written (their UUIDs
