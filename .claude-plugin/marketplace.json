@@ -26,6 +26,15 @@
         "./skills/maintenance/backlog-grooming",
         "./skills/maintenance/ci-health"
       ]
+    },
+    {
+      "name": "uberblick",
+      "description": "Skills for setting up and keeping an Uberblick corpus: intake of a repository's docs, history and tests.",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/uberblick/uberblick-intake"
+      ]
     }
   ]
 }

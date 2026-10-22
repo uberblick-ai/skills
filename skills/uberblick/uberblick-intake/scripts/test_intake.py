@@ -1,0 +1,173 @@
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import intake  # noqa: E402
+
+SCRIPT = Path(__file__).resolve().parent / "intake.py"
+
+
+def doc(title, body, **meta):
+    lines = ["---", f"title: {title}", f"description: {meta.pop('description', 'About ' + title)}"]
+    for k, v in meta.items():
+        lines.append(f"{k}: [{', '.join(v)}]" if isinstance(v, list) else f"{k}: {v}")
+    return "\n".join(lines + ["---", "", body])
+
+
+class Blocks(unittest.TestCase):
+    def test_blocks_and_inline_runs(self):
+        meta, blocks, refs = intake.parse_doc(doc("Send", (
+            "Upload a **PDF** and see [Roles](ref:roles).\n\n"
+            "## Recipients\n\n"
+            "- one `-p`\n  - nested\n1. first\n\n"
+            "| a | b |\n| --- | --- |\n| [x](ref:other) | 2 |\n\n"
+            "```ablauf\nflow v0\n```\n\n"
+            "```terminal\n$ glow\n```\n\n"
+            ":::card\ntitle: Hi\n\nBody\n:::\n\n> quoted\n> more\n"), tags=["signing"], tldr="Short."))
+        self.assertEqual(meta["tags"], ["signing"])
+        self.assertEqual(refs, {"roles", "other"})
+        types = [b["type"] for b in blocks]
+        self.assertEqual(types, ["paragraph", "heading", "list-item", "list-item", "list-item", "table", "code",
+                                 "terminal", "card", "quote"])
+        para = blocks[0]
+        self.assertEqual(para["text"], "Upload a PDF and see Roles.")
+        self.assertIn({"text": "PDF", "marks": {"bold": True}}, para["inline"])
+        self.assertIn({"text": "Roles", "marks": {"docLink": {"$doc": "roles"}}}, para["inline"])
+        self.assertEqual(blocks[3]["indent"], 1)
+        self.assertEqual(blocks[4]["list"], "ordered")
+        self.assertEqual(blocks[6]["language"], "ablauf")
+        self.assertEqual(blocks[9]["text"], "quoted more")
+
+    def test_refusals(self):
+        with self.assertRaisesRegex(ValueError, "mermaid"):
+            intake.parse_doc(doc("A", "```mermaid\ngraph TD\n```\n"))
+        with self.assertRaisesRegex(ValueError, "neither https"):
+            intake.parse_doc(doc("A", "See [the code](src/main.go).\n"))
+        with self.assertRaisesRegex(ValueError, "frontmatter"):
+            intake.parse_doc("# No frontmatter\n")
+
+
+class Scan(unittest.TestCase):
+    def test_guesses(self):
+        facts = {"headings": ["Status", "Context", "Decision"], "fences": {}, "words": 300}
+        self.assertEqual(intake.guess_class("docs/notes/0003-sync.md", facts)[0], "decision")
+        plain = {"headings": ["What is it?"], "fences": {}, "words": 500}
+        self.assertEqual(intake.guess_class("AGENTS.md", plain)[0], "harness")
+        self.assertEqual(intake.guess_class(".github/ISSUE_TEMPLATE/bug.md", plain)[0], "harness")
+        self.assertEqual(intake.guess_class("CONTRIBUTING.md", plain)[0], "technical")
+        self.assertEqual(intake.guess_class("upcoming-release-notes/123.md", plain)[0], "changelog")
+        self.assertEqual(intake.guess_class("docs/guide.md", plain)[0], "product")
+
+    def test_test_kinds_and_topics(self):
+        self.assertEqual(intake.test_kind("packages/app-tests/e2e/admin/search.spec.ts", ""), "e2e")
+        self.assertEqual(intake.test_kind("tests/test_cli.py", "CliRunner()\nCliRunner()\n", 4), "cli")
+        self.assertEqual(intake.test_kind("tests/test_models.py", "def test_a(): pass", 1), "unit")
+        self.assertEqual(intake.topic_of("packages/app-tests/e2e/admin/search.spec.ts"), "admin")
+        self.assertEqual(intake.topic_of("tests/test_cli.py"), "cli")
+        self.assertEqual(intake.topic_of("crates/uv/tests/it/lock.rs"), "it")
+
+    def test_scan_a_repository(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = Path(d)
+            run = lambda *a: subprocess.run(["git", "-C", d, *a], check=True, capture_output=True)  # noqa: E731
+            run("init", "-q")
+            run("config", "user.email", "a@example.com")
+            run("config", "user.name", "A")
+            (repo / "README.md").write_text("# Tool\n\n## Usage\n\nRun it.\n")
+            (repo / "AGENTS.md").write_text("# Agents\n")
+            (repo / "e2e").mkdir()
+            (repo / "e2e" / "login.spec.ts").write_text("test('signs in', async () => {});\n"
+                                                         "test('signs out', async () => {});\n")
+            (repo / "app.ts").write_text("export const a = 1;\n")
+            run("add", ".")
+            run("commit", "-qm", "Switch to the new renderer")
+            out = subprocess.run([sys.executable, str(SCRIPT), "scan", d], capture_output=True, text=True,
+                                 check=True).stdout
+            scan = json.loads(out)
+        self.assertEqual({m["path"]: m["guess"] for m in scan["markdown"]},
+                         {"README.md": "product", "AGENTS.md": "harness"})
+        self.assertEqual(scan["tests"]["cases"], {"e2e": 2})
+        self.assertEqual(scan["tests"]["e2e"][0]["titles"], ["signs in", "signs out"])
+        self.assertTrue(scan["churn"]["hot_files"])
+
+
+class Plan(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        base = Path(self.dir.name)
+        (base / "docs").mkdir()
+        (base / "docs" / "a.md").write_text(doc("Alpha", "See [Beta](ref:b).\n", tags=["core"], tldr="Alpha."))
+        (base / "docs" / "b.md").write_text(doc("Beta", "Back to [Alpha](ref:a).\n", tags=["core"], tldr="Beta."))
+        (base / "docs" / "d.md").write_text(doc("Which store?", "We use SQLite because it is local.\n"))
+        self.plan = {
+            "schema_version": 1, "repository": "o/n", "ref": "abc", "summary": "S",
+            "tags": [{"name": "core", "status": "new"}, {"name": "extra", "status": "new"}],
+            "sidebar": {"groups": [{"name": "Start", "docs": ["a"]}, {"name": "More", "docs": ["b", "d"]}],
+                        "starter": "unpin"},
+            "documents": [
+                {"slug": "a", "file": "docs/a.md", "sources": ["README.md"]},
+                {"slug": "b", "file": "docs/b.md", "sources": ["README.md"]},
+                {"slug": "d", "file": "docs/d.md", "kind": "decision", "related": "a", "sources": ["git:1"]},
+            ],
+            "markdown": [{"path": "README.md", "action": "convert", "doc": ["a", "b"], "why": "x"},
+                         {"path": "docs/**", "action": "keep", "why": "y"}],
+        }
+        self.path = base / "intake.json"
+        self.path.write_text(json.dumps(self.plan))
+        self.scan = {"markdown": [{"path": "README.md"}, {"path": "docs/x/y.md"}, {"path": "NOTES.md"}]}
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_check(self):
+        errors, warnings = intake.validate(self.plan, self.path.parent, self.scan)
+        self.assertEqual(errors, ["markdown: NOTES.md is not accounted for (convert, keep or skip)"])
+        self.plan["tags"][0]["name"] = "Core Tag"
+        errors, _ = intake.validate(self.plan, self.path.parent)
+        self.assertTrue(any("lowercase letters" in e for e in errors))
+
+    def test_decision_answer_limits(self):
+        (self.path.parent / "docs" / "d.md").write_text(doc("Which store?", "word " * 61 + "\n"))
+        errors, _ = intake.validate(self.plan, self.path.parent)
+        self.assertTrue(any("at most 60 words" in e for e in errors))
+
+    def test_history_warning(self):
+        (self.path.parent / "docs" / "a.md").write_text(doc("Alpha", "Search is planned for v2.\n", tldr="A."))
+        _, warnings = intake.validate(self.plan, self.path.parent)
+        self.assertTrue(any("'planned'" in w for w in warnings))
+
+    def test_calls_order_and_cycle(self):
+        out = subprocess.run([sys.executable, str(SCRIPT), "calls", str(self.path)], capture_output=True,
+                             text=True, check=True).stdout
+        calls = json.loads(out)
+        tools = [(c["tool"], c.get("slug")) for c in calls]
+        self.assertEqual(tools[:3], [("create_doc", "b"), ("create_doc", "a"), ("create_doc", "d")])
+        self.assertEqual(calls[2]["arguments"]["related"], {"$ref": "a"})
+        self.assertEqual(calls[2]["arguments"]["kind"], "decision")
+        # b links to a before a exists: plain text now, a curated link afterwards
+        self.assertNotIn("inline", calls[0]["arguments"]["blocks"][0])
+        self.assertIn({"tool": "set_metadata", "arguments": {"uuid": {"$ref": "b"}, "links": [{"$ref": "a"}]}},
+                      calls)
+        self.assertIn(("starter_cleanup", None), tools)
+        self.assertEqual(intake.resolve(calls[1]["arguments"]["blocks"][0]["inline"][1]["marks"],
+                                        {"b": "uuid-b"}), {"docLink": "uuid-b"})
+
+    def test_calls_after_an_earlier_run(self):
+        applied = self.path.parent / "applied.json"
+        applied.write_text(json.dumps({"uuids": {"a": "uuid-a", "b": "uuid-b"}}))
+        tags = self.path.parent / "tags.json"
+        tags.write_text(json.dumps({"tags": [{"id": "t1", "name": "core"}]}))
+        out = subprocess.run([sys.executable, str(SCRIPT), "calls", str(self.path), "--applied", str(applied),
+                              "--tags", str(tags)], capture_output=True, text=True, check=True).stdout
+        calls = json.loads(out)
+        self.assertEqual([c["tool"] for c in calls[:5]],
+                         ["existing", "set_metadata", "existing", "set_metadata", "create_doc"])
+        self.assertEqual(calls[1]["arguments"], {"uuid": "uuid-b", "tags": ["t1"]})
+
+
+if __name__ == "__main__":
+    unittest.main()

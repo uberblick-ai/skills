@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}</title>
+<style>
+:root{--bg:#fff;--fg:#1c1d1f;--muted:#6b6f76;--line:#e4e5e8;--soft:#f5f6f7;--accent:#3b5bdb;--new:#2b8a3e;--warn:#b35c00;--err:#c92a2a;--side:#fafafa}
+@media (prefers-color-scheme:dark){:root{--bg:#17181a;--fg:#e8e9eb;--muted:#9a9ea6;--line:#2c2e33;--soft:#202226;--accent:#7c95f5;--new:#69db7c;--warn:#ffa94d;--err:#ff8787;--side:#1c1d20}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+main{max-width:1060px;margin:0 auto;padding:32px 20px 80px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:19px;margin:40px 0 10px;padding-top:12px;border-top:1px solid var(--line)}
+h3{font-size:17px;margin:4px 0}h4,h5{font-size:15px;margin:18px 0 6px}
+.meta{color:var(--muted);font-size:13px}
+.stats{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0}
+.stat{background:var(--soft);border-radius:8px;padding:10px 14px;min-width:110px}.stat b{display:block;font-size:22px}.stat span{color:var(--muted);font-size:12px}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:8px 0}
+th,td{text-align:left;border-bottom:1px solid var(--line);padding:6px 8px;vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.03em}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--soft);padding:1px 4px;border-radius:4px}
+pre{font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--soft);padding:10px 12px;border-radius:6px;overflow:auto}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.tag{display:inline-block;font-size:12px;border:1px solid var(--line);border-radius:999px;padding:0 8px;margin:0 4px 2px 0}
+.tag.new{border-color:var(--new);color:var(--new)}
+.act{font-size:12px;font-weight:600;text-transform:uppercase}.act.convert{color:var(--accent)}.act.keep{color:var(--muted)}.act.skip{color:var(--warn)}
+.issues li.err{color:var(--err)}.issues li.warn{color:var(--warn)}.ok{color:var(--new)}
+.layout{display:grid;grid-template-columns:240px 1fr;gap:22px;align-items:start}
+.side{background:var(--side);border:1px solid var(--line);border-radius:10px;padding:10px 6px;position:sticky;top:12px;max-height:90vh;overflow:auto}
+.sg{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:12px 10px 4px}
+.si{display:flex;gap:8px;padding:4px 10px;border-radius:6px;color:var(--fg);font-size:14px}.si:hover{background:var(--soft);text-decoration:none}.si span{color:var(--muted)}
+.muted{opacity:.6}
+.bar{height:10px;background:var(--accent);border-radius:3px;min-width:2px}
+.doc{border:1px solid var(--line);border-radius:10px;padding:18px 22px;margin:0 0 18px}
+.doc.decision{border-left:4px solid var(--accent)}
+.doc header{border-bottom:1px solid var(--line);margin-bottom:10px;padding-bottom:8px}
+.doc .kind{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.doc .tldr{font-weight:500}.doc .desc,.doc .src{color:var(--muted);font-size:13px;margin:4px 0}
+.card{border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:10px 0}.card .lbl{font-size:12px;color:var(--muted)}.card .ttl{font-weight:600}.card .ftr{font-size:12px;color:var(--muted)}
+figure.viz{margin:12px 0;overflow:auto}figure.viz svg{max-width:100%;height:auto}figcaption{font-size:12px;color:var(--muted)}
+blockquote{border-left:3px solid var(--line);margin:8px 0;padding:2px 12px;color:var(--muted)}
+@media (max-width:760px){.layout{grid-template-columns:1fr}.side{position:static;max-height:none}}
+@media print{.side{position:static}.doc{break-inside:avoid-page}}
+</style>
+</head>
+<body>
+<main>
+<h1>Intake of {{REPO}}</h1>
+<div class="meta">At commit <code>{{REF}}</code> · {{DATE}} · Approve this plan before anything is written to the corpus.</div>
+<p>{{SUMMARY}}</p>
+<div class="stats">{{STATS}}</div>
+{{ISSUES}}
+
+<h2>Sidebar and documents</h2>
+<p class="meta">The sidebar as people will see it, then every document as it will be written. Ablauf drawings are rendered; wireframes render when the page can load the renderer.</p>
+<div class="layout">
+<nav class="side">{{SIDEBAR}}</nav>
+<div>{{DOCS}}</div>
+</div>
+
+<h2>Tags</h2>
+<p class="meta">Create the new tags under Workspace settings → Tags before the writes; MCP cannot create them.</p>
+<table><tr><th>Tag</th><th>Status</th><th>Docs</th><th>Why</th></tr>{{TAGS}}</table>
+
+<h2>Markdown in the repository</h2>
+<table><tr><th>Path</th><th>Files</th><th>Action</th><th>Into</th><th>Why</th></tr>{{MARKDOWN}}</table>
+
+<h2>Decision candidates from history</h2>
+<table><tr><th>Question</th><th>Evidence</th><th>Result</th><th>Why</th></tr>{{CANDIDATES}}</table>
+
+<h2>Test focus</h2>
+<p>{{TESTSUMMARY}}</p>
+<table><tr><th>Topic</th><th>Cases</th><th>Kind</th><th style="width:30%"></th><th>Reflected in</th></tr>{{FOCUS}}</table>
+
+<h2>Changes to the repository</h2>
+{{CHANGES}}
+</main>
+<script type="module">
+const figures = document.querySelectorAll("figure.wf");
+if (figures.length) {
+  try {
+    const wf = await import("https://cdn.jsdelivr.net/npm/@uberblick/wireframe@0.3.0/+esm");
+    const style = document.createElement("style");
+    style.textContent = wf.getEmbedStyles();
+    document.head.append(style);
+    for (const fig of figures) {
+      const drawing = wf.renderWireframe(wf.parseWireframe(fig.dataset.wireframe));
+      if (drawing) fig.querySelector("pre").replaceWith(drawing);
+    }
+  } catch { /* offline: the source stays */ }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,137 @@
+# intake.json and the documents
+
+`intake.py` reads `DIR/intake.json` and the Uberblick Markdown files it names
+in `DIR/docs/`. `check` validates them, `review` shows them, `calls` turns them
+into corpus writes.
+
+```json
+{
+  "schema_version": 1,
+  "repository": "OWNER/NAME",
+  "ref": "8707e33c",
+  "date": "2026-10-22",
+  "summary": "At most 80 words: what the corpus holds, how it is grouped and what stays in the repository.",
+  "tags": [
+    {"name": "signing", "status": "new", "why": "The signing flow, the product's core; 9 pages."},
+    {"name": "workflow", "status": "existing", "why": "Already in the catalog; the document lifecycle."}
+  ],
+  "sidebar": {
+    "groups": [
+      {"name": "Start here", "docs": ["overview", "document-lifecycle"]},
+      {"name": "Signing", "docs": ["send-a-document", "sign-a-document"]}
+    ],
+    "starter": "unpin"
+  },
+  "documents": [
+    {
+      "slug": "send-a-document",
+      "file": "docs/send-a-document.md",
+      "kind": "page",
+      "sources": ["README.md", "apps/docs/content/docs/users/documents/send.mdx"],
+      "tests": ["packages/app-tests/e2e/document-flow"],
+      "visuals": ["ablauf"]
+    },
+    {
+      "slug": "pdf-library",
+      "file": "docs/pdf-library.md",
+      "kind": "decision",
+      "related": "send-a-document",
+      "sources": ["git:9035240b4d"],
+      "status": "decided"
+    }
+  ],
+  "markdown": [
+    {"path": "README.md", "action": "convert", "doc": ["overview", "self-hosting"], "why": "Product overview and features."},
+    {"path": "apps/docs/content/docs/developers/**", "action": "keep", "why": "API reference, generated from the code."},
+    {"path": ".agents/**", "action": "keep", "why": "Agent plans and skills."},
+    {"path": "CODE_OF_CONDUCT.md", "action": "skip", "why": "Community file; nothing for the corpus."}
+  ],
+  "candidates": [
+    {"question": "Which library reads and signs PDFs?", "evidence": ["9035240b4d"], "create": "pdf-library",
+     "why": "Replaced pdf-sign; constrains every signing change."},
+    {"question": "Which linter?", "evidence": ["edbf65969b"], "create": null,
+     "why": "Tooling, no product consequence; stays in CONTRIBUTING.md."}
+  ],
+  "tests": {
+    "summary": "One or two sentences: where the suite's weight is and what that says about the product.",
+    "focus": [
+      {"topic": "document-flow", "cases": 46, "kind": "e2e", "doc": "send-a-document"},
+      {"topic": "api", "cases": 521, "kind": "e2e", "doc": null}
+    ]
+  },
+  "repo_changes": [
+    {"path": "README.md", "change": "Keep install and contributing; point to the corpus for what the product does."}
+  ],
+  "notes": ["Anything the person should know that fits nowhere else."]
+}
+```
+
+- `ref` is the commit the scan read (`scan.json`'s `ref`), `date` today.
+- `tags`: every tag a document uses, `status` `existing` when `list_tags`
+  has it (case ignored) and `new` otherwise. Name the catalog's spelling. A
+  tag is lowercase letters and digits joined by hyphens, at most 30
+  characters.
+- `sidebar.groups` in display order, each with the documents it pins in
+  order. A document is pinned once at most; unpinned documents stay
+  reachable through search, links and the decision log. `starter` is
+  `unpin` or `keep`: what to do with the workspace's starter pages, decided
+  with the person.
+- `documents`: `slug` is kebab-case and unique; `file` is relative to
+  `intake.json`. `kind` is `page` or `decision`. `sources` are the repository
+  paths a page is written from (`path` or `path:start-end`, or `git:SHA` for a
+  commit), `tests` the test folders or files its scenarios follow. A decision
+  takes `related` (the slug of the page it belongs to), `status` (`decided`
+  or `open`, default `decided`) and, only when a person's answer is on
+  record, `answer: {who, when, where}`: an ADR's deciders, its date and its
+  URL at `ref`. A document already in the corpus takes `existing: UUID`: it
+  is not created again, but can be pinned and linked.
+- `markdown`: every Markdown file the scan found is covered by exactly one
+  entry, an exact path or a glob (`dir/**`, `*.mdx`); an exact path wins over
+  a glob. `action` is `convert` (with `doc`, one slug or a list), `keep` or
+  `skip`.
+- `candidates`: every decision candidate considered, including the ones
+  left out, with the commits (`sha`, short) and `create` naming the decision
+  document or `null`.
+- `tests.focus`: the topics that carry the suite's weight, from
+  `intake.py tests`, each with the page that reflects it or `null`.
+- `repo_changes`: proposals only; the skill makes none unless asked.
+
+## A document file
+
+Each document is one Markdown file with frontmatter, then its blocks:
+
+```markdown
+---
+title: Send a document for signing
+description: Preparing and sending a document: recipients, roles, fields, signing order, reminders. Envelope, distribute, signers.
+tldr: Upload a PDF, add recipients and their fields, and send it; Documenso emails each recipient in order.
+tags: [signing, workflow]
+---
+
+Upload a PDF, add who signs, place their fields and send.
+
+## Recipients and roles
+
+Each recipient is a **signer**, **approver**, **viewer** or gets a copy. See [Recipient roles](ref:recipient-roles).
+
+### Signing in order
+
+With *signing order* on, the second signer gets the email only after the first has signed.
+```
+
+- `title` and `description` are required; the description is for agents
+  (at most 300 characters, search terms welcome), the `tldr` for people (at
+  most 300). Both are plain text: backticks and asterisks show literally. `tags` lists tag names from the plan. Decisions have no `tldr`.
+- The body is Uberblick Markdown: headings, paragraphs, flat lists (two
+  spaces of indent per level, up to three), quotes, GFM tables, fenced code,
+  `terminal` and `chart` fences, `ablauf` and `wireframe` fences, `:::card`
+  containers. Inline: `**bold**`, `*italic*`, `` `code` ``, `~~strike~~`,
+  `[text](https://…)` and `[text](ref:slug)` for another document of the plan.
+- Not allowed: a leading H1 (the title shows already), `mermaid` (Uberblick
+  deletes it; draw ablauf), relative links into the repository (link the file
+  on GitHub at `ref`), images, HTML, nested block content.
+- A decision's body is its answer: one to three blocks (paragraphs, code,
+  tables, a list counts once), at most 60 words, leading with the choice.
+
+`intake.py blocks FILE` prints the `create_doc` arguments a file becomes, to
+check a conversion.
