@@ -7,14 +7,16 @@ description: >-
   ablauf, every gate that holds work back (from the config and the agents'
   instruction files) numbered and highlighted, with the roles and the queue
   rules. Combines them into one document on request. Writes Uberblick Markdown
-  and a matching page to read or print. Use when a maintainer asks how their loop works, what the flow or the
+  and a matching page to read or print, and reports where an existing corpus
+  says otherwise. Use when a maintainer asks how their loop works, what the flow or the
   gates look like, or wants an overview of the agents. Reads only. Not for a
   loop role.
 license: MIT
 compatibility: >-
   Requires python3 and Node.js 22.18 or newer with npm, to install the
   @uberblick/ablauf renderer into a scratch directory. Reads the repository's
-  checkout, or GitHub through an authenticated gh without one.
+  checkout, or GitHub through an authenticated gh without one, and the
+  Uberblick corpus through a connected Uberblick MCP server when there is one.
 metadata:
   author: uberblick-ai
   version: "0.1"
@@ -81,7 +83,19 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    reaches, a rule in the instructions the config cannot route, a role that
    can only stop by reporting blocked.
 
-3. Write `DIR/flow.json` as [references/page.md](references/page.md)
+3. Read the corpus, if there is one. When an Uberblick MCP server is
+   connected for REPO, search it for documents on the loop, the agents or the
+   delivery workflow (`search`, `list_docs`) and read each one
+   (`export_markdown` or `get_doc`). Without a server there is no corpus to
+   read; skip this step. Compare what the documents say with what steps 1
+   and 2 found, and keep a list of the differences that matter: a gate, a
+   route, a label, an agent, a rule or a person's decision that the corpus
+   describes otherwise or leaves out, each with the document, what it says
+   and what the config or the instructions say, with the line. Leave out
+   wording and layout. The list is for the maintainer only: it goes in no
+   document, the generated ones included.
+
+4. Write `DIR/flow.json` as [references/page.md](references/page.md)
    describes: the overview with a short summary, one sentence per way work
    enters and per phase, and one on where a person steps in; the two phases
    with a sentence each, their roles, their gates numbered from `G1` in the
@@ -96,7 +110,7 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    queue as the launcher runs it; where the repository's own instructions say
    otherwise, add that as a finding.
 
-4. Draw `DIR/overview.flow`, `DIR/issue.flow` and `DIR/pr.flow` as
+5. Draw `DIR/overview.flow`, `DIR/issue.flow` and `DIR/pr.flow` as
    [references/flow.md](references/flow.md) describes, starting from
    [assets/overview.flow](assets/overview.flow),
    [assets/issue.flow](assets/issue.flow) and [assets/pr.flow](assets/pr.flow):
@@ -105,7 +119,7 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    in `flow.json`. The overview stays abstract: the ways work enters, one box
    per phase, and the merge.
 
-5. Render all three, installing the renderer once per scratch directory:
+6. Render all three, installing the renderer once per scratch directory:
 
    ```sh
    npm install --prefix DIR/ablauf @uberblick/ablauf@0.2.0
@@ -115,7 +129,7 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    Each `.svg` lands next to its `.flow`. It fails on any diagnostic and
    names the line; fix it and render again until all three print `clean`.
 
-6. Build the documents and open them:
+7. Build the documents and open them:
 
    ```sh
    python3 scripts/page.py DIR/flow.json --out DIR/flow.html --open
@@ -131,10 +145,11 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    which belongs in `notes`. Printed, each document starts a new A4 page,
    light even from a dark screen.
 
-7. Tell the maintainer where the page and the Markdown are, then in a few
+8. Tell the maintainer where the page and the Markdown are, then in a few
    sentences: the path an item takes in each phase, the gates where a person
    decides, and anything from the notes that looks like a mistake in the
-   config or the instructions. Change nothing on GitHub; offer to open an
+   config or the instructions. Then list the differences from step 3, one
+   line each, or say that the corpus matches or that there is none. Change nothing on GitHub; offer to open an
    issue only if they ask. When they store the documents in Uberblick, read
    the repository's own rules for writing corpus pages first and follow them.
    Create the phase documents first, then the overview, and link each phase's
