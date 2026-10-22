@@ -198,7 +198,7 @@ reached from them.
 - Pin a decision record only when it is itself the entry point a person in
   that domain needs.
 - The starter pages of a new workspace ("Welcome to Uberblick", "How to Use
-  It" in the "Uberblick" group, spelled "Überblick" before ub 0.4.9; the
+  It" in the "Uberblick" group, spelled "Überblick" in older versions; the
   UUIDs never change) are unpinned only when the person agrees.
 
 ## Repository changes

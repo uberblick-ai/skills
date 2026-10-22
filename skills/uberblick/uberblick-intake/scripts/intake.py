@@ -707,10 +707,19 @@ def load_scan(path):
     return scan
 
 
+def local_workspace(checkout):
+    """True when the checkout is bound to a local-only workspace, whose catalog is whole although it reads
+    `complete: false` while no hub runs."""
+    try:
+        return json.loads((Path(checkout) / ".uberblick.json").read_text(encoding="utf-8")).get("hubUrl") is None
+    except (OSError, ValueError):
+        return False
+
+
 def cmd_hot(args):
     scan = load_scan(args.scan)
     c = scan["churn"]
-    print(f"{scan['repository']} @ {scan['ref']}: {c['human_commits']} human commits of {c['commits_read']} read, "
+    print(f"{scan['repository']} @ {scan['ref']}: {c['human_commits']} human commits of {c['commits_read']} non-merge commits read, "
           f"{c['first']} to {c['last']}")
     print("\nHot areas (commits, authors, reverts):")
     for a in c["hot_areas"][:args.limit]:
@@ -1041,7 +1050,7 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
         if not title:
             errors.append(f"{where}: no title")
         for field in ("tldr", "description"):
-            if re.search(r"`|\*\*|\]\(|(^|\s)_\w", meta.get(field, "") or ""):
+            if re.search(r"`|\*\*|\]\(|(^|\s)_\w[^_]*_(?!\w)", meta.get(field, "") or ""):
                 warnings.append(f"{where}: {field} is plain text; Markdown such as backticks shows literally")
         desc = meta.get("description", "")
         if not desc:
@@ -1282,8 +1291,8 @@ def cmd_calls(args):
     listing = load(args.tags)
     catalog = {t["name"].lower(): t["id"] for t in listing.get("tags", [])}
     if listing.get("complete") is False:
-        print("the tag catalog is incomplete (this machine has not synced all of it); tags missing from it are "
-              "left off, so read it again once synced", file=sys.stderr)
+        print("the tag catalog reads complete: false. Tags missing from it are left off. On a team workspace, read "
+              "it again once synced; on a local one (hubUrl null) it is already the whole catalog", file=sys.stderr)
     parsed = {d["slug"]: (d, meta, blocks, refs) for d, meta, blocks, refs, _ in plan_paths(plan, base)}
     done_before = load(args.applied) if args.applied else {}
     done_before = done_before.get("uuids", done_before)  # applied.json, or {slug: uuid} from the MCP route
@@ -1510,7 +1519,7 @@ def cmd_ub(args):
                            "clientInfo": {"name": "uberblick-intake", "title": "Uberblick intake", "version": "1.0"}})
         server.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
         tools = {t["name"]: t for t in ask("tools/list", {}).get("tools", [])}
-        # ub before 0.4.9 inserts one block per call, after a block id it answered with
+        # older ub versions insert one block per call, after a block id they answered with
         one_at_a_time = "blocks" not in tools.get("insert_block", {}).get("inputSchema", {}).get("properties", {"blocks": 1})
         pending = [c for c in calls[applied["done"]:] if c["tool"] == "create_doc" and c["slug"] not in uuids]
         if pending or any(c["tool"] not in READ_TOOLS for c in calls):
@@ -1885,7 +1894,8 @@ def cmd_corpus(args):
     print(f"workspace {docs.get('workspace')}: {len(docs.get('docs', []))} documents; groups "
           + ", ".join(f"{g.get('name')} ({len(g.get('docs', []))})" for g in sidebar.get("groups", []))
           + "; tags " + (", ".join(t["name"] for t in tags.get("tags", [])) or "none")
-          + ("" if tags.get("complete", True) else " (catalog incomplete: not fully synced yet)"))
+          + ("" if tags.get("complete", True) or local_workspace(args.checkout)
+             else " (catalog incomplete: not fully synced yet)"))
 
 
 def main():

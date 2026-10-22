@@ -60,8 +60,10 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    and save the `list_tags` answer as it stands (`{"tags": [{"id", "name"}],
    "complete": …}`; other keys are fine) as `DIR/corpus/tags.json`. When
    both routes are there, write through `ub` (step 8): one command, with
-   the checks and the wait for the hub. A fresh workspace holds two starter
-   pages in an "Uberblick" group ("Überblick" before ub 0.4.9) and six
+   the checks and the wait for the hub. It opens the same workspace replica
+   as the connected MCP server, so both can run at once. A fresh workspace holds two starter
+   pages in an "Uberblick" group (older versions spell it "Überblick";
+   go by what `get_sidebar` shows) and six
    starter tags (auth, billing, mcp, permissions, rfc, sync); reuse a
    starter tag only where it fits. A
    catalog marked `complete: false` has not synced yet: read it again
@@ -231,7 +233,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    object; each line names its `slug`), and run `resolve` again: it skips
    what is done and stops before the next call that needs a UUID you have
    not saved yet. Two or three rounds cover a corpus. If the server's
-   `insert_block` takes one block and no `blocks` (`ub` before 0.4.9;
+   `insert_block` schema has no `blocks` (older versions; go by the
+   schema, not `ub --version`, which a development build prints as 0.0.0;
    `intake.py ub` handles this itself), add `--one-block`: each insert goes in at the top,
    so they come last block first, and sending them in order puts the page
    together. Send the calls in
@@ -255,7 +258,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    from `applied.json`) and in report mode on the Markdown kept in the
    repository, at the same commit: it records on each page which commit it
    was checked against. Without it, say that the pages were checked by
-   hand at `ref` and carry no recorded check.
+   hand at `ref` and carry no recorded check. Intake never records
+   `code_check` itself.
 
 10. **Report.** Tell the person what was created (pages, decision records,
     pins, tags), what stays in the repository as Markdown, what was skipped,
