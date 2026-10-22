@@ -61,12 +61,11 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    "complete": …}`; other keys are fine) as `DIR/corpus/tags.json`. When
    both routes are there, write through `ub` (step 8): one command, with
    the checks and the wait for the hub. It opens the same workspace replica
-   as the connected MCP server, so both can run at once. A fresh workspace holds two starter
-   pages in an "Uberblick" group (older versions spell it "Überblick";
-   go by what `get_sidebar` shows) and six
-   starter tags (auth, billing, mcp, permissions, rfc, sync); reuse a
-   starter tag only where it fits. A
-   catalog marked `complete: false` has not synced yet: read it again
+   as the connected MCP server, so both can run at once. A fresh workspace
+   holds two starter pages in an "Uberblick" group (older versions spell
+   it "Überblick"; go by what `get_sidebar` shows) and six starter tags
+   (auth, billing, mcp, permissions, rfc, sync); reuse a starter tag only
+   where it fits. A catalog marked `complete: false` has not synced yet: read it again
    before the writes. A local workspace (`"hubUrl": null` in
    `.uberblick.json`) syncs with the hub `ub open` serves on this machine:
    while that is not running, its catalog reads `complete: false` yet is the
