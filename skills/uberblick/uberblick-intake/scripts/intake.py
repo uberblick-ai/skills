@@ -16,6 +16,7 @@ references/plan.md for the plan and references/analysis.md for how to read the s
 
 import argparse
 import datetime as dt
+import hashlib
 import html
 import json
 import os
@@ -29,6 +30,7 @@ from pathlib import Path
 
 # --------------------------------------------------------------------------------------------------- scan helpers
 
+SCHEMA_VERSION = 2
 MD_EXT = (".md", ".mdx", ".markdown")
 NOISE_DIRS = re.compile(r"(^|/)(node_modules|vendor|third[_-]party|dist|build|out|\.venv|venv|target|"
                         r"__snapshots__|fixtures?|testdata|test-data|snapshots)(/|$)", re.I)
@@ -107,7 +109,7 @@ TEST_FILE = re.compile(
     r"(_spec\.rb$)|((^|/)test/.*_test\.rb$)|(_test\.exs$)|(\.feature$)|((^|/)(Tests?|UITests?)/.*\.swift$)",
     re.I)
 E2E_PATH = re.compile(r"(^|/)(e2e|e2e-tests?|end-to-end|playwright|cypress|acceptance|androidTest|"
-                      r"androidInstrumentedTest|ui-?tests?|browser-tests?|system|features|smoke|"
+                      r"androidInstrumentedTest|ui-?tests?|browser-tests?|system-tests?|smoke|"
                       r"maestro|detox|journeys?)(/|$)|\.(e2e|cy)\.[cm]?[jt]sx?$|\.feature$|UITests?/", re.I)
 INTEGRATION_PATH = re.compile(r"(^|/)(integration|integration-tests?|it|api-tests?|functional)(/|$)|"
                               r"\.(it|integration)\.[cm]?[jt]sx?$|(^|/)crates/[^/]+/tests/|(^|/)tests/.*\.rs$", re.I)
@@ -138,7 +140,9 @@ SUITE_PATTERNS = {
 
 def git(checkout, *args, check=True):
     try:
-        r = subprocess.run(["git", "-C", str(checkout), *args], capture_output=True, text=True, encoding="utf-8",
+        # gc.auto=0: reading the history must not start a repack in someone's checkout
+        r = subprocess.run(["git", "-C", str(checkout), "-c", "gc.auto=0", *args], capture_output=True, text=True,
+                           encoding="utf-8",
                            errors="replace")
     except OSError as e:
         sys.exit(f"git: {e}")
@@ -180,8 +184,16 @@ def frontmatter(text):
     return meta, text[end + 4:].lstrip("\n")
 
 
+GENERATED = re.compile(r"do not edit|auto-?generated|generated (by|from|with)|this file is generated", re.I)
+USAGE_FENCES = {"sh", "bash", "shell", "console", "zsh", "terminal", "shell-session", "plain", "text", "powershell",
+                "ps1", "cmd", "fish"}
+
+
 def md_facts(path, text):
     meta, body = frontmatter(text)
+    generated = bool(GENERATED.search(body[:600]))  # a whole file says so up top
+    partly = "[[[cog" in body
+    body = re.sub(r"<!--.*?-->", "", body, flags=re.S)  # cog blocks and comments hold no visible headings
     lines = body.splitlines()
     headings, fences, in_fence = [], Counter(), False
     for line in lines:
@@ -207,6 +219,8 @@ def md_facts(path, text):
         "images": len(re.findall(r"!\[[^\]]*\]\(", body)) + body.count("<img"),
         "links_md": len(links),
         "frontmatter": sorted(meta)[:10],
+        "generated": generated,
+        "partly_generated": partly,
     }
 
 
@@ -230,8 +244,11 @@ def guess_class(path, facts):
         return "rfc", "proposal, plan or spec directory"
     if TECH_NAME.search(p):
         return "technical", "contributor, reference or operations file"
+    if facts.get("generated"):
+        return "generated", "says it is generated; read what generates it"
     tech = sum(1 for h in facts["headings"] if TECH_HEADINGS.match(h))
-    code = sum(v for k, v in facts["fences"].items() if k not in ("mermaid",))
+    # shell sessions are how a command-line product is used, not code about it
+    code = sum(v for k, v in facts["fences"].items() if k not in USAGE_FENCES and k != "mermaid")
     if Path(p).name.lower().startswith("readme") and p.count("/") >= 1 and facts["words"] < 400:
         return "technical", "a package or folder README"
     if facts["headings"] and tech / max(1, len(facts["headings"])) > 0.5:
@@ -318,6 +335,27 @@ def md_history(checkout, paths, max_commits):
             for k, v in stats.items()}
 
 
+def milestones(checkout, limit=40):
+    """The largest changes on the main line over the whole history, merges of big pull requests included: a
+    feature landing ("add organisations") changes many files and names no direction verb."""
+    out = git(checkout, "log", "--first-parent", "--diff-merges=first-parent", "--no-renames", "-n100000",
+              "--format=\x1e%H\x1f%an\x1f%aI\x1f%s", "--name-only", check=False)
+    found = []
+    for chunk in out.split("\x1e")[1:]:
+        head, _, names = chunk.partition("\n")
+        parts = head.split("\x1f")
+        if len(parts) < 4 or BOT.search(parts[1]) or BOT.search(parts[3][:40]) or ROUTINE.match(parts[3]):
+            continue
+        files = [n for n in (x.strip() for x in names.splitlines()) if n and not LOCKFILES.search(n)
+                 and not CHURN_NOISE.search(n) and not NOISE_DIRS.search(n)]
+        if 15 <= len(files) <= 3000:
+            found.append({"sha": parts[0][:10], "date": parts[2][:10], "author": parts[1],
+                          "subject": parts[3].strip()[:140], "files": len(files),
+                          "direction": bool(DIRECTION.search(parts[3])),
+                          "areas": [a for a, _ in Counter(f.split("/")[0] for f in files).most_common(3)]})
+    return sorted(found, key=lambda c: -c["files"])[:limit]
+
+
 def churn(checkout, max_commits, workspaces, remote):
     out = git(checkout, "log", f"-n{max_commits}", "--no-merges", "--format=\x1e%H\x1f%an\x1f%aI\x1f%s",
               "--name-only", check=False)
@@ -382,60 +420,110 @@ def churn(checkout, max_commits, workspaces, remote):
     }
 
 
-CLI_DRIVER = re.compile(r"\b(assert_cmd|cargo_bin|get_bin\(|CliRunner\b|uv_snapshot!|cmd_snapshot!|"
-                        r"exec\.Command\(|testscript\.|subprocess\.(run|check_output|Popen)\(|execa\(|spawnSync\(|"
-                        r"Open3\.|System\.cmd\()")
+# Drivers that run the built command whatever it is called, and generic process calls that count only when the
+# line names the product (so `createdb` in a fixture is not a CLI journey).
+CLI_STRONG = re.compile(r"\b(assert_cmd|cargo_bin|get_bin\(|CliRunner\b|\w+_snapshot!|testscript\.)")
+CLI_WEAK = re.compile(r"(exec\.Command\(|subprocess\.(run|check_output|call|Popen)\(|execa\(|spawnSync\(|"
+                      r"spawn\(|Open3\.|System\.cmd\(|Command::new\()([^\n]*)")
+SKIPPED = re.compile(r"\b(?:it|test|describe|scenario)\.(?:skip|fixme|todo)\s*\(|\bx(?:it|describe)\s*\(|"
+                     r"@pytest\.mark\.(?:skip|xfail)|#\[ignore\]|@Ignore\b|@Disabled\b|\bt\.Skip\(", re.M)
 
 
-def test_kind(path, text, cases=0):
+def test_kind(path, text, cases=0, products=()):
+    """The test's scope from its path and what it drives. A guess: the plan can override it per topic."""
+    browser = re.search(r"\bpage\.(goto|getBy\w+|locator|click|fill)\(|cy\.visit\(|browser\.url\(|"
+                        r"\bdevice\.|onView\(|composeTestRule|XCUIApplication\(", text)
+    api_only = re.search(r"from ['\"]@playwright/test['\"]", text) and not browser and "request." in text
     if VISUAL_PATH.search(path) and E2E_PATH.search(path):
         return "e2e-visual"
-    if E2E_PATH.search(path):
+    if api_only:
+        return "e2e-api"
+    if E2E_PATH.search(path) or browser:
         return "e2e"
-    if re.search(r"from ['\"]@playwright/test['\"]|cy\.visit\(|browser\.url\(|page\.goto\(", text):
-        return "e2e"
-    if len(CLI_DRIVER.findall(text)) >= max(2, cases // 4):
+    drives = len(CLI_STRONG.findall(text))
+    if products:
+        names = re.compile(r"[\"'/\s(\[](" + "|".join(re.escape(p) for p in products) + r")[\"'\s,)\]]")
+        drives += sum(1 for m in CLI_WEAK.finditer(text) if names.search(m.group(0)))
+    if drives and drives >= max(1, cases // 4):
         return "cli"  # drives the built command end to end: a CLI's e2e layer
     if INTEGRATION_PATH.search(path):
         return "integration"
     return "unit"
 
 
-def topic_of(path):
-    """What a test is about: the folder after an e2e or tests folder, else the file name without test affixes."""
+GENERIC_DIRS = re.compile(r"(java|kotlin|scala|swift|src|main|test|tests|com|org|net|io|de|app|lib|internal|"
+                          r"unit|integration|it|e2e|specs?|__tests__|androidTest|commonTest|jvmTest|flows?|scenarios|cases)", re.I)
+
+
+def topic_of(path, prefix=""):
+    """What a test is about: the first meaningful folder below an e2e or tests folder, else the file name without
+    test affixes. `prefix` names the package in a monorepo, so two apps' `auth` tests stay apart."""
     parts = path.split("/")
-    for i, part in enumerate(parts[:-1]):
+    topic = None
+    jvm = re.search(r"(?:^|/)src/[^/]*[Tt]est[^/]*/(?:java|kotlin|scala)/", path)
+    if jvm:
+        # A JVM test sits below its package (com/fsck/k9/...); the module folder names what it is about.
+        module = path[:jvm.start()].split("/")
+        named = [m for m in module if m and not MODULE_GENERIC.fullmatch(m)]
+        return (named or module or [None])[-1]  # the module is the package already: no prefix
+    for i, part in enumerate(parts[:-1] if topic is None else []):
         if re.fullmatch(r"e2e|e2e-tests?|end-to-end|playwright|cypress|acceptance|tests?|it|integration|spec|"
-                        r"__tests__|androidTest|features", part, re.I) and i + 2 < len(parts):
-            return parts[i + 1]
-    stem = parts[-1].split(".")[0]
-    return re.sub(r"(^test_|_test$|_spec$|Tests?$|Spec$|IT$)", "", stem) or stem
+                        r"__tests__|androidTest|androidInstrumentedTest|ui-?tests?", part, re.I):
+            rest = [p for p in parts[i + 1:-1] if not GENERIC_DIRS.fullmatch(p)]
+            if rest:
+                topic = rest[0]
+                break
+    if topic is None:
+        stem = parts[-1].split(".")[0]
+        topic = re.sub(r"(^test_|_test$|_spec$|Tests?$|Spec$|IT$)", "", stem) or stem
+    return f"{prefix}/{topic}" if prefix else topic
 
 
-JOURNEY_KINDS = ("e2e", "e2e-visual", "cli")
+MODULE_GENERIC = re.compile(r"impl|api|internal|common|core|legacy|library|feature|app|shared|domain|data|ui",
+                            re.I)
+
+JOURNEY_KINDS = ("e2e", "e2e-visual", "e2e-api", "cli")
 
 
-def scan_tests(checkout, files, workspaces):
+def scan_tests(checkout, files, workspaces, products=()):
+    multi = len(workspaces) > 1
+    # A package that only holds tests (app-tests, e2e) names no product area of its own.
+    def prefix(area):
+        named = [x for x in area.split("/") if not MODULE_GENERIC.fullmatch(x) and x not in AREA_ROOTS]
+        if not multi or area not in workspaces or not named or re.search(r"test|e2e|spec", named[-1], re.I):
+            return ""
+        return named[-1]
     tests, configs = [], [f for f in files if E2E_CONFIGS.search(f) and not NOISE_DIRS.search(f)]
     code_lines = Counter()
     test_lines = Counter()
     languages = Counter()
     for f in files:
         ext = os.path.splitext(f)[1].lower()
+        if ext in (".yml", ".yaml") and E2E_PATH.search(f):
+            flow = read(checkout / f, 200_000)
+            if re.search(r"^appId:", flow, re.M) and re.search(r"^- (launchApp|tapOn|inputText|assertVisible)", flow,
+                                                              re.M):
+                # A Maestro flow: one journey on a device, named by its file
+                name = re.search(r"^name:\s*(.+)$", flow, re.M)
+                tests.append({"path": f, "area": area_of(f, workspaces), "topic": topic_of(f), "kind": "e2e",
+                              "cases": 1, "skipped": 0, "lines": flow.count("\n"), "suites": [],
+                              "titles": [(name.group(1) if name else Path(f).stem.replace("_", " "))[:120]]})
+                continue
         is_test = bool(TEST_FILE.search(f)) and not re.search(r"(^|/)(fixtures?|testdata|__snapshots__|"
                                                             r"node_modules|vendor)/", f, re.I)
         if ext not in CODE_EXT and not f.endswith(".feature"):
             continue
         if NOISE_DIRS.search(f) and not is_test:
             continue
-        text = read(checkout / f)
+        text = read(checkout / f, 8_000_000 if is_test else 400_000)
         n = text.count("\n")
         area = area_of(f, workspaces)
         if not is_test and ext == ".rs" and "#[cfg(test)]" in text:
             # Rust keeps unit tests next to the code: count them, but the file is code.
             cases = CASE_PATTERNS["rs"].findall(text)
             if cases:
-                tests.append({"path": f, "area": area, "topic": topic_of(f), "kind": "unit", "cases": len(cases), "lines": 0,
+                tests.append({"path": f, "area": area, "topic": topic_of(f, prefix(area)), "kind": "unit",
+                              "cases": len(cases), "skipped": len(SKIPPED.findall(text)), "lines": 0,
                               "suites": [], "titles": []})
         if not is_test:
             code_lines[area] += n
@@ -449,8 +537,9 @@ def scan_tests(checkout, files, workspaces):
         titles = [c[1] if isinstance(c, tuple) else c for c in cases]
         suite_rx = SUITE_PATTERNS.get(lang)
         suites = [s[1] if isinstance(s, tuple) and len(s) > 1 else s for s in suite_rx.findall(text)] if suite_rx else []
-        kind = test_kind(f, text, len(titles))
-        tests.append({"path": f, "area": area, "topic": topic_of(f), "kind": kind, "cases": len(titles), "lines": n,
+        kind = test_kind(f, text, len(titles), products)
+        tests.append({"path": f, "area": area, "topic": topic_of(f, prefix(area)), "kind": kind, "cases": len(titles),
+                      "skipped": len(SKIPPED.findall(text)), "lines": n,
                       "suites": [s[:100] for s in suites[:12]],
                       "titles": [t[:120] for t in titles[:30]] if kind in JOURNEY_KINDS else []})
     by_kind = Counter()
@@ -472,8 +561,11 @@ def scan_tests(checkout, files, workspaces):
     for a in areas:
         a["share"] = round(a["cases"] / total_cases, 3) if total_cases else 0
     return {
+        "method": "static: test declarations matched by pattern per language, not a runner's count; parameterised "
+                  "and generated tests count once, skipped ones are included and counted in `skipped`",
         "frameworks": configs[:12],
         "cases": dict(by_kind),
+        "skipped": sum(t.get("skipped", 0) for t in tests),
         "total_cases": total_cases,
         "files": len([t for t in tests if t["lines"]]),
         "areas": [a for a in areas if a["cases"] or a["code_lines"] > 200][:40],
@@ -505,11 +597,19 @@ def cmd_scan(args):
         dirs[d["path"].rsplit("/", 1)[0] if "/" in d["path"] else "."][d["guess"]] += 1
     manifests = sorted({MANIFESTS[f.rsplit("/", 1)[-1]] for f in files
                         if f.rsplit("/", 1)[-1] in MANIFESTS and not NOISE_DIRS.search(f)})
+    dirty = [line[3:] for line in git(checkout, "status", "--porcelain", "--untracked-files=no").splitlines()]
+    if dirty:
+        print(f"scan: {len(dirty)} tracked file(s) differ from HEAD; the scan reads them as they are on disk, "
+              "so commit or stash first to tie every source to the commit", file=sys.stderr)
+    products = products_of(checkout, files, remote)
     scan = {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "repository": remote,
         "checkout": str(checkout),
         "ref": git(checkout, "rev-parse", "--short", "HEAD").strip(),
+        "commit": git(checkout, "rev-parse", "HEAD").strip(),
+        "dirty": dirty[:50],
+        "products": products,
         "date": dt.date.today().isoformat(),
         "files": len(files),
         "stacks": manifests,
@@ -519,12 +619,47 @@ def cmd_scan(args):
         "markdown_dirs": [{"dir": k, "files": sum(v.values()), "guesses": dict(v)}
                           for k, v in sorted(dirs.items(), key=lambda kv: -sum(kv[1].values()))][:40],
         "markdown_classes": dict(Counter(d["guess"] for d in md)),
-        "churn": churn(checkout, args.max_commits, workspaces, remote),
-        "tests": scan_tests(checkout, files, workspaces),
+        "churn": {**churn(checkout, args.max_commits, workspaces, remote), "milestones": milestones(checkout)},
+        "tests": scan_tests(checkout, files, workspaces, products),
         "labels": labels_of(checkout, files, remote),
     }
     json.dump(scan, sys.stdout, indent=1, ensure_ascii=False)
     print()
+
+
+def products_of(checkout, files, remote):
+    """The names a user types to run the product: the repository's name and every declared command."""
+    names = set()
+    if remote:
+        names.add(remote.split("/")[-1].lower())
+    for f in files:
+        name = f.rsplit("/", 1)[-1]
+        if NOISE_DIRS.search(f) or name not in ("package.json", "pyproject.toml", "Cargo.toml", "go.mod", "setup.py"):
+            continue
+        if re.search(r"(^|/)(tests?|scripts|examples?|docs?|benchmarks?|ecosystem|samples?|playground)/", f):
+            continue
+        text = read(checkout / f, 60_000)
+        if name == "package.json":
+            try:
+                data = json.loads(text)
+            except ValueError:
+                continue
+            b = data.get("bin")
+            names.update(b.keys() if isinstance(b, dict) else [data.get("name", "").split("/")[-1]] if b else [])
+        elif name == "pyproject.toml":
+            m = re.search(r"^\[project\.scripts\]\n((?:[^\[\n][^\n]*\n?)*)", text, re.M)
+            if m:
+                names.update(re.findall(r"^\s*([\w.-]+)\s*=", m.group(1), re.M))
+        elif name == "Cargo.toml":
+            for block in re.findall(r"^\[\[bin\]\]\n((?:[^\[\n][^\n]*\n?)*)", text, re.M):
+                names.update(re.findall(r'^\s*name\s*=\s*"([^"]+)"', block, re.M))
+        elif name == "go.mod":
+            m = re.search(r"^module\s+(\S+)", text, re.M)
+            if m:
+                names.add(re.sub(r"/v\d+$", "", m.group(1)).split("/")[-1])
+        elif name == "setup.py":
+            names.update(re.findall(r"['\"]([\w-]+)\s*=\s*[\w.]+:\w+['\"]", text))
+    return sorted(n for n in names if n and len(n) > 1)[:20]
 
 
 def labels_of(checkout, files, remote):
@@ -543,8 +678,15 @@ def labels_of(checkout, files, remote):
 
 # --------------------------------------------------------------------------------------------------- readable views
 
+def load_scan(path):
+    scan = load(path)
+    if scan.get("schema_version") != SCHEMA_VERSION:
+        sys.exit(f"{path} was written by another version of intake.py; run `intake.py scan` again")
+    return scan
+
+
 def cmd_hot(args):
-    scan = load(args.scan)
+    scan = load_scan(args.scan)
     c = scan["churn"]
     print(f"{scan['repository']} @ {scan['ref']}: {c['human_commits']} human commits of {c['commits_read']} read, "
           f"{c['first']} to {c['last']}")
@@ -563,17 +705,23 @@ def cmd_hot(args):
     print("\nDirection changes in configuration and manifests:")
     for s in c["config_changes"][:args.limit]:
         print(f"  {s['date']} {s['sha']} {s['subject']}  [{', '.join(s['files'])}]")
+    print("\nLargest changes on the main line, whole history (features landing, rewrites, migrations):")
+    for m in c.get("milestones", [])[:args.limit * 2]:
+        print(f"  {m['date']} {m['sha']} {m['files']} files{' (direction)' if m['direction'] else ''}: "
+              f"{m['subject']}  [{', '.join(m['areas'])}]")
 
 
-KINDS = ("e2e", "e2e-visual", "cli", "integration", "unit")
+KINDS = ("e2e", "e2e-visual", "e2e-api", "cli", "integration", "unit")
 
 
 def cmd_tests(args):
-    scan = load(args.scan)
+    scan = load_scan(args.scan)
     t = scan["tests"]
-    print(f"{t['total_cases']} test cases in {t['files']} files: " +
+    print(f"{t['total_cases']} test declarations (a static count) in {t['files']} files, {t.get('skipped', 0)} "
+          f"marked skipped: " +
           ", ".join(f"{k} {v}" for k, v in sorted(t["cases"].items(), key=lambda kv: -kv[1])))
-    print("E2E configuration: " + (", ".join(t["frameworks"]) or "none found"))
+    print("Browser or device test configuration: " + (", ".join(t["frameworks"]) or "none found") +
+          (f"; {t['cases'].get('cli', 0)} cases run the built command" if t["cases"].get("cli") else ""))
     print("\nArea, cases (share), by kind, test lines per code line:")
     for a in t["areas"][:30]:
         kinds = ", ".join(f"{k} {a[k]}" for k in KINDS if a.get(k))
@@ -581,17 +729,22 @@ def cmd_tests(args):
         print(f"  {a['area']}: {a['cases']} ({a['share']:.0%}){': ' + kinds if kinds else ''}; "
               f"{a['code_lines']} code lines{ratio}")
     print("\nTopics, journeys first (e2e, e2e-visual and cli cases count as journeys):")
-    for x in t["topics"][:args.topics]:
+    for x in t.get("topics", [])[:args.topics]:
         print(f"  {x['topic']}: {x['cases']} (" + ", ".join(f"{k} {x[k]}" for k in KINDS if x.get(k)) + ")")
     print("\nJourneys (largest files first; suites, then test titles):")
-    shown = 0
+    shown = printed = 0
     for e in t["e2e"]:
         if shown >= args.titles:
             break
-        print(f"  {e['path']} ({e['cases']}): " + " | ".join(e["suites"][:3]))
-        for title in e["titles"][:4]:
+        print(f"  {e['path']} ({e['cases']}, {e['kind']}): " + " | ".join(e["suites"][:3]))
+        for title in e["titles"][:args.per_file]:
             print(f"      - {title}")
             shown += 1
+        printed += 1
+    if t["e2e"][printed:]:
+        print("\nMore journey files (their titles are in scan.json under tests.e2e):")
+        for e in t["e2e"][printed:]:
+            print(f"  {e['path']} ({e['cases']}, {e['kind']})")
 
 
 # --------------------------------------------------------------------------------------------------- Markdown -> blocks
@@ -602,6 +755,7 @@ INLINE = re.compile(
     r"|(?P<b>\*\*|__)(?P<btext>.+?)(?P=b)"
     r"|(?P<s>~~)(?P<stext>.+?)~~"
     r"|(?<![\w*])(?P<i>[*_])(?P<itext>[^*_\s](?:.*?[^*_\s])?)(?P=i)(?![\w*])")
+DELIMITER_ROW = re.compile(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$")
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 
 
@@ -711,8 +865,11 @@ def parse_doc(text):
             if j >= len(lines):
                 raise ValueError(f"line {i + 1}: unclosed :::{kind}")
             blocks.append({"type": kind, "text": "\n".join(lines[i + 1:j])})
+            refs.update(re.findall(r"\]\(ref:([a-z0-9-]+)\)", blocks[-1]["text"]))
             i = j + 1
             continue
+        if line.startswith(":::"):
+            raise ValueError(f"line {i + 1}: {line.strip()} is no Uberblick container; use :::card or :::figma")
         if line.lstrip().startswith("|"):
             j = i
             while j < len(lines) and lines[j].lstrip().startswith("|"):
@@ -802,19 +959,29 @@ def plan_paths(plan, base):
 
 
 def covers(pattern, path):
+    """`**` spans folders, `*` and `?` stay within one."""
     if pattern.endswith("/**"):
         return path.startswith(pattern[:-3] + "/")
-    if any(ch in pattern for ch in "*?["):
-        import fnmatch
-        return fnmatch.fnmatch(path, pattern)
-    return path == pattern
+    if not any(ch in pattern for ch in "*?"):
+        return path == pattern
+    rx = ""
+    for part in re.split(r"(\*\*/?|\*|\?)", pattern):
+        rx += {"**/": "(?:.*/)?", "**": ".*", "*": "[^/]*", "?": "[^/]"}.get(part, re.escape(part))
+    return re.fullmatch(rx, path) is not None
+
+
+def entry_for(entries, path):
+    """The entry that decides a file: an exact path, else the most specific (longest) pattern."""
+    hits = [m for m in entries if covers(m.get("path", ""), path)]
+    exact = [m for m in hits if m.get("path") == path]
+    return (exact or sorted(hits, key=lambda m: -len(m.get("path", ""))) or [None])[0]
 
 
 def words(blocks):
     return sum(len(re.findall(r"\w+", b.get("text", ""))) for b in blocks if b["type"] not in ("code",))
 
 
-def validate(plan, base, scan=None):
+def validate(plan, base, scan=None, checkout=None, catalog=None):
     """Errors stop the writes; warnings are for the agent to fix or justify."""
     errors, warnings = [], []
     for key in ("repository", "ref", "summary", "documents", "markdown", "sidebar", "tags"):
@@ -862,6 +1029,24 @@ def validate(plan, base, scan=None):
         for r in refs:
             if r not in slugs:
                 errors.append(f"{where}: link ref:{r} names no document in the plan")
+        for b in blocks:
+            if b["type"] in ("code", "terminal", "chart"):
+                continue
+            if "![" in b.get("text", ""):
+                errors.append(f"{where}: an image; Uberblick pages take no images, describe it or draw it")
+            if re.search(r"<(/?[a-zA-Z][\w-]*)(\s[^>]*)?>", re.sub(r"`[^`]*`", "", "".join(
+                    r["text"] for r in b.get("inline") or [{"text": b.get("text", ""), "marks": {}}]
+                    if not r["marks"].get("inlineCode")))):
+                warnings.append(f"{where}: HTML shows literally in Uberblick: {b.get('text', '')[:60]!r}")
+        fences = {b.get("language") for b in blocks if b["type"] == "code"}
+        for v in d.get("visuals", []):
+            if v not in fences:
+                warnings.append(f"{where}: `visuals` names {v}, but the document has no {v} block")
+        if checkout:
+            for src in d.get("sources", []) + d.get("tests", []):
+                path = src.split(":")[0] if not src.startswith("git:") else None
+                if path and not (checkout / path).exists():
+                    errors.append(f"{where}: source {src} does not exist in the checkout")
         if blocks and blocks[0]["type"] == "heading" and blocks[0].get("level") == 1:
             warnings.append(f"{where}: starts with an H1; the title is shown already, drop it")
         if kind == "decision":
@@ -885,6 +1070,11 @@ def validate(plan, base, scan=None):
             ans = d.get("answer")
             if ans and not all(ans.get(k) for k in ("who", "when", "where")):
                 errors.append(f"{where}: answer needs who, when and where")
+            if d.get("status") not in (None, "open", "decided"):
+                errors.append(f"{where}: status is open or decided")
+            if d.get("status") == "decided" and not ans:
+                warnings.append(f"{where}: decided without a person's answer on record; a record read from history "
+                                f"stays open until someone decides it")
         else:
             tldr = meta.get("tldr", "")
             if tldr and len(tldr) > MAX_TLDR:
@@ -895,9 +1085,11 @@ def validate(plan, base, scan=None):
             if n > 900:
                 warnings.append(f"{where}: {n} words; start small and split or cut")
             for b in blocks:
-                text = b.get("text", "")
                 if b["type"] in ("code", "terminal", "chart"):
                     continue
+                # UI labels and examples in code formatting are the product's words, not history
+                text = "".join(r["text"] for r in b["inline"] if not r["marks"].get("inlineCode")) \
+                    if b.get("inline") else b.get("text", "")
                 m = HISTORY.search(text)
                 if m:
                     warnings.append(f"{where}: {m.group(0)!r} reads as history or plans; the corpus states the "
@@ -920,15 +1112,40 @@ def validate(plan, base, scan=None):
                 converted[slug].append(m["path"])
         if not m.get("why"):
             warnings.append(f"markdown: {m.get('path')}: no `why`")
+        for sec in m.get("sections", []):
+            if sec.get("action") not in ("convert", "keep", "skip"):
+                errors.append(f"markdown: {m.get('path')} § {sec.get('heading')}: action is convert, keep or skip")
+            if sec.get("action") == "convert" and sec.get("doc") not in slugs:
+                errors.append(f"markdown: {m.get('path')} § {sec.get('heading')} converts into {sec.get('doc')!r}, "
+                              f"which is not a document")
     if scan:
         for doc in scan["markdown"]:
-            hits = [m for m in plan["markdown"] if covers(m.get("path", ""), doc["path"])]
-            if not hits:
+            if not entry_for(plan["markdown"], doc["path"]):
                 errors.append(f"markdown: {doc['path']} is not accounted for (convert, keep or skip)")
-            elif len({m.get('action') for m in hits}) > 1:
-                exact = [m for m in hits if m["path"] == doc["path"]]
-                if len(exact) != 1:
-                    errors.append(f"markdown: {doc['path']} matches entries with different actions")
+    for c in plan.get("candidates", []):
+        if c.get("create") and c["create"] not in slugs:
+            errors.append(f"candidates: {c.get('question')!r} creates {c['create']!r}, which is not a document")
+    for f in plan.get("tests", {}).get("focus", []):
+        if f.get("doc") and f["doc"] not in slugs:
+            errors.append(f"tests.focus: {f.get('topic')} points to {f['doc']!r}, which is not a document")
+    if catalog is not None:
+        for t in plan["tags"]:
+            have = t["name"].lower() in catalog
+            if have != (t.get("status") == "existing"):
+                warnings.append(f"tags: {t['name']} is marked {t.get('status')}, but the catalog "
+                                f"{'has' if have else 'lacks'} it")
+    use = Counter(x.lower() for _d, meta, *_ in plan_paths(plan, base) for x in (meta.get("tags") or []))
+    for t in plan["tags"]:
+        if use[t["name"].lower()] < 2:
+            warnings.append(f"tags: {t['name']} is used by {use[t['name'].lower()]} document(s); a tag earns its "
+                            f"place with two or more, unless it names a core area")
+    for c in plan.get("capabilities", []):
+        if c.get("doc") and c["doc"] not in slugs:
+            errors.append(f"capabilities: {c.get('name')!r} points to {c['doc']!r}, which is not a document")
+        if not c.get("doc") and not c.get("why"):
+            warnings.append(f"capabilities: {c.get('name')!r} has no page and no `why`")
+    if not plan.get("capabilities"):
+        warnings.append("capabilities: none listed; map what a person can do with the product to the pages first")
     groups = plan["sidebar"].get("groups", [])
     if not 2 <= len(groups) <= 7:
         warnings.append(f"sidebar: {len(groups)} groups; 3 to 6 read best")
@@ -940,6 +1157,9 @@ def validate(plan, base, scan=None):
             pinned[slug] += 1
             if slug not in slugs:
                 errors.append(f"sidebar: {g.get('name')!r} pins {slug!r}, which is not a document")
+    if len(slugs) > 12 and len(pinned) > len(slugs) * 2 / 3:
+        warnings.append(f"sidebar: {len(pinned)} of {len(slugs)} documents pinned; pin entry points, at most two "
+                        f"thirds")
     for slug, n in pinned.items():
         if n > 1:
             errors.append(f"sidebar: {slug} is pinned {n} times; a document has one pin")
@@ -950,8 +1170,10 @@ def validate(plan, base, scan=None):
 
 def cmd_check(args):
     plan = load(args.plan)
-    scan = load(args.scan) if args.scan else None
-    errors, warnings = validate(plan, Path(args.plan).resolve().parent, scan)
+    scan = load_scan(args.scan) if args.scan else None
+    catalog = {t["name"].lower() for t in load(args.tags).get("tags", [])} if args.tags else None
+    errors, warnings = validate(plan, Path(args.plan).resolve().parent, scan,
+                                Path(args.checkout).resolve() if args.checkout else None, catalog)
     for w in warnings:
         print(f"warning: {w}")
     for e in errors:
@@ -976,10 +1198,11 @@ def cmd_calls(args):
     errors, _ = validate(plan, base)
     if errors:
         sys.exit("the plan has errors; run `intake.py check` first")
-    catalog = {}
-    if args.tags:
-        for t in load(args.tags).get("tags", []):
-            catalog[t["name"].lower()] = t["id"]
+    listing = load(args.tags)
+    catalog = {t["name"].lower(): t["id"] for t in listing.get("tags", [])}
+    if listing.get("complete") is False:
+        print("the tag catalog is incomplete (this machine has not synced all of it); tags missing from it are "
+              "left off, so read it again once synced", file=sys.stderr)
     parsed = {d["slug"]: (d, meta, blocks, refs) for d, meta, blocks, refs, _ in plan_paths(plan, base)}
     done_before = load(args.applied).get("uuids", {}) if args.applied else {}
     for slug, uuid in done_before.items():
@@ -987,7 +1210,7 @@ def cmd_calls(args):
             parsed[slug][0]["existing"] = uuid
             parsed[slug][0]["retag"] = True
     pages = [s for s, (d, *_r) in parsed.items() if d.get("kind", "page") == "page"]
-    order, done, later_links = [], set(), defaultdict(set)
+    order, done, later = [], set(), []
 
     def visit(slug, stack):
         if slug in done:
@@ -1004,40 +1227,55 @@ def cmd_calls(args):
 
     for slug in pages:
         visit(slug, set())
-    created = set()
+    created = {s for s, (d, *_r) in parsed.items() if d.get("existing")}
     calls, skipped_tags = [], set()
 
+    def utf16(text):
+        return len(text.encode("utf-16-le")) // 2
+
     def strip_forward(blocks, slug):
-        """A link to a page not created yet becomes plain text here and a curated link afterwards."""
+        """A link to a document not created yet is plain text here. Once every document exists, link_range marks
+        it on prose, and edit_block rewrites a table or card, which carry their links as Markdown in their text.
+        `$block`, `$rev` and `$text` stand for that block as the document's create_doc answered it."""
         out = []
-        for b in blocks:
+        for n, b in enumerate(blocks):
             b = json.loads(json.dumps(b))
+            here = {"uuid": {"$ref": slug}, "block_id": {"$block": f"{slug}#{n}"}, "rev": {"$rev": f"{slug}#{n}"}}
+            at = 0
             for r in b.get("inline", []):
                 target = r["marks"].get("docLink")
+                size = utf16(r["text"])
                 if isinstance(target, dict) and target["$doc"] not in created:
-                    later_links[slug].add(target["$doc"])
+                    later.append({"tool": "link_range", "arguments": {**here, "start": at, "end": at + size,
+                                                                      "doc_id": {"$ref": target["$doc"]}}})
                     del r["marks"]["docLink"]
+                at += size
             if b.get("inline") is not None and not any(r["marks"] for r in b["inline"]):
                 del b["inline"]
-            if b["type"] == "table":
-                def table_ref(m):
-                    if m.group(2) in created:
-                        return m.group(0)
-                    later_links[slug].add(m.group(2))
-                    return m.group(1)
-                b["text"] = re.sub(r"\[([^\]]+)\]\(ref:([a-z0-9-]+)\)", table_ref, b["text"])
-                b["text"] = re.sub(r"\]\(ref:([a-z0-9-]+)\)", lambda m: "](" + "{{uuid:" + m.group(1) + "}})",
-                                   b["text"])
+            if b["type"] in ("table", "card", "figma"):
+                to_uuid = lambda t: re.sub(r"\]\(ref:([a-z0-9-]+)\)",  # noqa: E731
+                                           lambda m: "](" + "{{uuid:" + m.group(1) + "}})", t)
+                if any(r not in created for r in re.findall(r"\]\(ref:([a-z0-9-]+)\)", b["text"])):
+                    edit = {**here, "old_text": {"$text": f"{slug}#{n}"}, "new_text": to_uuid(b["text"])}
+                    if b["type"] == "table":
+                        # same rows and columns, only cells relinked: the identity map
+                        rows = [r for r in b["text"].splitlines() if not DELIMITER_ROW.match(r)]
+                        cols = len(rows[0].strip().strip("|").split("|"))
+                        edit["table_mapping"] = {"rows": list(range(len(rows))), "columns": list(range(cols))}
+                    later.append({"tool": "edit_block", "arguments": edit})
+                    b["text"] = re.sub(r"\[([^\]]+)\]\(ref:([a-z0-9-]+)\)",
+                                       lambda m: m.group(0) if m.group(2) in created else m.group(1), b["text"])
+                b["text"] = to_uuid(b["text"])
             out.append(b)
         return out
 
     def tag_list(meta):
         out = []
         for t in meta.get("tags", []) or []:
-            if catalog and t.lower() not in catalog:
+            if t.lower() not in catalog:
                 skipped_tags.add(t)
                 continue
-            out.append(catalog.get(t.lower(), t))
+            out.append(catalog[t.lower()])
         return out
 
     for slug in order + [s for s in parsed if s not in pages]:
@@ -1055,7 +1293,7 @@ def cmd_calls(args):
             a["tags"] = tl
         if d.get("kind") == "decision":
             a["kind"] = "decision"
-            a["status"] = d.get("status", "decided")
+            a["status"] = d.get("status") or ("decided" if d.get("answer") else "open")
             if d.get("related"):
                 a["related"] = {"$ref": d["related"]}
             if d.get("answer"):
@@ -1071,28 +1309,40 @@ def cmd_calls(args):
         calls.append({"tool": "starter_cleanup", "arguments": {}})
     for i, g in enumerate(plan["sidebar"].get("groups", [])):
         calls.append({"tool": "sidebar_group", "arguments": {"group": g["name"], "action": "move", "index": i}})
-    for slug, targets in sorted(later_links.items()):
-        calls.append({"tool": "set_metadata", "arguments": {"uuid": {"$ref": slug},
-                                                            "links": [{"$ref": t} for t in sorted(targets)]}})
+    calls += later
     if skipped_tags:
         print("tags not in the workspace's catalog, left off: " + ", ".join(sorted(skipped_tags)), file=sys.stderr)
     json.dump(calls, sys.stdout, indent=1, ensure_ascii=False)
     print()
 
 
-def resolve(value, uuids):
+def resolve(value, uuids, blocks=None):
+    """Replace the placeholders: `$ref`/`$doc` (a slug's UUID), `{{uuid:slug}}` in text, and `$block`, `$rev`,
+    `$text` ("slug#n": block n of that document as its create_doc answered it)."""
     if isinstance(value, dict):
-        if set(value) == {"$ref"} or set(value) == {"$doc"}:
-            slug = value.get("$ref") or value.get("$doc")
+        if len(value) == 1 and next(iter(value)) in ("$ref", "$doc"):
+            slug = next(iter(value.values()))
             if slug not in uuids:
                 raise KeyError(slug)
             return uuids[slug]
-        return {k: resolve(v, uuids) for k, v in value.items()}
+        if len(value) == 1 and next(iter(value)) in ("$block", "$rev", "$text"):
+            key, where = next(iter(value.items()))
+            slug, n = where.rsplit("#", 1)
+            try:
+                return (blocks or {})[slug][int(n)][("$block", "$rev", "$text").index(key)]
+            except (KeyError, IndexError):
+                raise KeyError(f"{where} (no block {n} recorded for {slug})") from None
+        return {k: resolve(v, uuids, blocks) for k, v in value.items()}
     if isinstance(value, list):
-        return [resolve(v, uuids) for v in value]
+        return [resolve(v, uuids, blocks) for v in value]
     if isinstance(value, str) and "{{uuid:" in value:
         return re.sub(r"\{\{uuid:([a-z0-9-]+)\}\}", lambda m: uuids[m.group(1)], value)
     return value
+
+
+def block_slug(call):
+    where = (call.get("arguments") or {}).get("block_id")
+    return where["$block"].rsplit("#", 1)[0] if isinstance(where, dict) and "$block" in where else None
 
 
 SETTLE_POLL = 2
@@ -1116,13 +1366,28 @@ READ_TOOLS = {"list_tags", "get_sidebar", "list_docs", "search", "get_doc", "exp
               "sync_status", "backlinks", "find_decisions", "get_data", "existing"}  # starter_cleanup writes
 
 
+class Stop(Exception):
+    pass
+
+
 def cmd_ub(args):
     """Run the calls through one `ub mcp serve` in the checkout: one agent in the workspace for the whole intake.
     Stops at the first error and writes what it applied so far, so a re-run with --resume skips the done calls."""
     calls = load(args.calls)
     checkout = Path(args.checkout).resolve()
-    applied = load(args.out) if args.resume and Path(args.out).exists() else {"uuids": {}, "done": 0, "results": []}
-    uuids = applied["uuids"]
+    digests = [hashlib.sha256(json.dumps(c, sort_keys=True).encode()).hexdigest()[:16] for c in calls]
+    before = load(args.out) if Path(args.out).exists() else None
+    if before and before.get("workspace") and not args.resume:  # only a run that wrote records its workspace
+        sys.exit(f"{args.out} records {before['done']} call(s) already applied: re-run with --resume to finish "
+                 f"these calls, or plan the next writes with `calls --applied {args.out}` and a new --out")
+    if args.resume and before and before.get("calls") != digests[:before.get("done", 0)]:
+        sys.exit(f"the first {before.get('done')} calls in {args.calls} are not the ones {args.out} applied; "
+                 f"--resume continues the same calls, changed only after where it stopped")
+    applied = before if args.resume and before else {"uuids": {}, "blocks": {}, "adopted": [], "done": 0,
+                                                     "results": []}
+    applied.setdefault("blocks", {})
+    applied.setdefault("adopted", [])
+    uuids, blocks = applied["uuids"], applied["blocks"]
     try:
         server = subprocess.Popen(args.ub.split() + ["mcp", "serve"], cwd=checkout, stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8")
@@ -1150,6 +1415,7 @@ def cmd_ub(args):
         return text
 
     def save():
+        applied["calls"] = digests[:applied["done"]]
         Path(args.out).write_text(json.dumps(applied, indent=1, ensure_ascii=False), encoding="utf-8")
 
     failed = None
@@ -1157,11 +1423,35 @@ def cmd_ub(args):
         ask("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                            "clientInfo": {"name": "uberblick-intake", "title": "Uberblick intake", "version": "1.0"}})
         server.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
+        pending = [c for c in calls[applied["done"]:] if c["tool"] == "create_doc" and c["slug"] not in uuids]
+        if pending or any(c["tool"] not in READ_TOOLS for c in calls):
+            listing = json.loads(call("list_docs", {}))
+            if applied.setdefault("workspace", listing["workspace"]) != listing["workspace"]:
+                raise Stop(f"{args.out} was applied to workspace {applied['workspace']}, but {checkout} is bound to "
+                           f"{listing['workspace']}")
+            # list_docs leaves decision records out unless asked for them
+            records = json.loads(call("list_docs", {"kind": "decision"}))["docs"]
+            titles = {d["title"].strip().lower(): d["uuid"] for d in listing["docs"] + records}
+            clash = {c["slug"]: titles[c["arguments"]["title"].strip().lower()] for c in pending
+                     if c["arguments"]["title"].strip().lower() in titles}
+            if clash and not args.adopt:
+                raise Stop("the workspace already has a document titled like " + ", ".join(sorted(clash)) +
+                           ": rename them in the plan, mark them `existing: UUID`, or pass --adopt to use the "
+                           "document already there instead of creating one")
+        else:
+            clash = {}
         for i, c in enumerate(calls):
             if i < applied["done"]:
                 continue
-            if c["tool"] == "existing":
-                uuids[c["slug"]] = c["uuid"]
+            if c["tool"] == "existing" or (c["tool"] == "create_doc" and c["slug"] in clash):
+                uuids[c["slug"]] = c.get("uuid") or clash[c["slug"]]
+                if c["tool"] == "create_doc":
+                    applied["adopted"].append(c["slug"])
+                applied["done"] = i + 1
+                continue
+            if block_slug(c) in applied["adopted"]:
+                applied["results"].append({"tool": c["tool"], "slug": block_slug(c),
+                                           "text": "skipped: the document was adopted, not written by this run"})
                 applied["done"] = i + 1
                 continue
             if c["tool"] == "starter_cleanup":
@@ -1174,21 +1464,31 @@ def cmd_ub(args):
                 save()
                 continue
             try:
-                text = call(c["tool"], resolve(c["arguments"], uuids))
+                text = call(c["tool"], resolve(c["arguments"], uuids, blocks))
             except (RuntimeError, KeyError) as e:
-                failed = f"call {i + 1} ({c['tool']} {c.get('slug', '')}): {e}"
+                failed = f"call {i + 1} ({c['tool']} {c.get('slug') or block_slug(c) or ''}): {e}"
                 break
             if c["tool"] == "create_doc":
                 try:
-                    uuids[c["slug"]] = json.loads(text)["uuid"]
+                    answer = json.loads(text)
+                    uuids[c["slug"]] = answer["uuid"]
+                    blocks[c["slug"]] = [[b["id"], b["rev"], b["text"]] for b in answer.get("blocks", [])]
                 except (ValueError, KeyError):
                     failed = f"call {i + 1}: create_doc answered without a uuid: {text[:200]}"
                     break
+                if len(blocks[c["slug"]]) != len(c["arguments"]["blocks"]):
+                    print(f"{c['slug']}: sent {len(c['arguments']['blocks'])} blocks, the document holds "
+                          f"{len(blocks[c['slug']])}; its later links may land on the wrong block", file=sys.stderr)
             applied["results"].append({"tool": c["tool"], "slug": c.get("slug"),
                                        "text": text if c["tool"] not in ("create_doc", "pin_doc") else None})
             applied["done"] = i + 1
             save()
             print(f"{i + 1}/{len(calls)} {c['tool']} {c.get('slug') or ''}".rstrip(), file=sys.stderr)
+        if not failed and any(c["tool"] in ("pin_doc", "starter_cleanup", "sidebar_group") for c in calls):
+            applied["sidebar"] = json.loads(call("get_sidebar", {}))
+            for g in applied["sidebar"].get("groups", []):
+                print(f"sidebar: {g.get('name')}: " + ", ".join(d.get("title", d["uuid"]) for d in g.get("docs", [])),
+                      file=sys.stderr)
         deadline = time.monotonic() + args.settle
         wrote = any(c["tool"] not in READ_TOOLS for c in calls)
         while wrote and applied["done"]:
@@ -1209,6 +1509,8 @@ def cmd_ub(args):
                       file=sys.stderr)
                 break
             time.sleep(SETTLE_POLL)
+    except Stop as e:
+        failed = str(e)
     finally:
         save()
         server.stdin.close()
@@ -1222,7 +1524,7 @@ def cmd_ub(args):
         for r in applied["results"]:
             if r.get("text"):
                 print(f"== {r['tool']}\n{r['text']}")
-    elif uuids:
+    elif uuids and not getattr(args, "quiet", False):
         print(json.dumps(uuids, indent=1))
 
 
@@ -1233,8 +1535,18 @@ def esc(x):
 
 
 def inline_html(text):
+    """Markdown text (a table cell, a card field, a plan note) as HTML."""
+    return runs_html(runs(text))
+
+
+def prose_html(block):
+    """A prose block as parsed: its text is plain, its marks are in `inline`."""
+    return runs_html(block.get("inline") or [{"text": block["text"], "marks": {}}])
+
+
+def runs_html(rs):
     out = []
-    for r in runs(text):
+    for r in rs:
         t = esc(r["text"])
         m = r["marks"]
         if m.get("inlineCode"):
@@ -1243,6 +1555,8 @@ def inline_html(text):
             t = f"<strong>{t}</strong>"
         if m.get("italic"):
             t = f"<em>{t}</em>"
+        if m.get("strike"):
+            t = f"<s>{t}</s>"
         if m.get("link"):
             t = f'<a href="{esc(m["link"])}">{t}</a>'
         if m.get("docLink"):
@@ -1261,11 +1575,11 @@ def doc_html(blocks, svgs):
             in_list = None
         if t == "heading":
             lvl = min(6, b.get("level", 2) + 1)
-            out.append(f"<h{lvl}>{inline_html(b['text'])}</h{lvl}>")
+            out.append(f"<h{lvl}>{prose_html(b)}</h{lvl}>")
         elif t == "paragraph":
-            out.append(f"<p>{inline_html(b['text'])}</p>")
+            out.append(f"<p>{prose_html(b)}</p>")
         elif t == "quote":
-            out.append(f"<blockquote>{inline_html(b['text'])}</blockquote>")
+            out.append(f"<blockquote>{prose_html(b)}</blockquote>")
         elif t == "list-item":
             tag = "ol" if b.get("list") == "ordered" else "ul"
             if in_list != tag:
@@ -1273,22 +1587,26 @@ def doc_html(blocks, svgs):
                     out.append(f"</{in_list}>")
                 out.append(f"<{tag}>")
                 in_list = tag
-            out.append(f'<li style="margin-left:{b.get("indent", 0) * 1.4}em">{inline_html(b["text"])}</li>')
+            out.append(f'<li style="margin-left:{b.get("indent", 0) * 1.4}em">{prose_html(b)}</li>')
         elif t == "table":
             rows = [r.strip().strip("|").split("|") for r in b["text"].splitlines()
-                    if not re.match(r"^\s*\|?\s*:?-{2,}", r)]
+                    if not DELIMITER_ROW.match(r)]
             body = "".join("<tr>" + "".join(f"<{'th' if i == 0 else 'td'}>{inline_html(c.strip())}"
                                            f"</{'th' if i == 0 else 'td'}>" for c in row) + "</tr>"
                            for i, row in enumerate(rows))
             out.append(f"<table>{body}</table>")
         elif t == "card":
             head, _, body = b["text"].partition("\n\n")
-            fields = dict(re.findall(r"^(label|title|footer):\s?(.*)$", head, re.M))
+            body = re.sub(r"^(footer|button):.*$", "", body, flags=re.M)
+            fields = dict(re.findall(r"^(label|title):\s?(.*)$", head, re.M) +
+                          re.findall(r"^(footer):\s?(.*)$", b["text"], re.M))
             out.append('<div class="card">' + (f'<div class="lbl">{inline_html(fields["label"])}</div>'
                                                if fields.get("label") else "") +
                        f'<div class="ttl">{inline_html(fields.get("title", ""))}</div>' +
                        (f"<p>{inline_html(body.strip())}</p>" if body.strip() else "") +
                        (f'<div class="ftr">{inline_html(fields["footer"])}</div>' if fields.get("footer") else "") +
+                       "".join(f'<span class="btn">{inline_html(x)}</span>'
+                               for x in re.findall(r"^button:\s?(.*)$", b["text"], re.M)) +
                        "</div>")
         elif t == "code" and b.get("language") == "ablauf" and svgs:
             svg = svgs.pop(0)
@@ -1305,7 +1623,7 @@ def doc_html(blocks, svgs):
 
 def cmd_review(args):
     plan = load(args.plan)
-    scan = load(args.scan)
+    scan = load_scan(args.scan)
     base = Path(args.plan).resolve().parent
     errors, warnings = validate(plan, base, scan)
     template = (Path(__file__).resolve().parent.parent / "assets" / "review.html").read_text(encoding="utf-8")
@@ -1342,15 +1660,31 @@ def cmd_review(args):
         md_rows.append(f"<tr class='{esc(m['action'])}'><td><code>{esc(m['path'])}</code></td><td class='num'>{n}</td>"
                        f"<td><span class='act {esc(m['action'])}'>{esc(m['action'])}</span></td><td>{target}</td>"
                        f"<td>{inline_html(m.get('why', ''))}</td></tr>")
+        for sec in m.get("sections", []):
+            into = sec.get("doc")
+            md_rows.append(f"<tr class='{esc(sec.get('action'))}'><td>§ {esc(sec.get('heading', ''))}</td><td></td>"
+                           f"<td><span class='act {esc(sec.get('action'))}'>{esc(sec.get('action'))}</span></td><td>"
+                           + (f'<a href="#doc-{esc(into)}">{esc(title_of.get(into, into))}</a>' if into else "")
+                           + f"</td><td>{inline_html(sec.get('why', ''))}</td></tr>")
+    cap_rows = []
+    for c in plan.get("capabilities", []):
+        doc = c.get("doc")
+        cap_rows.append(f"<tr><td>{inline_html(c.get('name', ''))}</td><td>"
+                        f"{'<a href=#doc-' + esc(doc) + '>' + esc(title_of.get(doc, doc)) + '</a>' if doc else '—'}"
+                        f"</td><td>{inline_html(c['why']) if c.get('why') else ''}"
+                        f"{' '.join(f'<code>{esc(e)}</code>' for e in c.get('evidence', []))}</td></tr>")
     # Decision candidates
     cand_rows = []
     url = scan["churn"].get("commit_url")
     for c in plan.get("candidates", []):
-        ev = " ".join(f'<a href="{esc(url + e)}"><code>{esc(e[:8])}</code></a>' if url else f"<code>{esc(e[:8])}</code>"
+        ev = " ".join(f'<a href="{esc(url + e)}"><code>{esc(e[:8])}</code></a>'
+                      if url and re.fullmatch(r"[0-9a-f]{7,40}", e) else f"<code>{esc(e)}</code>"
                       for e in c.get("evidence", []))
         made = c.get("create")
+        status = by_slug.get(made, ({}, {}, []))[0].get("status") or (
+            "decided" if by_slug.get(made, ({}, {}, []))[0].get("answer") else "open")
         cand_rows.append(f"<tr><td>{inline_html(c['question'])}</td><td>{ev}</td><td>"
-                         f"{'<a href=#doc-' + esc(made) + '>record</a>' if made else 'skip'}</td>"
+                         f"{'<a href=#doc-' + esc(made) + '>' + status + ' record</a>' if made else 'skip'}</td>"
                          f"<td>{inline_html(c.get('why', ''))}</td></tr>")
     # Test focus
     t = scan["tests"]
@@ -1365,13 +1699,14 @@ def cmd_review(args):
                           f"<td>{'<a href=#doc-' + esc(doc) + '>' + esc(title_of.get(doc, doc)) + '</a>' if doc else '—'}"
                           f"</td></tr>")
     # Documents
-    svgdir = base / "viz"
     docs_html = []
     for d, meta, blocks in by_slug.values():
         svgs = []
         n = sum(1 for b in blocks if b["type"] == "code" and b.get("language") == "ablauf")
         for i in range(n):
-            p = svgdir / f"{d['slug']}-{i + 1}.svg"
+            # viz.mjs draws next to the document file, named after it
+            doc_file = base / d.get("file", "")
+            p = doc_file.parent / "viz" / f"{doc_file.stem}-{i + 1}.svg"
             svgs.append(p.read_text(encoding="utf-8") if p.exists() else None)
         tags = "".join(f"<span class='tag'>{esc(x)}</span>" for x in meta.get("tags") or [])
         src = ", ".join(f"<code>{esc(x)}</code>" for x in d.get("sources", []) + d.get("tests", []))
@@ -1388,13 +1723,11 @@ def cmd_review(args):
     changes = "".join(f"<li><code>{esc(c['path'])}</code>: {inline_html(c['change'])}</li>"
                       for c in plan.get("repo_changes", []))
     kinds = Counter(d.get("kind", "page") for d in plan["documents"])
-    actions = Counter(m["action"] for m in plan["markdown"])
     md_actions = Counter()
     for doc in scan["markdown"]:
-        hits = [m for m in plan["markdown"] if covers(m["path"], doc["path"])]
-        exact = [m for m in hits if m["path"] == doc["path"]]
-        if hits:
-            md_actions[(exact or hits)[0]["action"]] += 1
+        hit = entry_for(plan["markdown"], doc["path"])
+        if hit:
+            md_actions[hit["action"]] += 1
     stats = [(len(scan["markdown"]), "Markdown files"), (md_actions["convert"], "converted"),
              (md_actions["keep"], "kept as Markdown"), (md_actions["skip"], "skipped"),
              (kinds["page"], "pages"), (kinds["decision"], "decision records"),
@@ -1411,22 +1744,48 @@ def cmd_review(args):
         "SIDEBAR": "\n".join(side),
         "TAGS": "".join(tag_rows),
         "MARKDOWN": "".join(md_rows),
+        "CAPABILITIES": "".join(cap_rows) or "<tr><td colspan=3>None listed.</td></tr>",
         "CANDIDATES": "".join(cand_rows) or "<tr><td colspan=4>No candidates.</td></tr>",
         "TESTSUMMARY": inline_html(plan.get("tests", {}).get("summary", "")) + " " + esc(
             f"{t['total_cases']} cases: " + ", ".join(f"{k} {v}" for k, v in sorted(t['cases'].items(),
                                                                                  key=lambda kv: -kv[1])) + "."),
         "FOCUS": "".join(focus_rows),
-        "CHANGES": f"<ul>{changes}</ul>" if changes else "<p>None.</p>",
+        "CHANGES": (f"<ul>{changes}</ul>" if changes else "<p>None.</p>"),
+        "STARTER": {"unpin": "The starter pages (Welcome to Uberblick, How to Use It) are unpinned and their group "
+                             "removed.",
+                    "keep": "The starter pages stay pinned."}.get(plan["sidebar"].get("starter"),
+                                                                  "The starter pages are left as they are."),
+        "NOTES": "".join(f"<li>{inline_html(n)}</li>" for n in plan.get("notes", [])) or "<li>None.</li>",
         "DOCS": "\n".join(docs_html),
     }.items():
         page = page.replace("{{" + key + "}}", value)
     Path(args.out).write_text(page, encoding="utf-8")
     print(f"{args.out}: {len(by_slug)} documents, {len(errors)} errors, {len(warnings)} warnings")
-    if args.open:
-        webbrowser.open(Path(args.out).resolve().as_uri())
+    if args.open and not webbrowser.open(Path(args.out).resolve().as_uri()):
+        print(f"no browser here: open {Path(args.out).resolve()} yourself, or send it to the person")
 
 
 # --------------------------------------------------------------------------------------------------- main
+
+def cmd_corpus(args):
+    """Read the workspace once: DIR/tags.json, DIR/sidebar.json and DIR/docs.json, for the plan and for `calls`."""
+    out = Path(args.dir)
+    out.mkdir(parents=True, exist_ok=True)
+    reads = [("list_tags", {}), ("get_sidebar", {}), ("list_docs", {}), ("list_docs", {"kind": "decision"})]
+    (out / "read.json").write_text(json.dumps([{"tool": t, "arguments": a} for t, a in reads]), encoding="utf-8")
+    applied = out / "read-applied.json"
+    applied.unlink(missing_ok=True)
+    cmd_ub(argparse.Namespace(calls=str(out / "read.json"), checkout=args.checkout, out=str(applied), resume=False,
+                              adopt=False, settle=0, ub=args.ub, print=False, quiet=True))
+    tags, sidebar, docs, records = (json.loads(r["text"]) for r in load(applied)["results"])
+    docs["docs"] += records["docs"]
+    for name, value in (("tags", tags), ("sidebar", sidebar), ("docs", docs)):
+        (out / f"{name}.json").write_text(json.dumps(value, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"workspace {docs.get('workspace')}: {len(docs.get('docs', []))} documents; groups "
+          + ", ".join(f"{g.get('name')} ({len(g.get('docs', []))})" for g in sidebar.get("groups", []))
+          + "; tags " + (", ".join(t["name"] for t in tags.get("tags", [])) or "none")
+          + ("" if tags.get("complete", True) else " (catalog incomplete: not fully synced yet)"))
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
@@ -1439,13 +1798,16 @@ def main():
     h.add_argument("--limit", type=int, default=15)
     t = sub.add_parser("tests", help="the test focus, readable")
     t.add_argument("scan")
-    t.add_argument("--titles", type=int, default=40)
+    t.add_argument("--titles", type=int, default=80)
     t.add_argument("--topics", type=int, default=25)
+    t.add_argument("--per-file", type=int, default=8, help="test titles per journey file")
     b = sub.add_parser("blocks", help="one Uberblick Markdown file as create_doc arguments")
     b.add_argument("doc")
     c = sub.add_parser("check", help="the plan against the scan and the corpus rules")
     c.add_argument("plan")
     c.add_argument("--scan")
+    c.add_argument("--checkout", help="the repository, to check that every source and test path exists")
+    c.add_argument("--tags", help="DIR/corpus/tags.json, to check which tags exist")
     r = sub.add_parser("review", help="the page a person approves before the writes")
     r.add_argument("plan")
     r.add_argument("--scan", required=True)
@@ -1453,20 +1815,28 @@ def main():
     r.add_argument("--open", action="store_true")
     k = sub.add_parser("calls", help="the ordered corpus writes")
     k.add_argument("plan")
-    k.add_argument("--tags", help="list_tags output, to pass tag ids and leave off tags the catalog lacks")
+    k.add_argument("--tags", required=True,
+                   help="list_tags output, to pass tag ids and leave off tags the catalog lacks")
     k.add_argument("--applied", help="applied.json of an earlier run: those documents are not created again, "
                                      "only given the plan's tags that exist now")
+    w = sub.add_parser("corpus", help="read the workspace's tags, sidebar and documents into DIR")
+    w.add_argument("--checkout", required=True)
+    w.add_argument("--dir", required=True)
+    w.add_argument("--ub", default="ub", help="the command that runs ub (default: ub)")
     u = sub.add_parser("ub", help="run the calls through one `ub mcp serve`")
     u.add_argument("--calls", required=True)
     u.add_argument("--checkout", required=True)
     u.add_argument("--out", default="applied.json")
-    u.add_argument("--resume", action="store_true")
+    u.add_argument("--resume", action="store_true", help="continue the same calls file after a stop")
+    u.add_argument("--adopt", action="store_true",
+                   help="a page whose title the workspace already has is used as it is, not created again")
     u.add_argument("--settle", type=int, default=60)
     u.add_argument("--ub", default="ub", help="the command that runs ub (default: ub)")
     u.add_argument("--print", action="store_true", help="print each answer, for reads such as list_tags")
     args = parser.parse_args()
     {"scan": cmd_scan, "hot": cmd_hot, "tests": cmd_tests, "blocks": cmd_blocks, "check": cmd_check,
-     "review": cmd_review, "calls": cmd_calls, "ub": cmd_ub}[args.command](args)
+     "review": cmd_review, "calls": cmd_calls, "corpus": cmd_corpus,
+     "ub": cmd_ub}[args.command](args)
 
 
 if __name__ == "__main__":

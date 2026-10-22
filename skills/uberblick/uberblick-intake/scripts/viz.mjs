@@ -1,7 +1,8 @@
 // Checks every ablauf and wireframe fence in the documents and draws each ablauf as an SVG for the review page.
 // Usage: node viz.mjs PREFIX DOC.md...
 // PREFIX is the directory `npm install --prefix` put @uberblick/ablauf and @uberblick/wireframe in.
-// SVGs land in viz/ next to the documents as <doc>-<n>.svg. Exits 1 on any diagnostic, naming the file and line.
+// SVGs land in viz/ next to the documents as <doc>-<n>.svg, and <doc>-<n>.flat.svg with the light colours written
+// in for image viewers. Exits 1 on any diagnostic, naming the file and line.
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -22,6 +23,15 @@ const { render } = await import(pathToFileURL(mod("ablauf")).href);
 const { parseWireframe } = await import(pathToFileURL(mod("wireframe")).href);
 
 let failed = false;
+// Image viewers and rasterizers ignore CSS custom properties: resolve the light colours into the SVG itself.
+function flat(svg) {
+  const colours = {};
+  for (const [, name, value] of svg.matchAll(/--([\w-]+):var\(--ab-[\w-]+,(#[0-9a-fA-F]{3,8})\)/g)) {
+    colours[name] ??= value;
+  }
+  return svg.replace("<svg ", '<svg style="background:#ffffff" ').replace(/var\(--([\w-]+)(?:,([^()]*))?\)/g, (m, name, fallback) => colours[name] ?? fallback ?? m);
+}
+
 let drawn = 0;
 let checked = 0;
 for (const doc of docs) {
@@ -41,6 +51,7 @@ for (const doc of docs) {
       const { svg, diagnostics } = render(source, { idPrefix: `${slug}-${n}` });
       mkdirSync(out, { recursive: true });
       writeFileSync(join(out, `${slug}-${n}.svg`), svg);
+      writeFileSync(join(out, `${slug}-${n}.flat.svg`), flat(render(source, { idPrefix: `${slug}-${n}`, scheme: "light" }).svg));
       for (const d of diagnostics) console.error(`${at(d.line)} ablauf ${d.severity}: ${d.message}`);
       if (diagnostics.length) failed = true;
       else drawn++;

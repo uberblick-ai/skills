@@ -37,7 +37,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .doc header{border-bottom:1px solid var(--line);margin-bottom:10px;padding-bottom:8px}
 .doc .kind{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
 .doc .tldr{font-weight:500}.doc .desc,.doc .src{color:var(--muted);font-size:13px;margin:4px 0}
-.card{border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:10px 0}.card .lbl{font-size:12px;color:var(--muted)}.card .ttl{font-weight:600}.card .ftr{font-size:12px;color:var(--muted)}
+.card{border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:10px 0}.card .lbl{font-size:12px;color:var(--muted)}.card .ttl{font-weight:600}.card .ftr{font-size:12px;color:var(--muted)}.card .btn{display:inline-block;margin:8px 8px 0 0;padding:3px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px}
 figure.viz{margin:12px 0;overflow:auto}figure.viz svg{max-width:100%;height:auto}figcaption{font-size:12px;color:var(--muted)}
 blockquote{border-left:3px solid var(--line);margin:8px 0;padding:2px 12px;color:var(--muted)}
 @media (max-width:760px){.layout{grid-template-columns:1fr}.side{position:static;max-height:none}}
@@ -52,8 +52,13 @@ blockquote{border-left:3px solid var(--line);margin:8px 0;padding:2px 12px;color
 <div class="stats">{{STATS}}</div>
 {{ISSUES}}
 
+<h2>What a person can do</h2>
+<p class="meta">Each capability the product offers, and the page that covers it.</p>
+<table><tr><th>Capability</th><th>Page</th><th>Evidence or why not</th></tr>{{CAPABILITIES}}</table>
+
 <h2>Sidebar and documents</h2>
 <p class="meta">The sidebar as people will see it, then every document as it will be written. Ablauf drawings are rendered; wireframes render when the page can load the renderer.</p>
+<p class="meta">{{STARTER}}</p>
 <div class="layout">
 <nav class="side">{{SIDEBAR}}</nav>
 <div>{{DOCS}}</div>
@@ -75,6 +80,9 @@ blockquote{border-left:3px solid var(--line);margin:8px 0;padding:2px 12px;color
 
 <h2>Changes to the repository</h2>
 {{CHANGES}}
+
+<h2>Notes</h2>
+<ul>{{NOTES}}</ul>
 </main>
 <script type="module">
 const figures = document.querySelectorAll("figure.wf");

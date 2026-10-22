@@ -70,5 +70,7 @@ dialog Send “Lease agreement”?
 
 `node scripts/viz.mjs DIR/node DIR/docs/*.md` parses every wireframe and
 draws every ablauf into `DIR/docs/viz/<slug>-<n>.svg`, which the review page
-shows. It fails on any diagnostic with the file and line. Look at each SVG:
-a clean render can still cross edges or crowd labels; fix those too.
+shows, and a `.flat.svg` beside each with its light colours written in, for
+an image viewer or rasterizer that ignores CSS variables. It fails on any
+diagnostic with the file and line. Look at each drawing: a clean render can
+still cross edges or crowd labels; fix those too.

@@ -21,20 +21,34 @@ Sort by what the file is for, not where it sits.
 | Generated, fixture, vendored, fragments | `skip` | release-note fragments, changelogs, blog posts, test fixtures, `node_modules`, translated copies |
 | Community and legal | `skip` | CODE_OF_CONDUCT, SECURITY, LICENSE, CLA |
 
-- One file may feed several pages, and several files one page. A README
-  usually splits: the pitch and features become the overview, install and
-  contributing stay.
+- One file may feed several pages, and several files one page. A file that
+  is part product, part technical takes `sections`: one entry per heading
+  with its own action. A README usually splits this way: the pitch and
+  features become the overview, install and contributing stay.
+- A generated file (a `cog` block, "do not edit", a file a script writes) is
+  never the source: read what generates it, and `keep` or `skip` the output.
 - A docs site is product intent but rarely belongs in the corpus page for
   page. Take its top-level navigation as the shape, convert the concepts and
   guides a person needs to act, and keep the reference sections as Markdown,
-  linked from the pages. A first intake writes 8 to 25 pages; a page per
-  docs-site page is a sign of copying.
+  linked from the pages. When the site is the product's published
+  documentation, the pages and the site overlap: say so on the review page
+  and let the person choose whether the corpus states intent at a coarser
+  grain beside the site (the usual answer) or replaces it.
 - Self-hosting and operations docs are technical unless the product is
   something people operate (a server, a CLI they install); then installing
   and configuring it is the product, and one page on it belongs in the corpus.
 - A changelog is history; the corpus has none.
 - Keep a file the team edits as Markdown on purpose (a style guide agents
   read, a contributing guide), even if it reads like intent.
+
+## Capabilities, then pages
+
+Before writing pages, list what a person can do with the product in
+`capabilities`: one line each, the evidence (docs, code, tests), and the page
+that covers it or why none does (internal, too small, reference only). The
+pages follow from that list, never from a quota: a one-README tool may need
+three pages, a large docs site thirty. A page per docs-site page is a sign of
+copying; a capability with heavy tests or many docs and no page is a gap.
 
 ## Writing pages
 
@@ -45,11 +59,25 @@ Unless the repository has its own rules for corpus pages, which win:
 - Write the product as it is, in the present tense. No history, plans or
   provenance: no "planned", "will", "coming soon", "since", "added in",
   version or release, date, issue or PR number. Work the maintainers have
-  decided counts as in place.
+  decided (an accepted RFC or ADR) counts as in place; an experiment behind
+  a flag does not, unless a person can turn it on, and then it is a
+  setting the page names.
+- Describe what the default release build does. One code base shipped as
+  several apps or editions is one corpus: name a difference on the page
+  where it matters.
+- When the docs and the code disagree, the code wins. Write what the code
+  does and list the drift in the plan's `notes`, so the maintainers can fix
+  the docs.
 - Start small: a one-line usage or example first, a short section per
   command, screen or setting with a snippet, then scenarios as H3 headings
-  with a short paragraph each. Related links last. Tables only for real
-  reference data.
+  with a short paragraph each. Related links last, as the closing section.
+  Tables only for real reference data.
+- Scenarios are what a person tries to get done, picked by how much it
+  matters to them; the tests are evidence that a scenario works and how,
+  not the list of scenarios. Never write a scenario from a test title alone.
+- For a command-line product, show usage in a `terminal` fence (`$ glow
+  README.md`, then the output) and syntax in a `sh` code fence.
+- An overview links the area pages; it does not repeat them.
 - Intros are one or two sentences, no TL;DR in the body. Plain words, full
   sentences. Cut what an example already shows.
 - Commands, syntax and UI labels appear in code formatting exactly as the
@@ -85,10 +113,13 @@ architectural direction, a system-wide commitment, a major user-facing
 behaviour); credible alternatives had materially different consequences; it
 constrains work beyond one change; and future work needs the trade-off.
 
-- **Existing ADRs** that are accepted become decided records: the title is
+- **Existing ADRs** and accepted RFCs become decided records when they meet
+  the four criteria and constrain a product page; engineering-only ones
+  (a build tool, a code style, a module layout) stay Markdown. The title is
   the question, the body the answer in at most 60 words, leading with the
   choice, with a link to the ADR file on GitHub at `ref` for the context and
-  alternatives. With deciders and a date in the ADR, record them as `answer`.
+  alternatives. Record the deciders and date as `answer`; when the ADR names
+  none, the author and date of the commit that accepted it.
   Superseded ADRs: record only the one in force, and say what it replaced
   in its answer if that helps. Rejected and proposed ADRs stay Markdown.
 - **History candidates** come from `intake.py hot`: an area with many
@@ -100,9 +131,13 @@ constrains work beyond one change; and future work needs the trade-off.
   on, a storage or sync model, a security or permission model, a public
   interface. Two to six records is typical; none is a fine answer for a
   young or small repository.
-- A history decision is recorded as decided without `answer` (an agent's
-  stance from the evidence); its answer cites the commit or pull request as a
-  GitHub link. A person confirms it in Uberblick.
+- A history decision is recorded `open`: the answer states the choice the
+  code shows and why, citing the commit or pull request as a GitHub link,
+  and a person decides it in Uberblick. Only an accepted ADR or a person's
+  answer on record (`answer: {who, when, where}`) is `decided`.
+- Open the patch (`git show SHA`), not only its message, and confirm the
+  current code still follows it. A choice that is a setting a person changes
+  (a default model, a theme) is a page fact, not a decision.
 - Each record's `related` names the page it constrains, so the page shows it.
 - List every candidate considered in `candidates`, with why it was left out.
 
@@ -113,16 +148,19 @@ page says, not to describe the tests.
 
 - `intake.py tests` gives cases per area and topic by kind, and the e2e
   journeys with their suite and test titles. `e2e` and `cli` tests run the
-  product as a person does: their titles are the product's scenarios.
-- An area with many journeys gets a page with scenarios that follow them,
-  one H3 per journey family, in the product's words: "Sign in order" from
+  product as a person does: in a command-line product the `cli` tests are
+  its journeys. The kinds and counts are heuristics from file names and
+  imports: read a few files per kind before relying on them, and write
+  "about" in `tests.summary`.
+- An area with many journeys gets the scenarios a person needs, one H3 per
+  scenario, in the product's words: "Sign in order", backed by
   `document-flow: signs in sequence`. Read the test to get the behaviour
   right, then state the behaviour, not the test.
 - An area with only unit tests or none gets a short page: what a person can
   do, no scenarios beyond the obvious. Do not invent scenarios no test or code
   shows.
-- A topic with heavy e2e weight and no page is a gap: add a page, or say in
-  `tests.focus` why not (an internal API, admin tooling).
+- A topic with heavy e2e weight and no page is a gap: add a page, or give
+  its `tests.focus` row a `why` (an internal API, admin tooling).
 - Put the suite's shape in `tests.summary`: where the weight is (for example
   "83% of cases are Playwright journeys, half of them the public API") and
   what that says about the product's priorities.
@@ -141,7 +179,8 @@ everything.
   product if pages for that exist.
 - Pin the page a person opens first in each area, and the decision records
   that most constrain day-to-day work. Leave the rest unpinned; links and
-  search reach them.
+  search reach them. With more than a dozen documents, pin at most two
+  thirds of them.
 - Group names are the product's nouns, short, in sentence case.
 - The starter pages of a new workspace ("Welcome to Uberblick", "How to Use
   It" in the "Uberblick" group) are unpinned only when the person agrees.
@@ -152,4 +191,5 @@ Propose, do not make: for each converted file, whether to delete it, shorten
 it to what stays technical, or leave it; and a line in AGENTS.md (or the
 README) saying product intent lives in the Uberblick corpus and how agents
 reach it. Keep the README's install and quick start: people read it on
-GitHub.
+GitHub. Never propose removing the source of a published docs site; its
+readers are not in the corpus.

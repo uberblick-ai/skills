@@ -37,14 +37,19 @@ into corpus writes.
       "kind": "decision",
       "related": "send-a-document",
       "sources": ["git:9035240b4d"],
-      "status": "decided"
+      "status": "open"
     }
   ],
   "markdown": [
-    {"path": "README.md", "action": "convert", "doc": ["overview", "self-hosting"], "why": "Product overview and features."},
+    {"path": "README.md", "action": "convert", "doc": ["overview", "self-hosting"], "why": "Pitch, features, self-hosting.",
+     "sections": [{"heading": "Developer quickstart", "action": "keep"}, {"heading": "Self hosting", "action": "convert", "doc": "self-hosting"}]},
     {"path": "apps/docs/content/docs/developers/**", "action": "keep", "why": "API reference, generated from the code."},
     {"path": ".agents/**", "action": "keep", "why": "Agent plans and skills."},
     {"path": "CODE_OF_CONDUCT.md", "action": "skip", "why": "Community file; nothing for the corpus."}
+  ],
+  "capabilities": [
+    {"name": "Send a document for signing", "evidence": ["apps/docs/content/docs/users/documents/send.mdx", "packages/app-tests/e2e/document-flow"], "doc": "send-a-document"},
+    {"name": "Manage API tokens", "evidence": ["apps/web/src/app/(dashboard)/settings/tokens"], "doc": null, "why": "Developer setting; the API reference stays Markdown."}
   ],
   "candidates": [
     {"question": "Which library reads and signs PDFs?", "evidence": ["9035240b4d"], "create": "pdf-library",
@@ -67,6 +72,9 @@ into corpus writes.
 ```
 
 - `ref` is the commit the scan read (`scan.json`'s `ref`), `date` today.
+- `capabilities`: what a person can do with the product, each with its
+  `evidence` (docs, code, tests) and the `doc` that covers it, or `null`
+  and a `why`. The pages follow from this list.
 - `tags`: every tag a document uses, `status` `existing` when `list_tags`
   has it (case ignored) and `new` otherwise. Name the catalog's spelling. A
   tag is lowercase letters and digits joined by hyphens, at most 30
@@ -80,15 +88,17 @@ into corpus writes.
   `intake.json`. `kind` is `page` or `decision`. `sources` are the repository
   paths a page is written from (`path` or `path:start-end`, or `git:SHA` for a
   commit), `tests` the test folders or files its scenarios follow. A decision
-  takes `related` (the slug of the page it belongs to), `status` (`decided`
-  or `open`, default `decided`) and, only when a person's answer is on
-  record, `answer: {who, when, where}`: an ADR's deciders, its date and its
-  URL at `ref`. A document already in the corpus takes `existing: UUID`: it
+  takes `related` (the slug of the page it belongs to), `status` (`open`
+  or `decided`) and, only when a person's answer is on record, `answer:
+  {who, when, where}`: an ADR's deciders, its date and its URL at `ref`.
+  Without `status`, a record with `answer` is `decided` and one without is
+  `open`. A document already in the corpus takes `existing: UUID`: it
   is not created again, but can be pinned and linked.
 - `markdown`: every Markdown file the scan found is covered by exactly one
   entry, an exact path or a glob (`dir/**`, `*.mdx`); an exact path wins over
   a glob. `action` is `convert` (with `doc`, one slug or a list), `keep` or
-  `skip`.
+  `skip`. A file that is part product, part technical adds `sections`, one
+  per heading with its own `action` (and `doc` when it converts).
 - `candidates`: every decision candidate considered, including the ones
   left out, with the commits (`sha`, short) and `create` naming the decision
   document or `null`.
@@ -126,7 +136,13 @@ With *signing order* on, the second signer gets the email only after the first h
   spaces of indent per level, up to three), quotes, GFM tables, fenced code,
   `terminal` and `chart` fences, `ablauf` and `wireframe` fences, `:::card`
   containers. Inline: `**bold**`, `*italic*`, `` `code` ``, `~~strike~~`,
-  `[text](https://…)` and `[text](ref:slug)` for another document of the plan.
+  `[text](https://…)` and `[text](ref:slug)` for another document of the plan
+  (a whole document; `ref:slug#heading` is not supported).
+- Scenarios are H3 headings under an H2 such as "Scenarios" or the area's
+  own heading, each with a short paragraph.
+- A `terminal` fence holds a session: `$ command` lines, each followed by
+  its output. A `:::card` holds `label:` and `title:` lines, a blank line,
+  the body, then optional `footer:` and `button: [Text](https://…)` lines.
 - Not allowed: a leading H1 (the title shows already), `mermaid` (Uberblick
   deletes it; draw ablauf), relative links into the repository (link the file
   on GitHub at `ref`), images, HTML, nested block content.

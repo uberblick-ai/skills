@@ -1,0 +1,47 @@
+{
+  "question": "What would our repository look like as an Uberblick corpus?",
+  "short": "Sort a repository's Markdown, history and tests into an Uberblick corpus: product pages, decision records, tags and a sidebar, approved on one review page before anything is written.",
+  "lede": "Product intent becomes pages a person can trust; technical, implementation and agent docs stay next to the code. Every Markdown file gets one fate, every page is checked against the code, and nothing reaches the workspace before a person approves the plan.",
+  "asks": [
+    "Set up Uberblick for this repository.",
+    "Move our product docs into the corpus.",
+    "What would an intake of this repo create?"
+  ],
+  "steps": [
+    "Reads the workspace: its tags, sidebar and documents.",
+    "Scans every tracked Markdown file, the git history and the test suite: hot areas, direction changes, the largest changes on the main line, test cases by kind and topic.",
+    "Lists what a person can do with the product, and writes one small page per area, with scenarios where the tests and docs show the team's weight.",
+    "Turns accepted ADRs and the few lasting choices in the history into decision records, open until a person decides them.",
+    "Draws flows with ablauf and screens with wireframes where a picture says it better, and checks every drawing.",
+    "Builds one review page with the sidebar, every document, every file's fate and the test focus, then writes to the workspace once approved."
+  ],
+  "facts_title": "What every Markdown file becomes",
+  "facts": [
+    [
+      "Convert",
+      "product intent: guides, concepts, features, accepted ADRs"
+    ],
+    [
+      "Keep",
+      "how it is built, run or changed, reference, agent instructions"
+    ],
+    [
+      "Skip",
+      "generated files, fixtures, release notes, community and legal files"
+    ]
+  ],
+  "needs": [
+    [
+      "Needs",
+      "<code>python3</code> and <code>git</code>; Node.js to check and draw ablauf and wireframe blocks."
+    ],
+    [
+      "Optional",
+      "the Uberblick MCP tools or <code>ub</code> to write the corpus, and the uberblick-corpus-sync skill to record the check against the code."
+    ],
+    [
+      "Leaves",
+      "<code>intake.json</code>, the documents as Markdown, <code>review.html</code>, and after approval the pages, decision records, pins and links in the workspace."
+    ]
+  ]
+}
