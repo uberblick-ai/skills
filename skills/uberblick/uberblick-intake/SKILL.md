@@ -120,7 +120,10 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    - every Markdown file: `convert` into a named page, `keep` as Markdown, or
      `skip` (generated, fixture, release note fragment, duplicate), with one
      line of why; a folder can be one entry (`docs/reference/**`), a mixed
-     file one entry per heading (`sections`);
+     file one entry per heading (`sections`). Installation, packages,
+     building and other setup stay as Markdown (the scan lists them as
+     `keep_sections`); a page links to them. Nothing converted leaves the
+     repository unless a person accepts that change;
    - the capabilities: what a person can do with the product, each with its
      evidence and the page that covers it, or why none does;
    - the pages: one per product area or concept a person acts on, small,

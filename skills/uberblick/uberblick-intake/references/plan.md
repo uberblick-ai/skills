@@ -41,8 +41,8 @@ into corpus writes.
     }
   ],
   "markdown": [
-    {"path": "README.md", "action": "convert", "doc": ["overview", "self-hosting"], "why": "Pitch, features, self-hosting.",
-     "sections": [{"heading": "Developer quickstart", "action": "keep"}, {"heading": "Self hosting", "action": "convert", "doc": "self-hosting"}]},
+    {"path": "README.md", "action": "convert", "doc": ["overview"], "why": "Pitch and features; install and setup stay for GitHub readers.",
+     "sections": [{"heading": "Developer quickstart", "action": "keep"}, {"heading": "Self hosting", "action": "keep"}]},
     {"path": "apps/docs/content/docs/developers/**", "action": "keep", "why": "API reference, generated from the code."},
     {"path": ".agents/**", "action": "keep", "why": "Agent plans and skills."},
     {"path": "CODE_OF_CONDUCT.md", "action": "skip", "why": "Community file; nothing for the corpus."}

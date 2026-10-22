@@ -13,7 +13,7 @@ Sort by what the file is for, not where it sits.
 | The file | Action | Examples |
 | --- | --- | --- |
 | What a user can do, see or decide | `convert` | README feature sections, user guides, concepts, how-tos, FAQ, product docs on a docs site |
-| How it is built, run or changed | `keep` | CONTRIBUTING, ARCHITECTURE, development setup, build, release, deployment, internals, code style, package READMEs |
+| How to get it, build it, run it or change it | `keep` | installation, binary packages, dependencies, building from source, CONTRIBUTING, ARCHITECTURE, development setup, release, deployment and self-hosting recipes, internals, code style, package READMEs, welcome docs for new contributors |
 | Exhaustive reference generated from or mirroring code | `keep` | CLI reference, API reference, config option lists, environment variable tables, changelogs of settings |
 | Instructions for agents or GitHub | `keep` | AGENTS.md, CLAUDE.md, `.agents/`, `.claude/`, `.cursor/`, skills, prompts, issue and PR templates |
 | Records of past decisions | `convert` into decision records | ADRs, `decisions/`, accepted RFCs |
@@ -24,7 +24,8 @@ Sort by what the file is for, not where it sits.
 - One file may feed several pages, and several files one page. A file that
   is part product, part technical takes `sections`: one entry per heading
   with its own action. A README usually splits this way: the pitch and
-  features become the overview, install and contributing stay.
+  features become the overview; dependencies, installation, packages,
+  building, contributing and support stay.
 - A generated file (a `cog` block, "do not edit", a file a script writes) is
   never the source: read what generates it, and `keep` or `skip` the output.
 - A docs site is product intent but rarely belongs in the corpus page for
@@ -34,9 +35,14 @@ Sort by what the file is for, not where it sits.
   documentation, the pages and the site overlap: say so on the review page
   and let the person choose whether the corpus states intent at a coarser
   grain beside the site (the usual answer) or replaces it.
-- Self-hosting and operations docs are technical unless the product is
-  something people operate (a server, a CLI they install); then installing
-  and configuring it is the product, and one page on it belongs in the corpus.
+- Getting the product running stays Markdown, even when the product is
+  something people install or operate (a server, a CLI): installation,
+  binary packages, building from source, deployment and proxy recipes are
+  documentation people follow step by step, and they change with the build.
+  What a person can configure and do once it runs is product intent and gets
+  pages; those pages link to the install docs instead of repeating them.
+- `convert` never moves a file out of the repository. The corpus states the
+  intent; the file stays until a person accepts a proposed change for it.
 - A changelog is history; the corpus has none.
 - Keep a file the team edits as Markdown on purpose (a style guide agents
   read, a contributing guide), even if it reads like intent.
@@ -176,7 +182,7 @@ own or work in; its pins are each domain's entry points; everything else is
 reached from them.
 
 - 3 to 6 groups, named for a domain in the product's nouns, short and in
-  sentence case: "Signing", "Self-hosting", "Billing". A group never names a
+  sentence case: "Signing", "Sharing", "Billing". A group never names a
   kind of document ("Decisions", "Reference", "Guides"): records and
   references belong to the domain they constrain.
 - Each group pins its entry points, usually one and at most three: the page
@@ -199,6 +205,7 @@ reached from them.
 Propose, do not make: for each converted file, whether to delete it, shorten
 it to what stays technical, or leave it; and a line in AGENTS.md (or the
 README) saying product intent lives in the Uberblick corpus and how agents
-reach it. Keep the README's install and quick start: people read it on
-GitHub. Never propose removing the source of a published docs site; its
+reach it. Keep the README's install, build and quick start, and every file
+new contributors or users follow to get started: people read them on
+GitHub. Never propose deleting or shortening a file that is `keep`. Never propose removing the source of a published docs site; its
 readers are not in the corpus.

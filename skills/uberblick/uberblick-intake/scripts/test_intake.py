@@ -183,6 +183,14 @@ class Plan(unittest.TestCase):
         _, warnings = intake.validate(self.plan, self.path.parent)
         self.assertTrue(any("'planned'" in w for w in warnings))
 
+    def test_setup_sections_stay(self):
+        self.plan["markdown"][0]["sections"] = [{"heading": "Installation", "action": "convert", "doc": "a"},
+                                                {"heading": "Features", "action": "convert", "doc": "a"}]
+        _, warnings = intake.validate(self.plan, self.path.parent)
+        self.assertEqual([w for w in warnings if "running" in w],
+                         ["markdown: README.md § Installation is how to get the product running; "
+                          "keep it as Markdown and link it from the page"])
+
     def calls(self, *extra, tags=None):
         path = self.path.parent / "tags.json"
         path.write_text(json.dumps({"tags": tags if tags is not None else [{"id": "t1", "name": "core"}]}))

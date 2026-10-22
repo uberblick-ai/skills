@@ -64,16 +64,20 @@ CHANGELOG = re.compile(r"(^|/)(CHANGELOG|HISTORY|NEWS|RELEASES?|UPGRADING|MIGRAT
 DECISION = re.compile(r"(^|/)(adrs?|decisions?|architecture[-_]decisions?|decision[-_]records?)(/|$)|"
                       r"(^|/)adr[-_]?\d+[^/]*$", re.I)
 RFC = re.compile(r"(^|/)(rfcs?|proposals?|design[-_]docs?|specs?|plans?)/", re.I)
-TECH_NAME = re.compile(r"(^|/)(CONTRIBUTING|DEVELOP(MENT|ING)?|HACKING|BUILDING|ARCHITECTURE|INTERNALS|"
+TECH_NAME = re.compile(r"(^|/)(CONTRIBUTING|DEVELOP(MENT|ING)?|HACKING|BUILD(ING)?|INSTALL(ATION|ING)?|ARCHITECTURE|INTERNALS|"
                        r"RELEASING|RELEASE|DEPLOY(MENT|ING)?|TESTING|STYLE|CODE[_-]STYLE|CODE[_-]REVIEW[^/]*|"
                        r"WRITING[_-]STYLE|DESIGN|MANIFEST|SIGNING|PORTING|BENCHMARKS?|PERFORMANCE|DEBUGGING|"
                        r"TROUBLESHOOTING)[^/]*$|(^|/)(contributing|development|developers?|internals|architecture|"
                        r"dev[-_]?docs|reference|api|self-hosting|hosting|deploy(ment)?|operations|ops|infra|"
                        r"benchmarks?|maintainers?)/", re.I)
-TECH_HEADINGS = re.compile(r"^(install(ation|ing)?|build(ing)?|development|setup|set up|local development|"
+TECH_HEADINGS = re.compile(r"^(install(ation|ing)?|build(ing)?|dependencies|(binary )?packages|from (release )?(tarball|source|version control)|compil(e|ing)|development|setup|set up|local development|"
                            r"testing|running tests|architecture|internals|api( reference)?|configuration|"
                            r"environment variables|deploy(ment|ing)?|docker|self[- ]host(ing)?|contributing|"
                            r"debugging|release|requirements|prerequisites|options|flags|cli reference)\b", re.I)
+# getting the product running: followed step by step, changes with the build, stays Markdown
+SETUP_HEADING = re.compile(r"^(install(ation|ing)?|(binary )?packages|dependencies|requirements|prerequisites|"
+                           r"build(ing)?|from (release )?(tarball|source|version control)|compil(e|ing)|"
+                           r"deploy(ment|ing)?|docker|self[- ]host(ing)?|upgrad(e|ing))\b", re.I)
 
 DOC_SITES = [
     ("mkdocs", ["mkdocs.yml", "mkdocs.yaml", "docs/mkdocs.yml"]),
@@ -312,7 +316,11 @@ def scan_markdown(checkout, files):
         text = read(checkout / f)
         facts = md_facts(f, text)
         cls, why = guess_class(f, facts)
-        docs.append({"path": f, "bytes": len(text.encode()), **facts, "guess": cls, "why": why})
+        entry = {"path": f, "bytes": len(text.encode()), **facts, "guess": cls, "why": why}
+        setup = [h for h in facts["headings"] if SETUP_HEADING.match(h)]
+        if setup and cls == "product":
+            entry["keep_sections"] = setup
+        docs.append(entry)
     return docs
 
 
@@ -1121,6 +1129,9 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
         for sec in m.get("sections", []):
             if sec.get("action") not in ("convert", "keep", "skip"):
                 errors.append(f"markdown: {m.get('path')} § {sec.get('heading')}: action is convert, keep or skip")
+            if sec.get("action") == "convert" and SETUP_HEADING.match(sec.get("heading") or ""):
+                warnings.append(f"markdown: {m.get('path')} § {sec.get('heading')} is how to get the product running; "
+                                f"keep it as Markdown and link it from the page")
             if sec.get("action") == "convert" and sec.get("doc") not in slugs:
                 errors.append(f"markdown: {m.get('path')} § {sec.get('heading')} converts into {sec.get('doc')!r}, "
                               f"which is not a document")
