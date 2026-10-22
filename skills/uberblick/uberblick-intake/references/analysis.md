@@ -132,8 +132,9 @@ constrains work beyond one change; and future work needs the trade-off.
   interface. Two to six records is typical; none is a fine answer for a
   young or small repository.
 - A history decision is recorded `open`: the answer states the choice the
-  code shows and why, citing the commit or pull request as a GitHub link,
-  and a person decides it in Uberblick. Only an accepted ADR or a person's
+  code shows and why, citing the pull request (or the commit, as
+  `https://github.com/OWNER/NAME/commit/<full sha>`) as a link whose text is
+  `#123` or the short sha, and a person decides it in Uberblick. Only an accepted ADR or a person's
   answer on record (`answer: {who, when, where}`) is `decided`.
 - Open the patch (`git show SHA`), not only its message, and confirm the
   current code still follows it. A choice that is a setting a person changes

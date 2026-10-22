@@ -1347,6 +1347,9 @@ def cmd_calls(args):
         calls.append({"tool": "sidebar_group", "arguments": {"group": g["name"], "action": "move", "index": i}})
     if skipped_tags:
         print("tags not in the workspace's catalog, left off: " + ", ".join(sorted(skipped_tags)), file=sys.stderr)
+        bare = sorted(c["slug"] for c in calls if c["tool"] == "create_doc" and not c["arguments"].get("tags"))
+        if bare:
+            print(f"{len(bare)} document(s) end up with no tag: " + ", ".join(bare), file=sys.stderr)
     json.dump(calls, sys.stdout, indent=1, ensure_ascii=False)
     print()
 

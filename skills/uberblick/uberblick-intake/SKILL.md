@@ -58,11 +58,18 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    Through the MCP tools, call `list_tags`, `get_sidebar`, `list_docs` and
    `list_docs` with `kind: decision` (decision records are listed only then),
    and save the `list_tags` answer as it stands (`{"tags": [{"id", "name"}],
-   "complete": …}`; other keys are fine) as `DIR/corpus/tags.json`. A fresh
-   workspace holds two starter pages in an "Uberblick" group. A catalog
-   marked `complete: false` has not synced yet: read it again before the
-   writes. With neither route, say so in one line: the run ends with the
-   review page and the Markdown files. Read
+   "complete": …}`; other keys are fine) as `DIR/corpus/tags.json`. When
+   both routes are there, write through `ub` (step 8): one command, with
+   the checks and the wait for the hub. A fresh workspace holds two starter
+   pages in an "Uberblick" group and six starter tags (auth, billing, mcp,
+   permissions, rfc, sync); reuse a starter tag only where it fits. A
+   catalog marked `complete: false` has not synced yet: read it again
+   before the writes. A local workspace (`"hubUrl": null` in
+   `.uberblick.json`) syncs with the hub `ub open` serves on this machine:
+   while that is not running, its catalog reads `complete: false` yet is the
+   whole catalog, and the writes wait in the replica until it runs. With neither
+   route, say so in one line: the run ends with the review page and the
+   Markdown files. Read
    the repository's own rules for corpus pages if it has any (AGENTS.md and
    the files it points to); otherwise follow the rules in
    [references/analysis.md](references/analysis.md#writing-pages).
@@ -102,7 +109,10 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    change, open the patch (`git -c gc.auto=0 show SHA`) and the code it
    touched today before calling it a decision. A large docs site is too much
    to read whole: read its navigation, then the pages and code behind each
-   capability, deepest where the tests are.
+   capability, deepest where the tests are. The user documentation is not
+   always Markdown: read a man page (`*.1`), a settings template
+   (`.env.template`, a sample config) or the CLI's help text as the source
+   it is.
 
 4. **Decide** each part as [references/analysis.md](references/analysis.md)
    describes:
@@ -180,7 +190,7 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    tags, and name those choices in the report.
 
 8. **Write to the corpus.** Read the workspace again (step 1) so the writes
-   use only tags that exist, then:
+   use only tags that exist, then, with `ub`:
 
    ```sh
    python3 scripts/intake.py calls DIR/intake.json --tags DIR/corpus/tags.json > DIR/calls.json
