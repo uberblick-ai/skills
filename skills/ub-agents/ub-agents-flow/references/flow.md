@@ -56,7 +56,9 @@ legend
 - Three flows. `overview.flow` is the abstract loop: an `end tone=muted`
   node per way work enters, side by side in the top row (a person's issue, an
   agent's follow-up or sub-issue, a bot's pull request), a `box` per phase
-  named after it with its agents as the caption, and an
+  named after it, its caption saying in a few words what the phase checks and
+  who does it (`"grounds the requirement in the current code, checks the intent
+  is clear and the scope an MVP; an issue review when needed"`), and an
   `end tone=done "Merged"`. No labels, gates, edge labels, rework or stop
   panel: the phase documents carry those. `issue.flow` starts at an
   `end created tone=muted "Issue created"` node with an edge to the entry
