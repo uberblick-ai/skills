@@ -134,6 +134,19 @@ class Scan(unittest.TestCase):
             (repo / "regress").mkdir()
             (repo / "regress" / "copy-mode-search.sh").write_text("#!/bin/sh\n$TEST_TMUX new -d\n")
             (repo / "SYNCING.md").write_text("# Syncing\n\n# Remote\n\nAdd it.\n\n# Merge\n\nMerge it.\n")
+            # vendored code is left out; a test harness's registry counts; a docs mirror is flagged
+            (repo / "vendor" / "pty").mkdir(parents=True)
+            (repo / "vendor" / "pty" / "README.md").write_text("# pty\n")
+            (repo / "vendor" / "pty" / "test_crosscompile.sh").write_text("#!/bin/sh\ngo build\n")
+            (repo / "pkg" / "integration" / "tests" / "commit").mkdir(parents=True)
+            (repo / "pkg" / "integration" / "tests" / "commit" / "amend.go").write_text(
+                'package commit\n\nvar Amend = NewIntegrationTest(NewIntegrationTestArgs{\n'
+                '\tDescription: "Amends the last commit",\n\tRun: func(t *TestDriver) {\n'
+                '\t\tt.Views().Files().\n\t\t\tPress(keys.Amend)\n\t},\n})\n')
+            guide = "# Undo\n\n" + "Press z to undo the last action you took in the program. " * 4 + "\n"
+            for tree in ("docs", "docs-master"):
+                (repo / tree).mkdir()
+                (repo / tree / "Undoing.md").write_text(guide)
             run("add", ".")
             run("commit", "-qm", "Switch to the new renderer")
             out = subprocess.run([sys.executable, str(SCRIPT), "scan", d], capture_output=True, text=True,
@@ -157,13 +170,14 @@ class Scan(unittest.TestCase):
             self.assertEqual(review.returncode, 0, review.stderr)
             self.assertIn('href="#doc-b"', (work / "review.html").read_text())
         self.assertEqual({m["path"]: m["guess"] for m in scan["markdown"]},
-                         {"README.md": "product", "AGENTS.md": "harness", "SYNCING.md": "technical"})
+                         {"README.md": "product", "AGENTS.md": "harness", "SYNCING.md": "technical",
+                          "docs-master/Undoing.md": "product", "docs/Undoing.md": "duplicate"})
         self.assertEqual(next(m for m in scan["markdown"] if m["path"] == "SYNCING.md")["headings"],
                          ["Remote", "Merge"])  # no H2: the H1 sections below the title
-        self.assertEqual(scan["tests"]["cases"], {"e2e": 2, "cli": 1})
-        self.assertEqual(scan["tests"]["files"], 2)
-        self.assertEqual(sum(a["test_lines"] for a in scan["tests"]["areas"]), 4)  # the script's lines count too
-        self.assertEqual(len(scan["tests"]["e2e"]), 2)
+        self.assertEqual(scan["tests"]["cases"], {"e2e": 3, "cli": 1})
+        self.assertEqual(scan["tests"]["files"], 3)
+        self.assertEqual(sum(a["test_lines"] for a in scan["tests"]["areas"]), 13)  # the script's lines count too
+        self.assertIn(["Amends the last commit"], [e["titles"] for e in scan["tests"]["e2e"]])
         self.assertEqual(scan["tests"]["e2e"][0]["titles"], ["signs in", "signs out"])
         self.assertTrue(scan["churn"]["hot_files"])
         self.assertEqual(scan["schema_version"], intake.SCHEMA_VERSION)
@@ -219,8 +233,8 @@ class Plan(unittest.TestCase):
         self.plan["markdown"][0]["sections"] = [{"heading": "Installation", "action": "convert", "doc": "a"},
                                                 {"heading": "Features", "action": "convert", "doc": "a"}]
         _, warnings = intake.validate(self.plan, self.path.parent)
-        self.assertEqual([w for w in warnings if "running" in w],
-                         ["markdown: README.md § Installation is how to get the product running; "
+        self.assertEqual([w for w in warnings if "community material" in w],
+                         ["markdown: README.md § Installation is setup or community material; "
                           "keep it as Markdown and link it from the page"])
 
     def calls(self, *extra, tags=None):

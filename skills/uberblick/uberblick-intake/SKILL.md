@@ -65,18 +65,21 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    holds two starter pages in an "Uberblick" group (older versions spell
    it "Überblick"; go by what `get_sidebar` shows) and six starter tags
    (auth, billing, mcp, permissions, rfc, sync); reuse a starter tag only
-   where it fits. A catalog marked `complete: false` has not synced yet: read it again
-   before the writes. A local workspace (`"hubUrl": null` in
+   where it fits. A catalog marked `complete: false` has not synced yet:
+   read it again before the writes. A local workspace (`"hubUrl": null` in
    `.uberblick.json`) syncs with the hub `ub open` serves on this machine:
    while that is not running, its catalog reads `complete: false` yet is the
-   whole catalog, and the writes wait in the replica until it runs. Leave
-   `ub open` to the person: it serves a web page that keeps running after
-   you finish. With neither
+   whole catalog, answers report the hub as `local` (older servers:
+   `hub-down` with `retry`, which is expected here too), and the writes
+   wait in the replica until it runs. Leave `ub open` to the person: it
+   serves a web page that keeps running after you finish. With neither
    route, say so in one line: the run ends with the review page and the
    Markdown files. Read
    the repository's own rules for corpus pages if it has any (AGENTS.md and
    the files it points to); otherwise follow the rules in
-   [references/analysis.md](references/analysis.md#writing-pages).
+   [references/analysis.md](references/analysis.md#writing-pages). Its
+   rules for code changes (commit, branch, ask before acting) do not apply:
+   an intake changes no file in the repository.
 
 2. **Scan.**
 
@@ -87,12 +90,14 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    ```
 
    `scan` lists every tracked Markdown file with its headings, size, history
-   and a first guess at its class, finds a docs site (mkdocs, Docusaurus,
+   and a first guess at its class (`guess`, with `why`; a file with the
+   same text as an earlier one is `duplicate`), finds a docs site (mkdocs, Docusaurus,
    mdBook and others), walks up to 5,000 commits for the files and areas that
    change most and the commits that changed direction, lists the largest
    changes on the main line over the whole history (a feature landing, a
    rewrite, a migration, merges included), and counts the tests
-   per area and topic, by kind: `e2e` (a browser or device), `e2e-api`,
+   per area and topic, by kind: `e2e` (a browser, a device or a terminal
+   UI driven by key presses), `e2e-api`,
    `cli` (the built command, end to end), `integration`, `unit`. `hot` and
    `tests` print the same facts to read. Kinds, topics and direction changes
    are heuristics from names and messages: facts to check, not findings. It
@@ -125,7 +130,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
      `skip` (generated, fixture, release note fragment, duplicate), with one
      line of why; a folder can be one entry (`docs/reference/**`), a mixed
      file one entry per heading (`sections`). Installation, packages,
-     building and other setup stay as Markdown (the scan lists them as
+     building and other setup, and contributing, sponsors and other
+     community sections, stay as Markdown (the scan lists them as
      `keep_sections`); a page links to them. Nothing converted leaves the
      repository unless a person accepts that change;
    - the capabilities: what a person can do with the product, each with its
@@ -176,7 +182,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    re-read the sources yourself. Fix what does not hold before the review:
    the person approves pages that are already true.
 
-7. **Review.** Build the page and open it:
+7. **Review.** Build the page and open it (leave off `--open` when nobody
+   is there to look):
 
    ```sh
    python3 scripts/intake.py review DIR/intake.json --scan DIR/scan.json --out DIR/review.html --open

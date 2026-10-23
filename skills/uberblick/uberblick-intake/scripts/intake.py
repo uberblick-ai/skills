@@ -37,6 +37,7 @@ SCHEMA_VERSION = 2
 MD_EXT = (".md", ".mdx", ".markdown")
 NOISE_DIRS = re.compile(r"(^|/)(node_modules|vendor|third[_-]party|dist|build|out|\.venv|venv|target|"
                         r"__snapshots__|fixtures?|testdata|test-data|snapshots)(/|$)", re.I)
+VENDORED = re.compile(r"(^|/)(node_modules|vendor|third[_-]party)/", re.I)
 LOCKFILES = re.compile(r"(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|go\.sum|poetry\.lock|"
                        r"uv\.lock|Gemfile\.lock|composer\.lock|bun\.lockb?|mix\.lock|gradle\.lockfile|"
                        r"\.yarn/.*|versions\.lock)$")
@@ -69,16 +70,18 @@ TECH_NAME = re.compile(r"(^|/)(CONTRIBUTING|DEVELOP(MENT|ING)?|HACKING|BUILD(ING
                        r"WRITING[_-]STYLE|DESIGN|MANIFEST|SIGNING|PORTING|BENCHMARKS?|PERFORMANCE|DEBUGGING|"
                        r"TROUBLESHOOTING|SYNC(ING)?|UPSTREAM|VENDOR(ING)?|MAINTAIN(ING|ERS?))[^/]*$|(^|/)(contributing|development|developers?|internals|architecture|"
                        r"dev[-_]?docs|reference|api|self-hosting|hosting|deploy(ment)?|operations|ops|infra|docker|playwright|"
-                       r"cypress|e2e|tests?|scripts|ci|packaging|helm|k8s|kubernetes|\.devcontainer|"
+                       r"cypress|e2e|tests?|scripts|ci|packaging|helm|k8s|kubernetes|\.devcontainer|dev|"
                        r"benchmarks?|maintainers?)/", re.I)
 TECH_HEADINGS = re.compile(r"^(install(ation|ing)?|build(ing)?|dependencies|(binary )?packages|from (release )?(tarball|source|version control)|compil(e|ing)|development|setup|set up|local development|"
                            r"testing|running tests|architecture|internals|api( reference)?|configuration|"
                            r"environment variables|deploy(ment|ing)?|docker|self[- ]host(ing)?|contributing|"
                            r"debugging|release|requirements|prerequisites|options|flags|cli reference)\b", re.I)
-# getting the product running: followed step by step, changes with the build, stays Markdown
+# getting the product running (followed step by step, changes with the build) and community sections: stay Markdown
 SETUP_HEADING = re.compile(r"^(install(ation|ing)?|(binary )?packages|dependencies|requirements|prerequisites|"
                            r"build(ing)?|from (release )?(tarball|source|version control)|compil(e|ing)|"
-                           r"deploy(ment|ing)?|docker|self[- ]host(ing)?|upgrad(e|ing))\b", re.I)
+                           r"deploy(ment|ing)?|docker|self[- ]host(ing)?|upgrad(e|ing)|"
+                           r"contribut(e|ing|ors?)|sponsors?|donat(e|ions?)|backers|support|licen[cs]e|"
+                           r"code of conduct|community|credits|acknowledge?ments?)\b", re.I)
 
 DOC_SITES = [
     ("mkdocs", ["mkdocs.yml", "mkdocs.yaml", "docs/mkdocs.yml"]),
@@ -124,6 +127,9 @@ INTEGRATION_PATH = re.compile(r"(^|/)(integration|integration-tests?|it|api-test
                               r"\.(it|integration)\.[cm]?[jt]sx?$|(^|/)crates/[^/]+/tests/|(^|/)tests/.*\.rs$", re.I)
 VISUAL_PATH = re.compile(r"(^|/)(vrt|visual|screenshots?)(/|$)|visual|\.vrt\.", re.I)
 
+GO_REGISTERED = re.compile(r"^var\s+\w+\s*=\s*New\w*Test\(", re.M)
+GO_DESCRIPTION = re.compile(r"^\s*Description:\s*\"((?:[^\"\\]|\\.)+)\"", re.M)
+GO_SKIP = re.compile(r"^\s*Skip:\s*true", re.M)
 CASE_PATTERNS = {
     "js": re.compile(r"^\s*(?:it|test|scenario)(?:\.(?:only|skip|each\([^)]*\)|concurrent|fixme|fail|slow))*\s*\(\s*"
                      r"([`'\"])(.+?)\1", re.M),
@@ -312,13 +318,18 @@ def workspaces_of(files):
 
 
 def scan_markdown(checkout, files):
-    docs = []
+    docs, seen = [], {}
     for f in files:
-        if not f.lower().endswith(MD_EXT):
+        if not f.lower().endswith(MD_EXT) or VENDORED.search(f):
             continue
         text = read(checkout / f)
         facts = md_facts(f, text)
         cls, why = guess_class(f, facts)
+        digest = hashlib.sha1(text.strip().encode()).hexdigest()
+        if digest in seen and facts["words"] > 20:
+            # a release copy or mirror of another tree: decide the original, then the copy follows it
+            cls, why = "duplicate", f"same text as {seen[digest]}"
+        seen.setdefault(digest, f)
         entry = {"path": f, "bytes": len(text.encode()), **facts, "guess": cls, "why": why}
         setup = [h for h in facts["headings"] if SETUP_HEADING.match(h)]
         if setup and cls == "product":
@@ -446,7 +457,8 @@ SKIPPED = re.compile(r"\b(?:it|test|describe|scenario)\.(?:skip|fixme|todo)\s*\(
 def test_kind(path, text, cases=0, products=()):
     """The test's scope from its path and what it drives. A guess: the plan can override it per topic."""
     browser = re.search(r"\bpage\.(goto|getBy\w+|locator|click|fill)\(|cy\.visit\(|browser\.url\(|"
-                        r"\bdevice\.|onView\(|composeTestRule|XCUIApplication\(", text)
+                        r"\bdevice\.|onView\(|composeTestRule|XCUIApplication\(|"
+                        r"\.\s*(Press(Key|Enter|Escape|Tab)?|SendKeys?)\(", text)
     api_only = re.search(r"from ['\"]@playwright/test['\"]", text) and not browser and "request." in text
     if VISUAL_PATH.search(path) and E2E_PATH.search(path):
         return "e2e-visual"
@@ -512,6 +524,8 @@ def scan_tests(checkout, files, workspaces, products=()):
     test_lines = Counter()
     languages = Counter()
     for f in files:
+        if VENDORED.search(f):
+            continue
         ext = os.path.splitext(f)[1].lower()
         if ext in (".yml", ".yaml") and E2E_PATH.search(f):
             flow = read(checkout / f, 200_000)
@@ -549,6 +563,15 @@ def scan_tests(checkout, files, workspaces, products=()):
                 tests.append({"path": f, "area": area, "topic": topic_of(f, prefix(area)), "kind": "unit",
                               "cases": len(cases), "skipped": len(SKIPPED.findall(text)), "lines": 0,
                               "suites": [], "titles": []})
+        if not is_test and ext == ".go" and GO_REGISTERED.search(text):
+            # tests declared as data and run by a harness (`var X = NewIntegrationTest(...)`): one case each
+            titles = GO_DESCRIPTION.findall(text) or [Path(f).stem.replace("_", " ")]
+            tests.append({"path": f, "area": area, "topic": topic_of(f, prefix(area)),
+                          "kind": test_kind(f, text, len(GO_REGISTERED.findall(text)), products),
+                          "cases": len(GO_REGISTERED.findall(text)), "skipped": len(GO_SKIP.findall(text)),
+                          "lines": n, "suites": [], "titles": [t[:120] for t in titles[:30]]})
+            test_lines[area] += n
+            continue
         if not is_test:
             code_lines[area] += n
             languages[CODE_EXT.get(ext, "other")] += n
@@ -1176,7 +1199,7 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
             if sec.get("action") not in ("convert", "keep", "skip"):
                 errors.append(f"markdown: {m.get('path')} § {sec.get('heading')}: action is convert, keep or skip")
             if sec.get("action") == "convert" and SETUP_HEADING.match(sec.get("heading") or ""):
-                warnings.append(f"markdown: {m.get('path')} § {sec.get('heading')} is how to get the product running; "
+                warnings.append(f"markdown: {m.get('path')} § {sec.get('heading')} is setup or community material; "
                                 f"keep it as Markdown and link it from the page")
             targets = sec.get("doc") if isinstance(sec.get("doc"), list) else [sec.get("doc")]
             for slug in targets if sec.get("action") == "convert" else []:

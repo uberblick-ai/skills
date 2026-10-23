@@ -138,7 +138,7 @@ With *signing order* on, the second signer gets the email only after the first h
 ```
 
 - `title` and `description` are required; the description is for agents
-  (at most 300 characters, search terms welcome), the `tldr` for people (at
+  (at most 300 characters, search terms included), the `tldr` for people (at
   most 300). Both are plain text: backticks and asterisks show literally. `tags` lists tag names from the plan. Decisions have no `tldr`.
 - The body is Uberblick Markdown: headings, paragraphs, flat lists (two
   spaces of indent per level, up to three), quotes, GFM tables, fenced code,

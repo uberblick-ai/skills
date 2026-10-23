@@ -75,4 +75,5 @@ draws every ablauf into `DIR/docs/viz/<slug>-<n>.svg`, which the review page
 shows, and a `.flat.svg` beside each with its light colours written in, for
 an image viewer or rasterizer that ignores CSS variables. It fails on any
 diagnostic with the file and line. Look at each drawing: a clean render can
-still cross edges or crowd labels; fix those too.
+still cross edges or crowd labels; fix those too. With no image viewer or
+rasterizer at hand, say in the report that the drawings were not looked at.

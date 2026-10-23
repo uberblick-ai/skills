@@ -33,6 +33,7 @@ function flat(svg) {
 }
 
 let drawn = 0;
+let flagged = 0;
 let checked = 0;
 for (const doc of docs) {
   const lines = readFileSync(doc, "utf8").split("\n");
@@ -53,16 +54,23 @@ for (const doc of docs) {
       writeFileSync(join(out, `${slug}-${n}.svg`), svg);
       writeFileSync(join(out, `${slug}-${n}.flat.svg`), flat(render(source, { idPrefix: `${slug}-${n}`, scheme: "light" }).svg));
       for (const d of diagnostics) console.error(`${at(d.line)} ablauf ${d.severity}: ${d.message}`);
-      if (diagnostics.length) failed = true;
-      else drawn++;
+      drawn++;
+      if (diagnostics.length) {
+        failed = true;
+        flagged++;
+      }
     } else {
       const { diagnostics } = parseWireframe(source);
       for (const d of diagnostics) console.error(`${at(d.line)} wireframe ${d.severity}: ${d.message}`);
-      if (diagnostics.length) failed = true;
-      else checked++;
+      checked++;
+      if (diagnostics.length) {
+        failed = true;
+        flagged++;
+      }
     }
     i = j;
   }
 }
-console.log(`${drawn} ablauf drawn, ${checked} wireframes clean${failed ? "; fix the diagnostics above" : ""}`);
+console.log(`${drawn} ablauf drawn, ${checked} wireframes checked` +
+  (failed ? `; ${flagged} with diagnostics: fix them above` : ", no diagnostics"));
 process.exitCode = failed ? 1 : 0;
