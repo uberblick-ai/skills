@@ -68,9 +68,8 @@ RFC = re.compile(r"(^|/)(rfcs?|proposals?|design[-_]docs?|specs?|plans?)/", re.I
 TECH_NAME = re.compile(r"(^|/)(CONTRIBUTING|DEVELOP(MENT|ING)?|HACKING|BUILD(ING)?|INSTALL(ATION|ING)?|ARCHITECTURE|INTERNALS|"
                        r"RELEASING|RELEASE|DEPLOY(MENT|ING)?|TESTING|STYLE|CODE[_-]STYLE|CODE[_-]REVIEW[^/]*|"
                        r"WRITING[_-]STYLE|DESIGN|MANIFEST|SIGNING|PORTING|BENCHMARKS?|PERFORMANCE|DEBUGGING|"
-                       r"TROUBLESHOOTING|SYNC(ING)?|UPSTREAM|VENDOR(ING)?|MAINTAIN(ING|ERS?))[^/]*$|(^|/)(contributing|development|developers?|internals|architecture|"
-                       r"dev[-_]?docs|reference|api|self-hosting|hosting|deploy(ment)?|operations|ops|infra|docker|playwright|"
-                       r"cypress|e2e|tests?|scripts|ci|packaging|helm|k8s|kubernetes|\.devcontainer|dev|"
+                       r"TROUBLESHOOTING)[^/]*$|(^|/)(contributing|development|developers?|internals|architecture|"
+                       r"dev[-_]?docs|reference|api|self-hosting|hosting|deploy(ment)?|operations|ops|infra|"
                        r"benchmarks?|maintainers?)/", re.I)
 TECH_HEADINGS = re.compile(r"^(install(ation|ing)?|build(ing)?|dependencies|(binary )?packages|from (release )?(tarball|source|version control)|compil(e|ing)|development|setup|set up|local development|"
                            r"testing|running tests|architecture|internals|api( reference)?|configuration|"
@@ -119,7 +118,6 @@ TEST_FILE = re.compile(
     r"integrationTest|testDebug|testRelease)/.*\.(kt|java)$)|((Test|Tests|Spec|IT)\.(kt|java|swift|cs|php)$)|"
     r"(_spec\.rb$)|((^|/)test/.*_test\.rb$)|(_test\.exs$)|(\.feature$)|((^|/)(Tests?|UITests?)/.*\.swift$)",
     re.I)
-SHELL_TEST = re.compile(r"(^|/)(regress|regressions?|tests?|t)/[^/]+\.sh$|(^|/)test[-_][^/]*\.sh$|_test\.sh$", re.I)
 E2E_PATH = re.compile(r"(^|/)(e2e|e2e-tests?|end-to-end|playwright|cypress|acceptance|androidTest|"
                       r"androidInstrumentedTest|ui-?tests?|browser-tests?|system-tests?|smoke|"
                       r"maestro|detox|journeys?)(/|$)|\.(e2e|cy)\.[cm]?[jt]sx?$|\.feature$|UITests?/", re.I)
@@ -127,9 +125,8 @@ INTEGRATION_PATH = re.compile(r"(^|/)(integration|integration-tests?|it|api-test
                               r"\.(it|integration)\.[cm]?[jt]sx?$|(^|/)crates/[^/]+/tests/|(^|/)tests/.*\.rs$", re.I)
 VISUAL_PATH = re.compile(r"(^|/)(vrt|visual|screenshots?)(/|$)|visual|\.vrt\.", re.I)
 
-GO_REGISTERED = re.compile(r"^var\s+\w+\s*=\s*New\w*Test\(", re.M)
-GO_DESCRIPTION = re.compile(r"^\s*Description:\s*\"((?:[^\"\\]|\\.)+)\"", re.M)
-GO_SKIP = re.compile(r"^\s*Skip:\s*true", re.M)
+# source files below a test folder: where a suite the patterns miss still shows
+TEST_DIR = re.compile(r"(^|/)([^/]*[-_.])?(tests?|specs?|integration|e2e|__tests__)([-_.][^/]*)?/", re.I)
 CASE_PATTERNS = {
     "js": re.compile(r"^\s*(?:it|test|scenario)(?:\.(?:only|skip|each\([^)]*\)|concurrent|fixme|fail|slow))*\s*\(\s*"
                      r"([`'\"])(.+?)\1", re.M),
@@ -457,8 +454,7 @@ SKIPPED = re.compile(r"\b(?:it|test|describe|scenario)\.(?:skip|fixme|todo)\s*\(
 def test_kind(path, text, cases=0, products=()):
     """The test's scope from its path and what it drives. A guess: the plan can override it per topic."""
     browser = re.search(r"\bpage\.(goto|getBy\w+|locator|click|fill)\(|cy\.visit\(|browser\.url\(|"
-                        r"\bdevice\.|onView\(|composeTestRule|XCUIApplication\(|"
-                        r"\.\s*(Press(Key|Enter|Escape|Tab)?|SendKeys?)\(", text)
+                        r"\bdevice\.|onView\(|composeTestRule|XCUIApplication\(", text)
     api_only = re.search(r"from ['\"]@playwright/test['\"]", text) and not browser and "request." in text
     if VISUAL_PATH.search(path) and E2E_PATH.search(path):
         return "e2e-visual"
@@ -522,6 +518,7 @@ def scan_tests(checkout, files, workspaces, products=()):
     tests, configs = [], [f for f in files if E2E_CONFIGS.search(f) and not NOISE_DIRS.search(f)]
     code_lines = Counter()
     test_lines = Counter()
+    uncounted = Counter()
     languages = Counter()
     for f in files:
         if VENDORED.search(f):
@@ -538,17 +535,10 @@ def scan_tests(checkout, files, workspaces, products=()):
                               "titles": [(name.group(1) if name else Path(f).stem.replace("_", " "))[:120]]})
                 test_lines[area_of(f, workspaces)] += flow.count("\n")
                 continue
-        if ext == ".sh" and SHELL_TEST.search(f):
-            # a regression script that runs the built program, as C and Unix projects test: one journey per script
-            script = read(checkout / f, 400_000)
-            stem = re.sub(r"(^test[-_]|[-_]test$)", "", Path(f).stem)
-            tests.append({"path": f, "area": area_of(f, workspaces), "topic": re.split(r"[-_]", stem)[0] or stem,
-                          "kind": "cli", "cases": 1, "skipped": 0, "lines": script.count("\n"), "suites": [],
-                          "titles": [stem.replace("-", " ").replace("_", " ")[:120]]})
-            test_lines[area_of(f, workspaces)] += script.count("\n")
-            continue
         is_test = bool(TEST_FILE.search(f)) and not re.search(r"(^|/)(fixtures?|testdata|__snapshots__|"
                                                             r"node_modules|vendor)/", f, re.I)
+        if not is_test and TEST_DIR.search(f) and (ext in CODE_EXT or ext in (".sh", ".bash")):
+            uncounted[f.rsplit("/", 1)[0]] += 1
         if ext not in CODE_EXT and not f.endswith(".feature"):
             continue
         if NOISE_DIRS.search(f) and not is_test:
@@ -563,15 +553,6 @@ def scan_tests(checkout, files, workspaces, products=()):
                 tests.append({"path": f, "area": area, "topic": topic_of(f, prefix(area)), "kind": "unit",
                               "cases": len(cases), "skipped": len(SKIPPED.findall(text)), "lines": 0,
                               "suites": [], "titles": []})
-        if not is_test and ext == ".go" and GO_REGISTERED.search(text):
-            # tests declared as data and run by a harness (`var X = NewIntegrationTest(...)`): one case each
-            titles = GO_DESCRIPTION.findall(text) or [Path(f).stem.replace("_", " ")]
-            tests.append({"path": f, "area": area, "topic": topic_of(f, prefix(area)),
-                          "kind": test_kind(f, text, len(GO_REGISTERED.findall(text)), products),
-                          "cases": len(GO_REGISTERED.findall(text)), "skipped": len(GO_SKIP.findall(text)),
-                          "lines": n, "suites": [], "titles": [t[:120] for t in titles[:30]]})
-            test_lines[area] += n
-            continue
         if not is_test:
             code_lines[area] += n
             languages[CODE_EXT.get(ext, "other")] += n
@@ -620,6 +601,9 @@ def scan_tests(checkout, files, workspaces, products=()):
         "areas": [a for a in areas if a["cases"] or a["code_lines"] > 200][:40],
         "topics": topics[:60],
         "e2e": journeys(tests),
+        # source files below test folders that hold no case the patterns know: a suite declared another way
+        "uncounted": {"files": sum(uncounted.values()),
+                      "folders": [{"path": d, "files": n} for d, n in uncounted.most_common(8)]},
         "languages": dict(languages.most_common(8)),
     }
 
@@ -802,6 +786,15 @@ def cmd_tests(args):
     print(f"{t['total_cases']} test declarations (a static count) in {t['files']} files, {t.get('skipped', 0)} "
           f"marked skipped: " +
           ", ".join(f"{k} {v}" for k, v in sorted(t["cases"].items(), key=lambda kv: -kv[1])))
+    un = t.get("uncounted") or {}
+    code = sum(a["code_lines"] for a in t["areas"])
+    if un.get("files", 0) >= max(10, t["files"]):  # more than helpers and page objects
+        print(f"Not counted: {un['files']} files below test folders hold no test the scan recognises "
+              f"({', '.join(f'{x['path']} {x['files']}' for x in un['folders'][:4])}); the suite may declare its "
+              f"tests another way: read them and count")
+    elif code > 5000 and t["total_cases"] * 2000 < code:
+        print(f"Few tests for {code} code lines: the suite may live where, or in a form, the scan does not "
+              f"recognise; look for it and count")
     print("Browser or device test configuration: " + (", ".join(t["frameworks"]) or "none found") +
           (f"; {t['cases'].get('cli', 0)} cases run the built command" if t["cases"].get("cli") else ""))
     print("\nArea, cases (share), by kind, test lines per code line:")

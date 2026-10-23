@@ -157,9 +157,14 @@ page says, not to describe the tests.
 - `intake.py tests` gives cases per area and topic by kind, and the e2e
   journeys with their suite and test titles. `e2e` and `cli` tests run the
   product as a person does: in a command-line product the `cli` tests are
-  its journeys. The kinds and counts are heuristics from file names and
+  its journeys, and any test that drives the product's own interface the
+  way a person does is a journey, whatever its folder is called. The kinds and counts are heuristics from file names and
   imports: read a few files per kind before relying on them, and write
-  "about" in `tests.summary`.
+  "about" in `tests.summary`. When `tests` says files below test folders
+  were not counted, or that the code has few tests, the suite is declared
+  in a way the scan does not know: find it, count its cases from the code,
+  set their kinds in `tests.focus` and say how you counted in
+  `tests.summary`.
 - An area with many journeys gets the scenarios a person needs, one H3 per
   scenario, in the product's words: "Sign in order", backed by
   `document-flow: signs in sequence`. Read the test to get the behaviour

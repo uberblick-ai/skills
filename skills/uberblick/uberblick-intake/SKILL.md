@@ -96,8 +96,7 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    change most and the commits that changed direction, lists the largest
    changes on the main line over the whole history (a feature landing, a
    rewrite, a migration, merges included), and counts the tests
-   per area and topic, by kind: `e2e` (a browser, a device or a terminal
-   UI driven by key presses), `e2e-api`,
+   per area and topic, by kind: `e2e` (a browser or device), `e2e-api`,
    `cli` (the built command, end to end), `integration`, `unit`. `hot` and
    `tests` print the same facts to read. Kinds, topics and direction changes
    are heuristics from names and messages: facts to check, not findings. It
