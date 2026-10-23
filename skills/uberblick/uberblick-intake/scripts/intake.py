@@ -744,11 +744,15 @@ def load_scan(path):
 
 def local_workspace(checkout):
     """True when the checkout is bound to a local-only workspace, whose catalog is whole although it reads
-    `complete: false` while no hub runs."""
-    try:
-        return json.loads((Path(checkout) / ".uberblick.json").read_text(encoding="utf-8")).get("hubUrl") is None
-    except (OSError, ValueError):
-        return False
+    `complete: false` while no hub runs. The binding is the nearest `.uberblick.json` at or above the checkout."""
+    for d in [Path(checkout).resolve(), *Path(checkout).resolve().parents]:
+        try:
+            return json.loads((d / ".uberblick.json").read_text(encoding="utf-8")).get("hubUrl") is None
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError):
+            return False
+    return False
 
 
 def cmd_hot(args):
@@ -1013,7 +1017,7 @@ def load(path):
 
 MAX_DESCRIPTION = 300
 MAX_TLDR = 300
-HISTORY = re.compile(r"\b(planned|will (be|soon|eventually)|coming soon|roadmap|todo|tbd|not yet|"
+HISTORY = re.compile(r"\b(planned|will (be|soon|eventually)|coming soon|roadmap|(?-i:TODO|TBD)|not yet|"
                      r"since (v?\d|version|release|the (v?\d|version|release|last|first))|as of (v?\d|version|20\d\d)|in v\d+(\.\d+)*|deprecated in|"
                      r"(added|introduced|removed|changed) in (v?\d|version)|"
                      r"20\d\d-\d\d-\d\d|github\.com/[^\s)]+/(pull|issues)/\d+|(^|\s)#\d{2,}\b)", re.I)

@@ -142,7 +142,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
      matters more than finishing fast;
    - the decision records: existing ADRs, and the few history candidates
      that meet all four criteria, `open` unless a person decided them;
-   - 2 to 12 tags, reusing the catalog's names first;
+   - 2 to 12 tags, reusing the catalog's names first (the plan proposes
+     them even when the catalog lacks them and the writes leave them off);
    - where a drawing helps: ablauf for a flow with branches or phases,
      wireframe for a screen the page describes;
    - the sidebar: 3 to 6 groups, one per domain, topic or responsibility;

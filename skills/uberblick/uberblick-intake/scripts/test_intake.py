@@ -89,6 +89,16 @@ class Blocks(unittest.TestCase):
 
 
 class Scan(unittest.TestCase):
+    def test_local_binding_from_a_parent(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / ".uberblick.json").write_text(json.dumps({"hubUrl": None}))
+            (Path(d) / "repo").mkdir()
+            self.assertTrue(intake.local_workspace(Path(d) / "repo"))
+            (Path(d) / "repo" / ".uberblick.json").write_text(json.dumps({"hubUrl": "wss://hub.example"}))
+            self.assertFalse(intake.local_workspace(Path(d) / "repo"))  # the nearest binding wins
+        self.assertFalse(intake.HISTORY.search("stop on an edit todo"))  # a product word, not a note
+        self.assertTrue(intake.HISTORY.search("TODO: describe exports"))
+
     def test_guesses(self):
         facts = {"headings": ["Status", "Context", "Decision"], "fences": {}, "words": 300}
         self.assertEqual(intake.guess_class("docs/notes/0003-sync.md", facts)[0], "decision")
