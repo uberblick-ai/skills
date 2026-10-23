@@ -61,7 +61,7 @@ into corpus writes.
     "summary": "One or two sentences: where the suite's weight is and what that says about the product.",
     "focus": [
       {"topic": "document-flow", "cases": 46, "kind": "e2e", "doc": "send-a-document"},
-      {"topic": "api", "cases": 521, "kind": "e2e", "doc": null}
+      {"topic": "api", "cases": 521, "kind": "e2e", "doc": null, "why": "The public API; its reference stays Markdown."}
     ]
   },
   "repo_changes": [

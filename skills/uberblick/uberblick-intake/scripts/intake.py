@@ -522,6 +522,7 @@ def scan_tests(checkout, files, workspaces, products=()):
                 tests.append({"path": f, "area": area_of(f, workspaces), "topic": topic_of(f), "kind": "e2e",
                               "cases": 1, "skipped": 0, "lines": flow.count("\n"), "suites": [],
                               "titles": [(name.group(1) if name else Path(f).stem.replace("_", " "))[:120]]})
+                test_lines[area_of(f, workspaces)] += flow.count("\n")
                 continue
         if ext == ".sh" and SHELL_TEST.search(f):
             # a regression script that runs the built program, as C and Unix projects test: one journey per script
@@ -530,6 +531,7 @@ def scan_tests(checkout, files, workspaces, products=()):
             tests.append({"path": f, "area": area_of(f, workspaces), "topic": re.split(r"[-_]", stem)[0] or stem,
                           "kind": "cli", "cases": 1, "skipped": 0, "lines": script.count("\n"), "suites": [],
                           "titles": [stem.replace("-", " ").replace("_", " ")[:120]]})
+            test_lines[area_of(f, workspaces)] += script.count("\n")
             continue
         is_test = bool(TEST_FILE.search(f)) and not re.search(r"(^|/)(fixtures?|testdata|__snapshots__|"
                                                             r"node_modules|vendor)/", f, re.I)
@@ -584,17 +586,43 @@ def scan_tests(checkout, files, workspaces, products=()):
         a["share"] = round(a["cases"] / total_cases, 3) if total_cases else 0
     return {
         "method": "static: test declarations matched by pattern per language, not a runner's count; parameterised "
-                  "and generated tests count once, skipped ones are included and counted in `skipped`",
+                  "and generated tests count once, skipped ones are included and counted in `skipped`; a shell "
+                  "regression script counts as one case and skips inside it are not seen; Rust tests inside source "
+                  "files count as cases but their lines stay code",
         "frameworks": configs[:12],
         "cases": dict(by_kind),
         "skipped": sum(t.get("skipped", 0) for t in tests),
         "total_cases": total_cases,
-        "files": len([t for t in tests if t["lines"]]),
+        "files": len({t["path"] for t in tests}),
         "areas": [a for a in areas if a["cases"] or a["code_lines"] > 200][:40],
         "topics": topics[:60],
-        "e2e": sorted((t for t in tests if t["kind"] in JOURNEY_KINDS), key=lambda t: -t["cases"])[:150],
+        "e2e": journeys(tests),
         "languages": dict(languages.most_common(8)),
     }
+
+
+def journeys(tests, detailed=150):
+    """Every journey file, most cases first, then longest; past the first `detailed` only path and counts."""
+    out = sorted((t for t in tests if t["kind"] in JOURNEY_KINDS), key=lambda t: (-t["cases"], -t["lines"], t["path"]))
+    return out[:detailed] + [{**t, "suites": [], "titles": []} for t in out[detailed:]]
+
+
+def brief(text):
+    """A write's answer without the echoed content: its ids, revision and delivery state."""
+    try:
+        answer = json.loads(text)
+    except ValueError:
+        return text[:300]
+    if not isinstance(answer, dict):
+        return text[:300]
+    keep = {k: v for k, v in answer.items() if k in ("uuid", "rev", "revision", "applied", "synced", "durable")}
+    if isinstance(answer.get("block"), dict):
+        keep["block"] = answer["block"].get("id")
+    if isinstance(answer.get("blocks"), list):
+        keep["blocks"] = len(answer["blocks"])
+    if isinstance(answer.get("hub"), dict):
+        keep["hub"] = answer["hub"].get("status")
+    return keep
 
 
 def remote_of(checkout):
@@ -762,7 +790,7 @@ def cmd_tests(args):
     print("\nTopics, journeys first (e2e, e2e-visual and cli cases count as journeys):")
     for x in t.get("topics", [])[:args.topics]:
         print(f"  {x['topic']}: {x['cases']} (" + ", ".join(f"{k} {x[k]}" for k in KINDS if x.get(k)) + ")")
-    print("\nJourneys (largest files first; suites, then test titles):")
+    print(f"\nJourneys ({len(t['e2e'])} files, most cases first, then longest; suites, then test titles):")
     shown = printed = 0
     for e in t["e2e"]:
         if shown >= args.titles:
@@ -773,7 +801,7 @@ def cmd_tests(args):
             shown += 1
         printed += 1
     if t["e2e"][printed:]:
-        print("\nMore journey files (their titles are in scan.json under tests.e2e):")
+        print("\nMore journey files (scan.json keeps titles for the first 150 under tests.e2e; open the rest):")
         for e in t["e2e"][printed:]:
             print(f"  {e['path']} ({e['cases']}, {e['kind']})")
 
@@ -1203,7 +1231,7 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
     if not plan.get("capabilities"):
         warnings.append("capabilities: none listed; map what a person can do with the product to the pages first")
     groups = plan["sidebar"].get("groups", [])
-    if not 2 <= len(groups) <= 7:
+    if not 3 <= len(groups) <= 6:
         warnings.append(f"sidebar: {len(groups)} groups; 3 to 6 read best")
     pinned = Counter()
     kinds = {d.get("slug"): d.get("kind", "page") for d in plan["documents"]}
@@ -1457,6 +1485,8 @@ SETTLE_POLL = 2
 # The pages and group `ub workspace create` seeds; fixed ids, so every workspace's starter is recognisable.
 STARTER_DOCS = ("2d56b281-5614-43bd-b8d8-edd1c270a85a", "d7ddd0b1-fee9-4ef0-8f1e-42882f925c31")
 STARTER_GROUP = "57a27e40-0000-4000-8000-000000000001"
+# refusals of the starter cleanup that mean the page or group is already gone
+ABSENT = re.compile(r"\b\w*not_found\b|not found|not pinned", re.I)
 
 
 READ_TOOLS = {"list_tags", "get_sidebar", "list_docs", "search", "get_doc", "export_markdown", "get_help",
@@ -1564,8 +1594,14 @@ def cmd_ub(args):
                     text = call(c["tool"], arguments)
             except (RuntimeError, KeyError, ValueError) as e:
                 if c.get("optional"):
-                    # starter cleanup: a page already unpinned or a group already gone is the state we want
+                    # starter cleanup: a page already unpinned or a group already gone is the state we want;
+                    # any other refusal is kept as a warning, since the cleanup did not happen
+                    absent = bool(ABSENT.search(str(e)))
                     applied["results"].append({"tool": c["tool"], "text": f"optional, not applied: {e}"})
+                    if not absent:
+                        applied.setdefault("warnings", []).append(f"{c['tool']} {json.dumps(c.get('arguments'))}: {e}")
+                        print(f"ub: optional {c['tool']} refused for a reason other than an absent page or group, "
+                              f"so the starter cleanup is incomplete: {e}", file=sys.stderr)
                     applied["done"] = i + 1
                     save()
                     continue
@@ -1578,8 +1614,8 @@ def cmd_ub(args):
                     failed = f"call {i + 1}: create_doc answered without a uuid: {text[:200]}"
                     break
             applied["results"].append({"tool": c["tool"], "slug": c.get("slug"),
-                                       "text": text if c["tool"] not in ("create_doc", "insert_block", "pin_doc")
-                                       else None})
+                                       **({"answer": brief(text)} if c["tool"] in ("create_doc", "insert_block",
+                                                                                    "pin_doc") else {"text": text})})
             applied["done"] = i + 1
             save()
             print(f"{i + 1}/{len(calls)} {c['tool']} {c.get('slug') or ''}".rstrip(), file=sys.stderr)
@@ -1595,6 +1631,7 @@ def cmd_ub(args):
                 status = json.loads(call("sync_status", {}))
             except (ValueError, RuntimeError):
                 break
+            applied["sync"] = status
             if not status.get("unsyncedChanges") and not status.get("inFlightUpdates"):
                 break
             if (status.get("hub") or {}).get("status") == "hub-down":
@@ -1776,10 +1813,11 @@ def cmd_review(args):
                        f"<td>{inline_html(m.get('why', ''))}</td></tr>")
         for sec in m.get("sections", []):
             into = sec.get("doc")
+            into = ", ".join(f'<a href="#doc-{esc(x)}">{esc(title_of.get(x, x))}</a>'
+                             for x in ([into] if isinstance(into, str) else into or []))
             md_rows.append(f"<tr class='{esc(sec.get('action'))}'><td>§ {esc(sec.get('heading', ''))}</td><td></td>"
                            f"<td><span class='act {esc(sec.get('action'))}'>{esc(sec.get('action'))}</span></td><td>"
-                           + (f'<a href="#doc-{esc(into)}">{esc(title_of.get(into, into))}</a>' if into else "")
-                           + f"</td><td>{inline_html(sec.get('why', ''))}</td></tr>")
+                           f"{into}</td><td>{inline_html(sec.get('why', ''))}</td></tr>")
     cap_rows = []
     for c in plan.get("capabilities", []):
         doc = c.get("doc")

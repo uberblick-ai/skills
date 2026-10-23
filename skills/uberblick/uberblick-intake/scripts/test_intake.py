@@ -139,11 +139,31 @@ class Scan(unittest.TestCase):
             out = subprocess.run([sys.executable, str(SCRIPT), "scan", d], capture_output=True, text=True,
                                  check=True).stdout
             scan = json.loads(out)
+            # the review page shows a section that feeds several documents
+            work = Path(d) / ".intake"
+            (work / "docs").mkdir(parents=True)
+            (work / "scan.json").write_text(out)
+            for slug in "ab":
+                (work / "docs" / f"{slug}.md").write_text(doc(slug.upper(), "Text.\n", tldr="T."))
+            (work / "intake.json").write_text(json.dumps({
+                "schema_version": 1, "repository": "o/n", "ref": "abc", "summary": "S", "tags": [],
+                "sidebar": {"groups": [{"name": "Start", "docs": ["a", "b"]}]},
+                "documents": [{"slug": s, "file": f"docs/{s}.md", "sources": ["README.md"]} for s in "ab"],
+                "markdown": [{"path": "README.md", "action": "convert", "doc": ["a", "b"], "why": "x",
+                              "sections": [{"heading": "Usage", "action": "convert", "doc": ["a", "b"]}]}]}))
+            review = subprocess.run([sys.executable, str(SCRIPT), "review", str(work / "intake.json"), "--scan",
+                                     str(work / "scan.json"), "--out", str(work / "review.html")],
+                                    capture_output=True, text=True)
+            self.assertEqual(review.returncode, 0, review.stderr)
+            self.assertIn('href="#doc-b"', (work / "review.html").read_text())
         self.assertEqual({m["path"]: m["guess"] for m in scan["markdown"]},
                          {"README.md": "product", "AGENTS.md": "harness", "SYNCING.md": "technical"})
         self.assertEqual(next(m for m in scan["markdown"] if m["path"] == "SYNCING.md")["headings"],
                          ["Remote", "Merge"])  # no H2: the H1 sections below the title
         self.assertEqual(scan["tests"]["cases"], {"e2e": 2, "cli": 1})
+        self.assertEqual(scan["tests"]["files"], 2)
+        self.assertEqual(sum(a["test_lines"] for a in scan["tests"]["areas"]), 4)  # the script's lines count too
+        self.assertEqual(len(scan["tests"]["e2e"]), 2)
         self.assertEqual(scan["tests"]["e2e"][0]["titles"], ["signs in", "signs out"])
         self.assertTrue(scan["churn"]["hot_files"])
         self.assertEqual(scan["schema_version"], intake.SCHEMA_VERSION)
@@ -309,6 +329,8 @@ class Plan(unittest.TestCase):
         applied = json.loads((base / "applied.json").read_text())
         self.assertEqual(applied["done"], len(calls))
         self.assertEqual(applied["adopted"], ["a"])
+        self.assertNotIn("warnings", applied)  # "not pinned": the cleanup's state already holds
+        self.assertIn({"tool": "create_doc", "slug": "b", "answer": {"uuid": "uuid-Beta"}}, applied["results"])
 
     def test_one_block_at_a_time(self):
         calls, _ = self.calls()

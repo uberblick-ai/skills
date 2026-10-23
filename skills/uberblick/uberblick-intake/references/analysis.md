@@ -142,9 +142,10 @@ constrains work beyond one change; and future work needs the trade-off.
   `https://github.com/OWNER/NAME/commit/<full sha>`) as a link whose text is
   `#123` or the short sha, and a person decides it in Uberblick. Only an accepted ADR or a person's
   answer on record (`answer: {who, when, where}`) is `decided`.
-- Open the patch (`git show SHA`), not only its message, and confirm the
-  current code still follows it. A choice that is a setting a person changes
-  (a default model, a theme) is a page fact, not a decision.
+- Open the patch (`git show SHA`; for a merge, `git diff SHA^1 SHA`, since
+  `git show` hides most of a merged branch), not only its message, and
+  confirm the current code still follows it. A choice that is a setting a
+  person changes (a default model, a theme) is a page fact, not a decision.
 - Each record's `related` names the page it constrains, so the page shows it.
 - List every candidate considered in `candidates`, with why it was left out.
 

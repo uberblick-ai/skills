@@ -69,7 +69,9 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    before the writes. A local workspace (`"hubUrl": null` in
    `.uberblick.json`) syncs with the hub `ub open` serves on this machine:
    while that is not running, its catalog reads `complete: false` yet is the
-   whole catalog, and the writes wait in the replica until it runs. With neither
+   whole catalog, and the writes wait in the replica until it runs. Leave
+   `ub open` to the person: it serves a web page that keeps running after
+   you finish. With neither
    route, say so in one line: the run ends with the review page and the
    Markdown files. Read
    the repository's own rules for corpus pages if it has any (AGENTS.md and
@@ -253,7 +255,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    pass `--applied DIR/applied.json` (or `DIR/uuids.json`) to `calls`, with
    a new `--out` for `ub` (or a new uuids file for `resolve`): documents
    already written are not created again, only given their tags with
-   `set_metadata` and pinned.
+   `set_metadata` and pinned; their content stays as written. To change a
+   written page, edit it with the MCP tools (`get_help` topic `edit_doc`).
 
 9. **Record the grounding.** When the `uberblick-corpus-sync` skill is
    installed, run it in apply mode on the pages just written (their UUIDs
