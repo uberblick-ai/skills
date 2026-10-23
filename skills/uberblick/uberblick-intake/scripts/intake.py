@@ -1632,9 +1632,15 @@ def cmd_ub(args):
             except (ValueError, RuntimeError):
                 break
             applied["sync"] = status
+            hub = (status.get("hub") or {}).get("status")
+            if hub == "local":
+                # newer servers: a local workspace without `ub open` has nothing pending
+                print(f"ub: the writes are applied in this local workspace; `ub open` in {checkout} serves them to "
+                      f"the web editor", file=sys.stderr)
+                break
             if not status.get("unsyncedChanges") and not status.get("inFlightUpdates"):
                 break
-            if (status.get("hub") or {}).get("status") == "hub-down":
+            if hub == "hub-down":
                 if local_workspace(checkout):
                     print(f"ub: the writes are applied in this local workspace; `ub open` in {checkout} serves its "
                           f"hub, and they sync while it runs", file=sys.stderr)
