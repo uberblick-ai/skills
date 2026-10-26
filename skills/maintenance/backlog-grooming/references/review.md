@@ -63,6 +63,31 @@ below the issue with that color; omit only the established default (often medium
 Do not assume a shared default across repositories. Do not guess colors or infer
 priority from effort. Without readable label metadata, show plain priority text.
 
+## Milestone load
+
+A milestone's weight is the sum of its issues' estimates: delivered, still
+open and proposed. Take the weights and cap from the repository's instructions
+when they define them (another scale, such as story points, maps one to one);
+otherwise use XS 0, S 1, M 2, L 3, XL 5, a cap of 25 and a ceiling of twice
+the cap. Record them in `capacity` with their source. Defaults are a starting
+point, not a finding: when the maintainer asks, measure recent milestones and
+show the range before suggesting another cap.
+
+Delivered issues seldom carry a current estimate. Use a recorded estimate
+where one exists. Otherwise size the work the issue actually delivered, for
+example from the lines its merged PRs changed, mapped to the scale so the
+spread resembles the repository's own estimates, and say so in the milestone's
+`basis`. Issues closed as not planned or duplicate weigh nothing. If neither
+is available, give only the open weight and disclose it.
+
+Weigh what a milestone holds, not what the review touched: open issues outside
+the reviewed items go into `other_open_weight`. Over the cap, recommend moving
+issues into a new or later milestone with its own goal, smallest coherent cut
+first, rather than adding more. A bounded exception needs a reason anyone can
+check: one outcome, such as a refactor or migration, that delivers nothing
+half done. Size alone, or several unrelated themes, is not one. Creating a
+milestone and moving issues are mutations; ask in chat first.
+
 ## Optional ub-agents integration
 
 Only inspect ub-agents when the repository uses it. Read its actual config,
