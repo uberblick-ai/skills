@@ -46,7 +46,7 @@ instructions govern authority, trusted inputs and issue mutations.
    blockers. When a product corpus exists, discover and read its relevant live
    documents and decisions; code proves implementation, not intended behavior.
 
-3. **Challenge each issue.** Recommend keep, narrow, combine, defer, close
+3. **Challenge each issue, oldest first.** Recommend keep, narrow, combine, defer, close
    delivered, close unnecessary, or track only. Ask what observable user,
    technical or maintenance benefit remains, what has already landed, and
    whether a smaller outcome would suffice. Do not repeat implementation
@@ -55,6 +55,10 @@ instructions govern authority, trusted inputs and issue mutations.
    recorded blockers from proposed prerequisites and mere file overlap.
    Read and use a repository's effort scale when available; disclose unavailable
    fields. Estimates are judgments, not commitments or invented time savings.
+   Record each issue's `created_at`; the report lists the oldest first. Mark
+   an issue `no_change` when it is clear, kept as it is, already in the right
+   milestone and a good fit, with nothing to decide. It then moves from the
+   table to a short "No change required" list near the end of the report.
 
 4. **Keep milestones bounded.** Whenever you recommend placing issues in a
    milestone, or the scope already has milestones, weigh each affected one:

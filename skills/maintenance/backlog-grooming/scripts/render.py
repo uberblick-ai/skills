@@ -36,6 +36,7 @@ def timestamp(value):
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("Timestamps must include a timezone")
+    return parsed
 
 def validate(data):
     if data.get('schema_version') != 1:
@@ -99,6 +100,14 @@ def validate(data):
                 text(blocker, k)
             if blocker.get('url'):
                 url(blocker['url'])
+        if 'created_at' in item:
+            timestamp(text(item, 'created_at'))
+        if item.get('no_change'):
+            placement = item.get('placement') or {}
+            if item['treatment'] != 'keep' or item['state'] == 'closed' or challenge['status'] == 'pending':
+                raise ValueError(f'{ident}: no_change is only for an open item kept as it is')
+            if 'proposed' in placement and placement['proposed'] != placement.get('current'):
+                raise ValueError(f'{ident}: no_change cannot move the item to another milestone')
     validate_milestones(data)
     return data
 
@@ -211,6 +220,21 @@ def load_section(data):
 def visible(item):
     return item['state'] != 'closed' or bool(item.get('open_prs') or item.get('highlight_reason'))
 
+def oldest_first(items):
+    """Oldest created first; items without created_at follow in input order."""
+    return sorted(items, key=lambda i: (0, timestamp(i['created_at']).timestamp()) if i.get('created_at') else (1, 0))
+
+def no_change_section(items, data):
+    if not items:
+        return ''
+    titles = {str(m['id']): m['title'] for m in data.get('milestones', [])}
+    rows = []
+    for item in items:
+        current = (item.get('placement') or {}).get('current')
+        where = f' · {esc(titles[str(current)])}' if current is not None else ''
+        rows.append(f'<li>{link(item["id"], item.get("url"))} <strong>{esc(item["title"])}</strong> · {esc(item["effort"]["estimate"])}{where}<small>{esc(item["summary"])}</small></li>')
+    return f'<section><h2>No change required</h2><p>Clear, kept as they are and in the right place. Nothing to decide.</p><ul class="fit">{"".join(rows)}</ul></section>'
+
 def priority_badge(priority):
     if not priority or priority.get('is_default'):
         return ''
@@ -226,7 +250,9 @@ def priority_badge(priority):
 
 def render(data):
     validate(data)
-    items = sorted((i for i in data['items'] if visible(i)), key=lambda i: (i.get('priority') or {}).get('rank', 2))
+    shown = oldest_first(i for i in data['items'] if visible(i))
+    items = [i for i in shown if not i.get('no_change')]
+    fits = [i for i in shown if i.get('no_change')]
     has_loop = any(i.get('loop') is not None for i in items)
     rows = []
     for item in items:
@@ -265,13 +291,13 @@ def render(data):
     limitations = ''.join(f'<li>{esc(x)}</li>' for x in data.get('limitations', []))
     challenge = data.get('challenge_summary')
     load, overloaded = load_section(data)
-    tail = load
+    tail = load + no_change_section(fits, data)
     tail += f'<section><h2>Independent challenge</h2><p>{esc(challenge)}</p></section>' if challenge else ''
     tail += f'<section><h2>Grounding &amp; limitations</h2><p>{esc(baselines)}</p><ul>{limitations}</ul></section>'
     if has_loop:
         tail += '<p class="note">Loop eligibility is a checked snapshot, not a guarantee of the next dispatch. Reasons and configuration sources are in the evidence.</p>'
     template = (Path(__file__).resolve().parent.parent/'assets'/'report.html').read_text(encoding='utf-8')
-    values = {'SCOPE':esc(scope['label']), 'DATE':esc(data['reviewed_at']), 'GOAL':esc(scope['goal']), 'COUNT':str(len(items)), 'OVERLOAD':f' · {overloaded} milestone{"s" if overloaded != 1 else ""} over the cap' if overloaded else '', 'LOOP_HEADER':'Loop / blockers' if has_loop else 'Blocked by', 'ROWS':''.join(rows), 'TAIL':tail}
+    values = {'SCOPE':esc(scope['label']), 'DATE':esc(data['reviewed_at']), 'GOAL':esc(scope['goal']), 'COUNT':str(len(items)), 'COUNT_NOTES':(f' · {len(fits)} with no change required' if fits else '') + (f' · {overloaded} milestone{"s" if overloaded != 1 else ""} over the cap' if overloaded else ''), 'LOOP_HEADER':'Loop / blockers' if has_loop else 'Blocked by', 'ROWS':''.join(rows), 'TAIL':tail}
     # One pass: text in source data must never become another template directive.
     return re.sub(r'@@([A-Z_]+)@@', lambda m: values[m.group(1)], template)
 

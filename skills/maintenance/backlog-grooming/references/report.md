@@ -7,6 +7,10 @@ without a clear user, technical or maintenance benefit.” Do not add introducto
 opinion panels or chat-confirmation banners. Decisions are asked in chat, never
 through report controls.
 
+Rows run from the oldest issue to the newest, by `created_at`; items without
+it follow in input order. Priority shows on the row but does not reorder it.
+Items marked `no_change` leave the table for a "No change required" list below
+the Milestone load table: id, title, estimate and milestone, with the summary.
 The columns are Issue, Treatment, Est., Loop / blockers (or Blocked by without
 a loop), and Finding & evidence. Evidence gets the widest right-hand column and
 expands inline. Use words only for Yes / No / Blocked; put a short reason below
@@ -73,12 +77,16 @@ Each item requires:
 | `challenge` | `{status, summary?}`; status `completed`, `not-needed`, `pending`, or `unavailable`; summary required except for not-needed |
 
 Optional per-item fields:
+- `created_at`: when the issue was opened, a timestamp with timezone; sets
+  the order.
+- `no_change`: true for an open item kept as it is, in its current milestone,
+  with nothing to decide. Only valid with treatment `keep`, without a move in
+  `placement` and without a pending challenge.
 - `url`: absolute HTTP(S) tracker URL when one exists. Do not invent links for
   drafts, offline backlogs or tracker items without a permalink.
 - `workflow_labels`: string array. Do not repeat priority here.
-- `priority`: `{name, rank, color?, is_default?}`. Lower numeric rank sorts first;
-  use the repository's ranking, normalizing its default to 2 (the rank for omitted
-  priority). `color` is the tracker's six-digit hex color without `#`, never a
+- `priority`: `{name, rank, color?, is_default?}`. Rank is numeric, lower
+  is more urgent; use the repository's ranking, normalizing its default to 2. `color` is the tracker's six-digit hex color without `#`, never a
   guessed semantic color. Set `is_default` only from the repository policy or an
   explicit display preference. Medium is hidden where it is the established
   default, not because of its spelling; an unknown priority is not a default.

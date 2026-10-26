@@ -31,11 +31,10 @@ class ReportTests(unittest.TestCase):
         closed['highlight_reason'] = 'Closure conflicts with an undelivered guarantee.'
         self.assertIn(closed['highlight_reason'], render.render(self.data))
 
-    def test_priority_sort_color_and_default_suppression(self):
+    def test_priority_color_and_default_suppression(self):
         self.data['items'].reverse()
         self.data['items'][0]['priority'] = {'name':'priority:medium','rank':2,'color':'FBCA04','is_default':True}
         page = render.render(self.data)
-        self.assertLess(page.index('Install at the project root'), page.index('Improve the sync summary'))
         self.assertIn('background:#D93F0B', page)
         self.assertNotIn('priority:medium', page)
 
@@ -142,6 +141,39 @@ class ReportTests(unittest.TestCase):
         with self.assertRaises(ValueError): render.render(self.data)
         self.data['items'][0].pop('placement')
         self.data['capacity'] = {'cap': 10, 'ceiling': 5}
+        with self.assertRaises(ValueError): render.render(self.data)
+
+    def test_oldest_issue_first_whatever_the_priority(self):
+        page = render.render(self.data)
+        self.assertLess(page.index('Improve the sync summary'), page.index('Install at the project root'))
+        self.data['items'][2]['created_at'] = '2026-10-01T00:00:00Z'
+        page = render.render(self.data)
+        self.assertLess(page.index('Install at the project root'), page.index('Improve the sync summary'))
+        for item in self.data['items']: item.pop('created_at')
+        page = render.render(self.data)
+        self.assertLess(page.index('Install at the project root'), page.index('Improve the sync summary'))
+        self.data['items'][0]['created_at'] = '2026-09-14'
+        with self.assertRaises(ValueError): render.render(self.data)
+
+    def test_no_change_items_leave_the_table_for_the_list(self):
+        item = self.data['items'][0]
+        item['no_change'] = True
+        page = render.render(self.data)
+        table, rest = page.split('</table>', 1)
+        self.assertNotIn(item['title'], table)
+        self.assertIn('No change required', rest)
+        self.assertLess(rest.index(item['title']), rest.index('Grounding'))
+        self.assertIn('1.4: Reliable sync', rest.split('No change required')[1])
+        self.assertIn('2 items in the decision table · 1 with no change required', page)
+        self.assertEqual(render.milestone_load(self.data)[0][0]['after'], 25)
+
+    def test_no_change_only_for_items_kept_in_place(self):
+        item = self.data['items'][0]
+        item['no_change'] = True
+        item['placement'] = {'current': '14', 'proposed': None}
+        with self.assertRaises(ValueError): render.render(self.data)
+        item['placement'] = {'current': '14'}
+        item['treatment'] = 'narrow'
         with self.assertRaises(ValueError): render.render(self.data)
 
 if __name__ == '__main__': unittest.main()
