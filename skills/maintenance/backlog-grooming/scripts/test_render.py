@@ -104,4 +104,44 @@ class ReportTests(unittest.TestCase):
         self.assertIn('Prüfung — schneller…', page)
         self.assertLess(page.index('<meta charset="utf-8">'), page.index('<title>'))
 
+    def test_milestone_load_counts_delivered_open_and_proposed(self):
+        load, = render.milestone_load(self.data)[0]
+        self.assertEqual((load['before'], load['after'], load['added'], load['status']), (24, 25, 1, 'Within cap'))
+        page = render.render(self.data)
+        self.assertIn('24 → 25', page)
+        self.assertNotIn('over the cap', page)
+
+    def test_milestone_over_cap_is_overloaded_unless_bounded(self):
+        self.data['items'][2]['effort']['estimate'] = 'XL'
+        load, = render.milestone_load(self.data)[0]
+        self.assertEqual((load['after'], load['status']), (29, 'Overloaded'))
+        self.assertIn('1 milestone over the cap', render.render(self.data))
+        self.data['milestones'][0]['bounded'] = 'One storage refactor; not useful half done.'
+        self.assertEqual(render.milestone_load(self.data)[0][0]['status'], 'Bounded exception')
+        self.data['milestones'][0]['delivered_weight'] = 60
+        self.assertEqual(render.milestone_load(self.data)[0][0]['status'], 'Overloaded')
+
+    def test_capacity_is_configurable_and_closing_issues_leave(self):
+        self.data['capacity'] = {'weights': {'1': 1, '3': 3, '8': 8}, 'cap': 10}
+        for item in self.data['items']: item['effort']['estimate'] = '3'
+        self.data['milestones'][0]['delivered_weight'] = 0
+        load, = render.milestone_load(self.data)[0]
+        self.assertEqual((load['before'], load['after']), (5, 8))
+        self.data['items'][0]['treatment'] = 'close unnecessary'
+        self.assertEqual(render.milestone_load(self.data)[0][0]['after'], 5)
+        self.data['items'][0]['effort']['estimate'] = 'huge'
+        self.data['items'][0]['treatment'] = 'keep'
+        load, = render.milestone_load(self.data)[0]
+        self.assertEqual((load['after'], load['unknown']), (5, 1))
+
+    def test_milestone_load_is_optional_and_references_are_checked(self):
+        del self.data['milestones']
+        for item in self.data['items']: item.pop('placement', None)
+        self.assertNotIn('Milestone load', render.render(self.data))
+        self.data['items'][0]['placement'] = {'proposed': 'missing'}
+        with self.assertRaises(ValueError): render.render(self.data)
+        self.data['items'][0].pop('placement')
+        self.data['capacity'] = {'cap': 10, 'ceiling': 5}
+        with self.assertRaises(ValueError): render.render(self.data)
+
 if __name__ == '__main__': unittest.main()

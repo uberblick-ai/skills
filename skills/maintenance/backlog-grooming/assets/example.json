@@ -38,6 +38,9 @@
         "name": "priority:high",
         "rank": 1,
         "color": "D93F0B"
+      },
+      "placement": {
+        "current": "14"
       }
     },
     {
@@ -103,7 +106,33 @@
           "source": "native",
           "url": "https://github.com/example/app/issues/4"
         }
-      ]
+      ],
+      "placement": {
+        "current": null,
+        "proposed": "14"
+      }
+    }
+  ],
+  "capacity": {
+    "weights": {
+      "XS": 0,
+      "S": 1,
+      "M": 2,
+      "L": 3,
+      "XL": 5
+    },
+    "cap": 25,
+    "ceiling": 50,
+    "source": "Fictional example: skill defaults"
+  },
+  "milestones": [
+    {
+      "id": "14",
+      "title": "1.4: Reliable sync",
+      "url": "https://github.com/example/app/milestone/14",
+      "delivered_weight": 21,
+      "other_open_weight": 2,
+      "basis": "Illustrative: delivered weight from recorded estimates of closed issues."
     }
   ],
   "challenge_summary": "One illustrative independent challenge retained delivered last-sync behavior.",

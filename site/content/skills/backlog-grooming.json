@@ -11,6 +11,7 @@
     "Agrees on the goal and scope in chat: the whole repository, a milestone or a project, and whether you want a smaller backlog or a named outcome sooner.",
     "Reads every open issue in scope, linked deliveries, blockers and, where one exists, the product corpus.",
     "Challenges each issue and recommends one treatment with a tentative effort estimate.",
+    "Weighs each milestone by its estimates and flags those over the cap (25 by default), proposing a new milestone instead of piling more issues in.",
     "Asks a separate agent to argue against the large or disputed calls, and labels the rows it challenged.",
     "Settles material choices with you in chat, then renders <em>Less work. More value.</em> as HTML and JSON.",
     "Changes issues only when you ask. A dry run changes nothing."
