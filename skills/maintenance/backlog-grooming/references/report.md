@@ -12,7 +12,9 @@ it follow in input order. Priority shows on the row but does not reorder it.
 Items marked `no_change` that carry a workflow label leave the table for a "No
 change required" list below the Milestone load table; without a label they
 stay in the table, since they still need one. The list shows id, title,
-estimate and milestone, with the summary. The columns are Issue, Treatment, Est., Loop / blockers (or Blocked by without
+estimate and milestone, with the summary.
+
+The columns are Issue, Treatment, Est., Loop / blockers (or Blocked by without
 a loop), and Finding & evidence. Evidence gets the widest right-hand column and
 expands inline. Use words only for Yes / No / Blocked; put a short reason below
 No or Blocked. Show explicit non-default priority using its tracker label color
