@@ -158,6 +158,9 @@ class ReportTests(unittest.TestCase):
     def test_no_change_items_leave_the_table_for_the_list(self):
         item = self.data['items'][0]
         item['no_change'] = True
+        table = render.render(self.data).split('</table>', 1)[0]
+        self.assertIn(item['title'], table)
+        item['workflow_labels'] = ['ready']
         page = render.render(self.data)
         table, rest = page.split('</table>', 1)
         self.assertNotIn(item['title'], table)

@@ -9,9 +9,10 @@ through report controls.
 
 Rows run from the oldest issue to the newest, by `created_at`; items without
 it follow in input order. Priority shows on the row but does not reorder it.
-Items marked `no_change` leave the table for a "No change required" list below
-the Milestone load table: id, title, estimate and milestone, with the summary.
-The columns are Issue, Treatment, Est., Loop / blockers (or Blocked by without
+Items marked `no_change` that carry a workflow label leave the table for a "No
+change required" list below the Milestone load table; without a label they
+stay in the table, since they still need one. The list shows id, title,
+estimate and milestone, with the summary. The columns are Issue, Treatment, Est., Loop / blockers (or Blocked by without
 a loop), and Finding & evidence. Evidence gets the widest right-hand column and
 expands inline. Use words only for Yes / No / Blocked; put a short reason below
 No or Blocked. Show explicit non-default priority using its tracker label color
@@ -81,7 +82,8 @@ Optional per-item fields:
   the order.
 - `no_change`: true for an open item kept as it is, in its current milestone,
   with nothing to decide. Only valid with treatment `keep`, without a move in
-  `placement` and without a pending challenge.
+  `placement` and without a pending challenge. Listed apart only when the item
+  has `workflow_labels`.
 - `url`: absolute HTTP(S) tracker URL when one exists. Do not invent links for
   drafts, offline backlogs or tracker items without a permalink.
 - `workflow_labels`: string array. Do not repeat priority here.

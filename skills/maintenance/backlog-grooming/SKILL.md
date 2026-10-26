@@ -58,7 +58,8 @@ instructions govern authority, trusted inputs and issue mutations.
    Record each issue's `created_at`; the report lists the oldest first. Mark
    an issue `no_change` when it is clear, kept as it is, already in the right
    milestone and a good fit, with nothing to decide. It then moves from the
-   table to a short "No change required" list near the end of the report.
+   table to a short "No change required" list near the end of the report,
+   unless it has no workflow label: such an issue stays in the table.
 
 4. **Keep milestones bounded.** Whenever you recommend placing issues in a
    milestone, or the scope already has milestones, weigh each affected one:

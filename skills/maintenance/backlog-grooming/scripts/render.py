@@ -251,8 +251,9 @@ def priority_badge(priority):
 def render(data):
     validate(data)
     shown = oldest_first(i for i in data['items'] if visible(i))
-    items = [i for i in shown if not i.get('no_change')]
-    fits = [i for i in shown if i.get('no_change')]
+    # An issue without a workflow label still needs one, so it stays a decision.
+    fits = [i for i in shown if i.get('no_change') and i.get('workflow_labels')]
+    items = [i for i in shown if i not in fits]
     has_loop = any(i.get('loop') is not None for i in items)
     rows = []
     for item in items:
