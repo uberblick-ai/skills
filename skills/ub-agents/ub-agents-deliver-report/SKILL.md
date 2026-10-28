@@ -17,7 +17,7 @@ compatibility: >-
   the page.
 metadata:
   author: uberblick-ai
-  version: "1.9"
+  version: "1.10"
 ---
 
 # Deliver report
@@ -110,9 +110,15 @@ classes, the page and the records are defined in
    adding prose. Reuse a lesson id the registry already has. Write `cost`
    with dates ("5 runs on 11 October"), never "today": a lesson can stay a
    recommended action for 14 days. Then search the repositories' issues and PRs for
-   one that addresses each proposed lesson, new or registered: mark it
+   one that addresses each proposed lesson, new or registered, so nobody
+   builds a change that is already under way: open ones, drafts included,
+   and ones merged or closed in the last 30 days (`gh pr list` and `gh issue
+   list` with `--state all --search "WORDS updated:>=DAY"`). Read the close
+   ones; only one that makes this change counts. Mark the lesson
    `tracked` with `addressed_by` when an open one does, `applied` when a merged
-   one did. Keep `addressed_as` (`implemented` or `planned`) from the registry;
+   one did. One closed without merging means someone tried and stopped: keep
+   the lesson only if its reason for closing does not rule the change out,
+   and name it with why it closed in `change`. Keep `addressed_as` (`implemented` or `planned`) from the registry;
    the session that discussed an action card writes it. Rank up to five still-proposed lessons from the last 14 days,
    most runs saved first, as the day's `actions`; re-propose an older lesson
    when the day shows it again.
@@ -191,9 +197,12 @@ classes, the page and the records are defined in
    after the heading and delete the items past the fifth; when
    `changelog_new` is 0, leave it as it is. A document whose heading still
    reads "Actions" gets it renamed. Each action is a card whose "Discuss in
-   Claude Code" button opens a new session with a prompt to discuss the
-   change before making it. When that discussion settles on applying it,
-   the prompt has the session strike the card through, with the pull
+   Claude Code" button opens a new session with a prompt that first looks
+   for issues and pull requests already on the change, drafts and the last
+   30 days' merged or closed ones included, then discusses it before making
+   it. When that discussion settles on applying it, or finds an open one,
+   the prompt has the session strike the card through as soon as the pull
+   request (a draft counts) or issue exists, with the pull
    request or issue as a GitHub pill below, and mark the lesson `tracked`,
    so `document` keeps it that way until the change is done. If Uberblick refuses a card with `invalid_card`
    (0.4.3 has no card buttons), run `document` again with `--no-button`. The

@@ -305,13 +305,18 @@ bottom:
    `claude://code/new?q=PROMPT`, which opens a new session in the Claude
    desktop app with the prompt filled in, not sent. The prompt names the
    repository, the document and the day the lesson was last proposed, the
-   change, where it lives and its evidence, and asks for a plan before any change; the link
+   change, where it lives and its evidence. It first has the session search
+   the issues and pull requests for the same change, open ones (drafts
+   included) and ones merged or closed in the last 30 days, and work from one
+   that covers it instead of starting another; then it asks for a plan before any change; the link
    cannot select a repository by name, only a local folder, so the prompt
    names it. Card prose takes only http(s) links, so the link is a `button:`
    line, which Uberblick reads from the release after 0.4.3; `--no-button`
    leaves it out for older versions. When the discussion settles on applying
-   the lesson, the prompt asks that session to mark it once a pull request
-   implements it or an issue plans it: replace the card with the struck one,
+   the lesson, or the search finds an open pull request or issue already making
+   it, the prompt asks that session to mark it as soon as a pull request
+   implements it (a draft counts) or an issue plans it, so a second reader
+   sees it taken: replace the card with the struck one,
    then set the lesson's record in `lessons` to `tracked`, with
    `addressed_by` and `addressed_as`, so later reports keep it struck
    through.
