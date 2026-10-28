@@ -332,7 +332,10 @@ for line in sys.stdin:
         prompt = unquote(url.split("q=", 1)[1])
         for part in ("CI Health Report for o/r (Uberblick document d0c)", "Recommendation: Shard e2e.",
                      "Evidence: It ends 8 min after the rest.\nWhere: CI / e2e\nCost: about 90 min of waiting a day\n"
-                     "Issues and PRs: o/r#7, o/r#8, o/tools#3\n\nLet's discuss", "Look at ci.yml.", "wait for my go-ahead"):
+                     "Issues and PRs: o/r#7, o/r#8, o/tools#3\n\nFirst check that nobody is on it already: search o/r's",
+                     "open ones (drafts included) and ones merged or closed in the last 30 days",
+                     "already: search o/r's issues and pull requests for the same change", "\n\nLet's discuss",
+                     "Look at ci.yml.", "wait for my go-ahead", "as soon as a pull request implements it (a draft counts)"):
             self.assertIn(part, prompt)
         records = {"records": [{"id": r["id"], "value": r["value"]} for r in reversed(stored["replaceRecords"])]}
         self.assertEqual([b["text"] for b in ci.cards(data, records, doc="d0c")], [b["text"] for b in blocks],
@@ -355,8 +358,10 @@ for line in sys.stdin:
                          "footer: Planned in [o/r#12](https://github.com/o/r/issues/12).\n\n"
                          "~~It ends 8 min after the rest.~~", "struck through, no button, the issue as a pill below")
         self.assertEqual(marked[1]["text"], blocks[1]["text"], "the others stay as they are")
-        kept = ci.records(data, (), actions[:1], applied)
-        self.assertNotIn("applied", [b["collection"] for b in kept], "a kept action keeps its mark")
+        kept = ci.records(data, (), actions[:1], applied)[-1]
+        self.assertEqual((kept["collection"], kept["upsert"]), ("applied", applied["records"]),
+                         "a kept action keeps its mark, and one the run found is stored")
+        self.assertNotIn("deleteRecords", kept)
         dropped = ci.records(data, (), actions[1:], applied)[-1]
         self.assertEqual((dropped["collection"], dropped["deleteRecords"]), ("applied", ["shard-e2e"]),
                          "a dropped action's mark goes with it")

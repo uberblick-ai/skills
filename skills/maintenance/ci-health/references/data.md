@@ -208,13 +208,17 @@ card with none of the three has no footer), and a "Discuss in Claude Code" butto
 which opens a new session in the Claude desktop app with the prompt filled
 in, not sent. The prompt names the repository and the document, the day of
 the data, the recommendation, its evidence, where, cost and issues and
-PRs, and `check`, and asks for a plan
+PRs, and `check`. It first has the session search the repository's
+issues and pull requests for the same change, open ones (drafts included)
+and ones merged or closed in the last 30 days, and work from one that
+covers it instead of starting another; then it asks for a plan
 before any change; the link cannot select a repository by name, only a
 local folder, so the prompt names it.
 
-When the discussion settles on applying the action, the prompt asks that
-session to mark it once a pull request implements it or an issue plans
-it. The card's title and why are struck through, the button goes, and a
+When the discussion settles on applying the action, or the search finds
+an open pull request or issue already making it, the prompt asks that
+session to mark it as soon as a pull request implements it (a draft
+counts) or an issue plans it, so a second reader sees it taken. The card's title and why are struck through, the button goes, and a
 footer that is not struck through replaces the evidence and names the change, for example `Planned
 in [acme/app#212](https://github.com/acme/app/issues/212).` A link whose
 text is the `owner/repo#number` reference and whose target is its GitHub
@@ -223,8 +227,10 @@ the action's id in the `applied` collection, `{"status": "planned", "ref":
 "acme/app#212", "url": "https://github.com/acme/app/issues/212", "day":
 "2026-10-15"}`, with `status` `implemented` or `planned`. It is a separate
 collection because every run replaces `actions`, and a person's decision
-must survive that. `cards --applied` renders a marked action the same way,
-and `records --applied` deletes the marks of actions no longer kept.
+must survive that. A run marks an action the same way when its own search
+finds an open pull request or issue making it. `cards --applied` renders a
+marked action the same way, and `records --applied` writes the marks of
+kept actions and deletes those of actions no longer kept.
 
 Card prose takes only http(s) links,
 so the link is a `button:` line, which Uberblick reads from the release
@@ -240,7 +246,7 @@ document; with `--doc UUID` it prints the full `update_data` arguments:
 | `days` | `2026-10-09` | day, every field above |
 | `incidents` | `2026-10-04/acme-app-189` | incident |
 | `actions` | `split-browser-e2e` | current action; `--actions` replaces the set |
-| `applied` | `split-browser-e2e` | action being applied, written by the session that discussed it |
+| `applied` | `split-browser-e2e` | action being applied, written by the session that discussed it or the run that found its pull request or issue |
 
 The schema lists every job field seen, so a batch that adds a job widens it;
 earlier records stay valid. A day takes about 400 bytes, so a year stays far

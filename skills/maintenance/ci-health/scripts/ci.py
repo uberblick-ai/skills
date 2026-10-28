@@ -718,8 +718,9 @@ def action_rows(data, actions):
 
 def records(data, incidents=(), actions=None, applied=()):
     """One update_data batch: the repository's days, keyed by day so a refresh replaces them, any incidents, and
-    with `actions` the current top actions, which replace the ones before. `applied` marks of actions no longer
-    kept are deleted."""
+    with `actions` the current top actions, which replace the ones before. `applied` marks of kept actions are
+    written, so one this run found (an open pull request or issue already on the action) is stored with the rest,
+    and marks of actions no longer kept are deleted."""
     if any(i.get("repo") not in (None, data["repo"]) for i in incidents):
         sys.exit(f"incidents: every incident must be for {data['repo']}, the repository of this document")
     batch = [{"collection": "days", "schema": schema(data),
@@ -729,9 +730,12 @@ def records(data, incidents=(), actions=None, applied=()):
     if actions is not None:
         rows = action_rows(data, actions)
         batch.append({"collection": "actions", "schema": ACTIONS, "replaceRecords": rows})
-        gone = sorted(set(applied_marks(applied)) - {r["id"] for r in rows})
-        if gone:
-            batch.append({"collection": "applied", "schema": APPLIED, "deleteRecords": gone})
+        marks = applied_marks(applied)
+        kept = [{"id": r["id"], "value": marks[r["id"]]} for r in rows if r["id"] in marks]
+        gone = sorted(set(marks) - {r["id"] for r in rows})
+        if kept or gone:
+            batch.append({"collection": "applied", "schema": APPLIED, **({"upsert": kept} if kept else {}),
+                          **({"deleteRecords": gone} if gone else {})})
     return batch
 
 
@@ -787,6 +791,11 @@ SKILL_URL = "https://skills.uberblick.ai/skills/ci-health"
 # `button:` line, which Uberblick reads from the release after 0.4.3.
 CLAUDE_CODE = "claude://code/new?q="
 CHECK = "Check it against the repository: is it sound, what would it change, what are the risks, and is there a simpler way?"
+# Two people can open the same card hours apart, so the session looks for work already under way before planning any.
+ALREADY = ("First check that nobody is on it already: search {repo}'s issues and pull requests for the same change, "
+           "open ones (drafts included) and ones merged or closed in the last 30 days. If one covers it, link it and "
+           "say where it stands, and we work from it instead of starting another; an open one means the card is "
+           "marked with it now, as below.")
 
 
 def one_line(text):
@@ -828,8 +837,8 @@ def applied_card(a, status, ref, url):
 
 def discuss_link(data, action, doc=None):
     """A link that opens Claude Code with a prompt to discuss the action before changing anything: the repository,
-    the recommendation, its evidence, what to check, then a plan. If the outcome is to apply it, the prompt says how
-    to mark the card. The prompt is filled in, not sent."""
+    the recommendation, its evidence, a search for issues and pull requests already on it, what to check, then a
+    plan. If the outcome is to apply it, the prompt says how to mark the card. The prompt is filled in, not sent."""
     source = f"the CI Health Report for {data['repo']}" + (f" (Uberblick document {doc})" if doc else "")
     where = f"Uberblick document {doc}" if doc else f'the "CI Health Report" document for {data["repo"]} in Uberblick'
     card = applied_card(action, "STATUS", "REF", "URL")
@@ -840,10 +849,11 @@ def discuss_link(data, action, doc=None):
               "value": {"status": "implemented or planned", "ref": "REF", "url": "URL", "day": "YYYY-MM-DD"}}
     prompt = (f"From {source}, data as of {action.get('updated') or data['last']}:\n\n"
               f"Recommendation: {action['title'].rstrip('.')}.\nEvidence: {action['why']}\n{details}\n"
+              f"{ALREADY.format(repo=data['repo'])}\n\n"
               f"Let's discuss this before changing anything. {action.get('check') or CHECK} "
               "Then propose a plan and wait for my go-ahead.\n\n"
-              "If we decide to apply it, mark the card once a pull request implements it or an issue plans it, so the "
-              f"report shows it is being handled. In {where}, replace the card titled \"{one_line(action['title'])}\" "
+              "If we decide to apply it, mark the card as soon as a pull request implements it (a draft counts) or an "
+              f"issue plans it, so the report shows it is being handled before anyone else starts. In {where}, replace the card titled \"{one_line(action['title'])}\" "
               "under Recommended Actions with this one (delete_block, then insert_block in the same place, since "
               "edit_block cannot change formatting). STATUS is Implemented or Planned, REF is owner/repo#number and "
               "URL its GitHub address; keeping the reference as the link text makes it show as a GitHub pill:\n\n"
@@ -1029,7 +1039,8 @@ def main():
     r.add_argument("data")
     r.add_argument("incidents", nargs="?")
     r.add_argument("--actions", help="the current top actions, which replace the stored ones")
-    r.add_argument("--applied", help="the stored applied collection from get_data; marks of dropped actions go")
+    r.add_argument("--applied", help="the applied collection from get_data, plus marks this run found; marks of "
+                                     "kept actions are written, those of dropped actions go")
     r.add_argument("--doc", help="the document's uuid: print update_data arguments instead of the operations alone")
     n = commands.add_parser("create")
     n.add_argument("data")
