@@ -20,7 +20,7 @@ compatibility: >-
   the `ub` command; without either the skill prints a table.
 metadata:
   author: uberblick-ai
-  version: "1.7"
+  version: "1.8"
 ---
 
 # CI health
@@ -209,7 +209,31 @@ the document layout are in [references/data.md](references/data.md).
    mark is being handled: someone discussed it and opened the pull request
    or issue the mark names. Keep it, struck through, in its place while that
    pull request or issue is open, and drop it once it is merged or closed;
-   the days after show what it changed. Without `DOC`, nothing keeps
+   the days after show what it changed.
+
+   Then check, for each action you keep or add, that nobody is on it
+   already: a card can wait for days, and two people reading it should not
+   both build the change.
+
+   ```sh
+   gh pr list --repo REPO --state all --search "WORDS updated:>=DAY" --json number,title,state,isDraft,url
+   gh issue list --repo REPO --state all --search "WORDS updated:>=DAY" --json number,title,state,url
+   ```
+
+   `WORDS` are a few words of the change and the job or workflow file it
+   touches, `DAY` 30 days before the last day; `--state all` lists open ones,
+   drafts included, and merged or closed ones. Read the ones that look
+   close: only one that makes this change counts, not one that touches the
+   same job for another reason. An open pull request or issue that makes
+   it is someone handling it: with `DOC`, add a mark for the action to the
+   records of `DIR/applied.json` unless it has one, `{"id": ID, "value":
+   {"status": "implemented", "ref": "owner/name#N", "url": URL, "day":
+   TODAY}}`, `planned` for an issue, giving a new action an `id` in
+   lowercase words joined by hyphens; without `DOC`, name it with the
+   action. A merged one means the action is done: drop it. One closed
+   without merging means someone tried and stopped: keep the action only
+   while its evidence holds, with that reference in `evidence` and why it
+   closed in `why`. Without `DOC`, nothing keeps
    actions between runs, so choose them afresh. Fewer than three is fine,
    and no action goes without data behind it. Write `DIR/actions.json` in
    rank order, in the shape `references/data.md` gives: `area`, `title`
@@ -240,8 +264,10 @@ the document layout are in [references/data.md](references/data.md).
    python3 scripts/ci.py records DIR/data.json [DIR/incidents.json] --actions DIR/actions.json [--applied DIR/applied.json] --doc DOC > DIR/update.json
    ```
 
-   `DIR/applied.json` is the `applied` collection as `get_data` returned
-   it; the marks of dropped actions are deleted with them.
+   `DIR/applied.json` is the `applied` collection, read again with
+   `get_data` just before so a mark another session set meanwhile is kept,
+   plus the marks step 7 added; `records` writes the marks of kept actions
+   and deletes those of dropped ones.
 
    Pass it as the arguments of `update_data`, then read the area summary
    back with `get_data` and confirm `days`, `incidents` and `actions` are
@@ -262,9 +288,12 @@ the document layout are in [references/data.md](references/data.md).
     `create` writes below it. Each card's footer carries the evidence:
     where the change applies, what the problem costs and the issues and PRs
     behind it, as GitHub pills. Its button opens a new Claude Code
-    session with a prompt to discuss the action before changing anything.
-    When that discussion settles on applying it, the prompt has the session
-    strike the card through, with the pull request or issue as a GitHub
+    session with a prompt that first looks for issues and pull requests
+    already on the action, drafts and the last 30 days' merged or closed
+    ones included, then discusses it before changing anything.
+    When that discussion settles on applying it, or finds an open one, the
+    prompt has the session strike the card through as soon as the pull
+    request (a draft counts) or issue exists, with the pull request or issue as a GitHub
     pill below, and store an `applied` mark, so `cards` keeps it that way. If
     Uberblick refuses a card with `invalid_card` (0.4.3 has no card buttons),
     run `cards` or `create` again with `--no-button`. Leave every
@@ -276,7 +305,7 @@ the document layout are in [references/data.md](references/data.md).
 
 11. Reply with the total wall time (the 7-day median with its ± and the
     P95), the share of failed runs, the tests, the test ratio and any
-    coverage, any new incident with the job that moved, the actions with which are new or dropped, and
+    coverage, any new incident with the job that moved, the actions with which are new or dropped and which someone is already on, and
     where the days were stored, naming the days filled in when there was
     more than one. When the skill runs on a schedule with
     nothing new, a single line is enough.
