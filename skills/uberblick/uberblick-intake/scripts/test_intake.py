@@ -1,0 +1,507 @@
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import intake  # noqa: E402
+
+SCRIPT = Path(__file__).resolve().parent / "intake.py"
+
+
+# A stand-in for `ub mcp serve`: answers the tools intake.py calls and logs each call. The workspace already has
+# a page titled Alpha, and the first unpin_doc fails as it does when the page is unpinned already. A second argument
+# makes it an older ub (`one`) or a newer one that creates tags and checks drawings (`new`).
+FAKE_UB = r"""
+import json, sys
+log = open(sys.argv[1], "a")
+mode = sys.argv[2] if len(sys.argv) > 2 else ""
+one_block = mode == "one"  # an older ub: insert_block takes one block after a block id
+unpins, blocks = 0, 0
+for line in sys.stdin:
+    m = json.loads(line)
+    if "id" not in m:
+        continue
+    result = {}
+    if m["method"] == "tools/list" and one_block:
+        result = {"tools": [{"name": "insert_block", "inputSchema": {"properties": {"uuid": {}, "type": {}}}}]}
+    if m["method"] == "tools/list" and mode == "new":
+        result = {"tools": [{"name": "create_tag"}, {"name": "insert_block"}]}
+    if m["method"] == "tools/call":
+        name, args = m["params"]["name"], m["params"]["arguments"]
+        log.write(json.dumps({"name": name, "arguments": args}) + "\n"); log.flush()
+        error, text = False, "{}"
+        if name == "list_docs":
+            docs = [] if args.get("kind") else [{"title": "Alpha", "uuid": "uuid-existing"}]
+            text = json.dumps({"workspace": "w", "docs": docs})
+        elif name == "create_doc":
+            text = json.dumps({"uuid": "uuid-" + args["title"]})
+        elif name == "get_sidebar":
+            text = json.dumps({"groups": []})
+        elif name == "insert_block" and mode == "new":
+            drawing = {"status": "errors", "diagnostics": [{"line": 2, "severity": "error", "message": "Unknown line"}]}
+            text = json.dumps({"uuid": args["uuid"], "blocks": [{"id": "x1", "rev": 1, "drawing": drawing},
+                                                                 {"id": "x2", "rev": 1, "drawing": {"status": "clean", "diagnostics": []}}]})
+        elif name == "insert_block" and one_block:
+            blocks += 1
+            error = "blocks" in args
+            text = json.dumps({"block": {"id": f"b{blocks}"}})
+        elif name == "unpin_doc":
+            unpins += 1
+            error, text = unpins == 1, "not pinned"
+        result = {"content": [{"type": "text", "text": text}], "isError": error}
+    print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": result}), flush=True)
+"""
+
+
+def doc(title, body, **meta):
+    lines = ["---", f"title: {title}", f"description: {meta.pop('description', 'About ' + title)}"]
+    for k, v in meta.items():
+        lines.append(f"{k}: [{', '.join(v)}]" if isinstance(v, list) else f"{k}: {v}")
+    return "\n".join(lines + ["---", "", body])
+
+
+class Blocks(unittest.TestCase):
+    def test_blocks_and_inline_runs(self):
+        meta, blocks, refs = intake.parse_doc(doc("Send", (
+            "Upload a **PDF** and see [Roles](ref:roles).\n\n"
+            "## Recipients\n\n"
+            "- one `-p`\n  - nested\n1. first\n\n"
+            "| a | b |\n| --- | --- |\n| [x](ref:other) | 2 |\n\n"
+            "```ablauf\nflow v0\n```\n\n"
+            "```terminal\n$ glow\n```\n\n"
+            ":::card\ntitle: Hi\n\nBody\n:::\n\n> quoted\n> more\n"), tags=["signing"], tldr="Short."))
+        self.assertEqual(meta["tags"], ["signing"])
+        self.assertEqual(refs, {"roles", "other"})
+        types = [b["type"] for b in blocks]
+        self.assertEqual(types, ["paragraph", "heading", "list-item", "list-item", "list-item", "table", "code",
+                                 "terminal", "card", "quote"])
+        para = blocks[0]
+        self.assertEqual(para["text"], "Upload a PDF and see Roles.")
+        self.assertIn({"text": "PDF", "marks": {"bold": True}}, para["inline"])
+        self.assertIn({"text": "Roles", "marks": {"docLink": {"$doc": "roles"}}}, para["inline"])
+        self.assertEqual(blocks[3]["indent"], 1)
+        self.assertEqual(blocks[4]["list"], "ordered")
+        self.assertEqual(blocks[6]["language"], "ablauf")
+        self.assertEqual(blocks[9]["text"], "quoted more")
+
+    def test_refusals(self):
+        with self.assertRaisesRegex(ValueError, "mermaid"):
+            intake.parse_doc(doc("A", "```mermaid\ngraph TD\n```\n"))
+        with self.assertRaisesRegex(ValueError, "neither https"):
+            intake.parse_doc(doc("A", "See [the code](src/main.go).\n"))
+        with self.assertRaisesRegex(ValueError, "frontmatter"):
+            intake.parse_doc("# No frontmatter\n")
+
+
+class Scan(unittest.TestCase):
+    def test_local_binding_from_a_parent(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / ".uberblick.json").write_text(json.dumps({"hubUrl": None}))
+            (Path(d) / "repo").mkdir()
+            self.assertTrue(intake.local_workspace(Path(d) / "repo"))
+            (Path(d) / "repo" / ".uberblick.json").write_text(json.dumps({"hubUrl": "wss://hub.example"}))
+            self.assertFalse(intake.local_workspace(Path(d) / "repo"))  # the nearest binding wins
+        self.assertFalse(intake.HISTORY.search("stop on an edit todo"))  # a product word, not a note
+        self.assertTrue(intake.HISTORY.search("TODO: describe exports"))
+
+    def test_guesses(self):
+        facts = {"headings": ["Status", "Context", "Decision"], "fences": {}, "words": 300}
+        self.assertEqual(intake.guess_class("docs/notes/0003-sync.md", facts)[0], "decision")
+        plain = {"headings": ["What is it?"], "fences": {}, "words": 500}
+        self.assertEqual(intake.guess_class("AGENTS.md", plain)[0], "harness")
+        self.assertEqual(intake.guess_class(".github/ISSUE_TEMPLATE/bug.md", plain)[0], "harness")
+        self.assertEqual(intake.guess_class("CONTRIBUTING.md", plain)[0], "technical")
+        self.assertEqual(intake.guess_class("upcoming-release-notes/123.md", plain)[0], "changelog")
+        self.assertEqual(intake.guess_class("docs/guide.md", plain)[0], "product")
+
+    def test_test_kinds_and_topics(self):
+        self.assertEqual(intake.test_kind("packages/app-tests/e2e/admin/search.spec.ts", ""), "e2e")
+        self.assertEqual(intake.test_kind("tests/test_cli.py", "CliRunner()\nCliRunner()\n", 4), "cli")
+        self.assertEqual(intake.test_kind("tests/test_models.py", "def test_a(): pass", 1), "unit")
+        self.assertEqual(intake.topic_of("packages/app-tests/e2e/admin/search.spec.ts"), "admin")
+        self.assertEqual(intake.topic_of("tests/test_cli.py"), "cli")
+        self.assertEqual(intake.topic_of("crates/uv/tests/it/lock.rs"), "lock")
+        self.assertEqual(intake.topic_of("mail/protocols/imap/src/test/java/com/fsck/k9/mail/store/imap/A.kt"), "imap")
+        self.assertEqual(intake.topic_of("legacy/core/src/test/java/com/fsck/k9/B.kt"), "core")
+
+    def test_generated_and_usage_fences(self):
+        gen = intake.md_facts("docs/cli.md", "<!-- This file is generated by cog. Do not edit. -->\n# CLI\n")
+        self.assertEqual(intake.guess_class("docs/cli.md", gen)[0], "generated")
+        readme = intake.md_facts("README.md", "<!-- [[[cog\n# Not a title\n]]] -->\n# Tool\n\n" +
+                                 "```bash\ntool run\n```\n" * 3 + "Run it.\n")
+        self.assertEqual(readme["title"], "Tool")
+        self.assertTrue(readme["partly_generated"])
+        self.assertEqual(intake.guess_class("README.md", readme)[0], "product")
+
+    def test_scan_a_repository(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = Path(d)
+            run = lambda *a: subprocess.run(["git", "-C", d, *a], check=True, capture_output=True)  # noqa: E731
+            run("init", "-q")
+            run("config", "user.email", "a@example.com")
+            run("config", "user.name", "A")
+            (repo / "README.md").write_text("# Tool\n\n## Usage\n\nRun it.\n")
+            (repo / "AGENTS.md").write_text("# Agents\n")
+            (repo / "e2e").mkdir()
+            (repo / "e2e" / "login.spec.ts").write_text("test('signs in', async () => {});\n"
+                                                         "test('signs out', async () => {});\n")
+            (repo / "app.ts").write_text("export const a = 1;\n")
+            (repo / "regress").mkdir()
+            (repo / "regress" / "copy-mode-search.sh").write_text("#!/bin/sh\n$TEST_TMUX new -d\n")
+            (repo / "SYNCING.md").write_text("# Syncing\n\n# Remote\n\nAdd it.\n\n# Merge\n\nMerge it.\n")
+            # vendored code is left out; tests the patterns miss are named, not guessed; a docs mirror is flagged
+            (repo / "vendor" / "pty").mkdir(parents=True)
+            (repo / "vendor" / "pty" / "README.md").write_text("# pty\n")
+            (repo / "vendor" / "pty" / "test_crosscompile.sh").write_text("#!/bin/sh\ngo build\n")
+            (repo / "pkg" / "integration" / "tests" / "commit").mkdir(parents=True)
+            (repo / "pkg" / "integration" / "tests" / "commit" / "amend.go").write_text(
+                'package commit\n\nvar Amend = NewIntegrationTest(NewIntegrationTestArgs{\n'
+                '\tDescription: "Amends the last commit",\n\tRun: func(t *TestDriver) {\n'
+                '\t\tt.Views().Files().\n\t\t\tPress(keys.Amend)\n\t},\n})\n')
+            guide = "# Undo\n\n" + "Press z to undo the last action you took in the program. " * 4 + "\n"
+            for tree in ("docs", "docs-master"):
+                (repo / tree).mkdir()
+                (repo / tree / "Undoing.md").write_text(guide)
+            run("add", ".")
+            run("commit", "-qm", "Switch to the new renderer")
+            out = subprocess.run([sys.executable, str(SCRIPT), "scan", d], capture_output=True, text=True,
+                                 check=True).stdout
+            scan = json.loads(out)
+            # the review page shows a section that feeds several documents
+            work = Path(d) / ".intake"
+            (work / "docs").mkdir(parents=True)
+            (work / "scan.json").write_text(out)
+            for slug in "ab":
+                (work / "docs" / f"{slug}.md").write_text(doc(slug.upper(), "Text.\n", tldr="T."))
+            (work / "intake.json").write_text(json.dumps({
+                "schema_version": 1, "repository": "o/n", "ref": "abc", "summary": "S", "tags": [],
+                "sidebar": {"groups": [{"name": "Start", "docs": ["a", "b"]}]},
+                "documents": [{"slug": s, "file": f"docs/{s}.md", "sources": ["README.md"]} for s in "ab"],
+                "markdown": [{"path": "README.md", "action": "convert", "doc": ["a", "b"], "why": "x",
+                              "sections": [{"heading": "Usage", "action": "convert", "doc": ["a", "b"]}]}]}))
+            review = subprocess.run([sys.executable, str(SCRIPT), "review", str(work / "intake.json"), "--scan",
+                                     str(work / "scan.json"), "--out", str(work / "review.html")],
+                                    capture_output=True, text=True)
+            self.assertEqual(review.returncode, 0, review.stderr)
+            self.assertIn('href="#doc-b"', (work / "review.html").read_text())
+        self.assertEqual({m["path"]: m["guess"] for m in scan["markdown"]},
+                         {"README.md": "product", "AGENTS.md": "harness", "SYNCING.md": "product",
+                          "docs-master/Undoing.md": "product", "docs/Undoing.md": "duplicate"})
+        self.assertEqual(next(m for m in scan["markdown"] if m["path"] == "SYNCING.md")["headings"],
+                         ["Remote", "Merge"])  # no H2: the H1 sections below the title
+        self.assertEqual(scan["tests"]["cases"], {"e2e": 2})
+        self.assertEqual(scan["tests"]["files"], 1)
+        self.assertEqual(scan["tests"]["uncounted"]["folders"],
+                         [{"path": "pkg/integration/tests/commit", "files": 1}])
+        self.assertEqual(scan["tests"]["e2e"][0]["titles"], ["signs in", "signs out"])
+        self.assertTrue(scan["churn"]["hot_files"])
+        self.assertEqual(scan["schema_version"], intake.SCHEMA_VERSION)
+        self.assertEqual(scan["churn"]["milestones"], [])  # one small commit is no milestone
+
+
+class Plan(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        base = Path(self.dir.name)
+        (base / "docs").mkdir()
+        (base / "docs" / "a.md").write_text(doc("Alpha", "See [Beta](ref:b).\n", tags=["core"], tldr="Alpha."))
+        (base / "docs" / "b.md").write_text(doc("Beta", "Back to [Alpha](ref:a).\n", tags=["core"], tldr="Beta."))
+        (base / "docs" / "d.md").write_text(doc("Which store?", "We use SQLite because it is local.\n"))
+        self.plan = {
+            "schema_version": 1, "repository": "o/n", "ref": "abc", "summary": "S",
+            "tags": [{"name": "core", "status": "new"}, {"name": "extra", "status": "new"}],
+            "sidebar": {"groups": [{"name": "Start", "docs": ["a"]}, {"name": "More", "docs": ["b", "d"]}],
+                        "starter": "unpin"},
+            "documents": [
+                {"slug": "a", "file": "docs/a.md", "sources": ["README.md"]},
+                {"slug": "b", "file": "docs/b.md", "sources": ["README.md"]},
+                {"slug": "d", "file": "docs/d.md", "kind": "decision", "related": "a", "sources": ["git:1"]},
+            ],
+            "markdown": [{"path": "README.md", "action": "convert", "doc": ["a", "b"], "why": "x"},
+                         {"path": "docs/**", "action": "keep", "why": "y"}],
+        }
+        self.path = base / "intake.json"
+        self.path.write_text(json.dumps(self.plan))
+        self.scan = {"markdown": [{"path": "README.md"}, {"path": "docs/x/y.md"}, {"path": "NOTES.md"}]}
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_check(self):
+        errors, warnings = intake.validate(self.plan, self.path.parent, self.scan)
+        self.assertEqual(errors, ["markdown: NOTES.md is not accounted for (convert, keep or skip)"])
+        self.plan["tags"][0]["name"] = "Core Tag"
+        errors, _ = intake.validate(self.plan, self.path.parent)
+        self.assertTrue(any("lowercase letters" in e for e in errors))
+
+    def test_decision_answer_limits(self):
+        (self.path.parent / "docs" / "d.md").write_text(doc("Which store?", "word " * 61 + "\n"))
+        errors, _ = intake.validate(self.plan, self.path.parent)
+        self.assertTrue(any("at most 60 words" in e for e in errors))
+
+    def test_history_warning(self):
+        (self.path.parent / "docs" / "a.md").write_text(doc("Alpha", "Search is planned for v2.\n", tldr="A."))
+        _, warnings = intake.validate(self.plan, self.path.parent)
+        self.assertTrue(any("'planned'" in w for w in warnings))
+
+    def test_setup_sections_stay(self):
+        self.plan["markdown"][0]["sections"] = [{"heading": "Installation", "action": "convert", "doc": "a"},
+                                                {"heading": "Features", "action": "convert", "doc": "a"}]
+        _, warnings = intake.validate(self.plan, self.path.parent)
+        self.assertEqual([w for w in warnings if "community material" in w],
+                         ["markdown: README.md § Installation is setup or community material; "
+                          "keep it as Markdown and link it from the page"])
+
+    def calls(self, *extra, tags=None):
+        path = self.path.parent / "tags.json"
+        path.write_text(json.dumps({"tags": tags if tags is not None else [{"id": "t1", "name": "core"}]}))
+        run = subprocess.run([sys.executable, str(SCRIPT), "calls", str(self.path), "--tags", str(path), *extra],
+                             capture_output=True, text=True, check=True)
+        return json.loads(run.stdout), run.stderr
+
+    def test_calls_in_two_passes(self):
+        calls, _ = self.calls()
+        tools = [(c["tool"], c.get("slug")) for c in calls]
+        # every document exists before any block is written, so each link can name its target
+        self.assertEqual(tools[:6], [("create_doc", "a"), ("create_doc", "b"), ("create_doc", "d"),
+                                     ("insert_block", "a"), ("insert_block", "b"), ("insert_block", "d")])
+        self.assertNotIn("blocks", calls[0]["arguments"])
+        self.assertEqual(calls[0]["arguments"]["tags"], ["t1"])
+        self.assertEqual(calls[2]["arguments"]["related"], {"$ref": "a"})
+        self.assertEqual(calls[2]["arguments"]["kind"], "decision")
+        self.assertEqual(calls[2]["arguments"]["status"], "open")
+        self.assertEqual(calls[3]["arguments"]["uuid"], {"$ref": "a"})
+        self.assertFalse([t for t, _ in tools if t in ("link_range", "edit_block", "starter_cleanup")])
+        optional = [c for c in calls if c.get("optional")]
+        self.assertEqual([c["tool"] for c in optional], ["unpin_doc", "unpin_doc", "sidebar_group"])
+        self.assertEqual(calls[-1]["arguments"], {"group": "More", "action": "move", "index": 1})
+        marks = calls[3]["arguments"]["blocks"][0]["inline"][1]["marks"]
+        self.assertEqual(intake.resolve(marks, {"b": "uuid-b"}), {"docLink": "uuid-b"})
+        with self.assertRaises(KeyError):
+            intake.resolve(calls[3]["arguments"], {"a": "uuid-a"})
+
+    def test_links_in_a_table(self):
+        (self.path.parent / "docs" / "b.md").write_text(doc("Beta", "| x |\n| - |\n| [Alpha](ref:a) |\n",
+                                                            tags=["core"], tldr="B."))
+        calls, _ = self.calls()
+        insert = next(c for c in calls if c["tool"] == "insert_block" and c["slug"] == "b")
+        self.assertEqual(insert["arguments"]["blocks"][0]["text"], "| x |\n| - |\n| [Alpha]({{uuid:a}}) |")
+        self.assertEqual(intake.resolve(insert["arguments"], {"a": "A", "b": "B"})["blocks"][0]["text"],
+                         "| x |\n| - |\n| [Alpha](A) |")
+
+    def test_resolve_for_the_mcp_route(self):
+        calls, _ = self.calls()
+        base = self.path.parent
+        (base / "calls.json").write_text(json.dumps(calls))
+
+        def resolve(uuids):
+            if uuids is not None:
+                (base / "uuids.json").write_text(json.dumps(uuids))
+            run = subprocess.run([sys.executable, str(SCRIPT), "resolve", "--calls", str(base / "calls.json"),
+                                  "--uuids", str(base / "uuids.json")], capture_output=True, text=True, check=True)
+            return [json.loads(line) for line in run.stdout.splitlines()], run.stderr
+
+        # nothing answered yet: the pages, then a stop at the record that names its page
+        ready, err = resolve(None)
+        self.assertEqual([(r["call"], r["tool"]) for r in ready], [(1, "create_doc"), (2, "create_doc")])
+        self.assertIn("needs the UUID of 'a'", err)
+        ready, _ = resolve({"a": "A", "b": "B"})
+        self.assertEqual(ready[0], {"call": 3, "tool": "create_doc", "slug": "d", "arguments": {
+            "title": "Which store?", "description": "About Which store?", "kind": "decision",
+            "status": "open", "related": "A"}})
+        self.assertEqual(ready[1]["call"], 4)  # stops before d's blocks, which wait for d
+        self.assertEqual(len(ready), 3)
+        ready, err = resolve({"a": "A", "b": "B", "d": "D"})
+        self.assertEqual(ready[0]["call"], 4)
+        self.assertEqual(ready[0]["arguments"]["uuid"], "A")
+        self.assertNotIn("text", ready[0]["arguments"]["blocks"][0])  # the inline runs carry it
+        self.assertEqual(ready[-1]["call"], len(calls))
+        self.assertIn("all ready", err)
+
+    def test_a_decided_record_is_created_with_its_answer(self):
+        self.plan["documents"][2]["status"] = "decided"
+        self.plan["documents"][2]["answer"] = {"who": "Ann", "when": "2026-01-02", "where": "https://x.test/adr"}
+        self.path.write_text(json.dumps(self.plan))
+        calls, _ = self.calls()
+        create = next(c for c in calls if c.get("slug") == "d")
+        self.assertEqual(create["arguments"]["blocks"][0]["text"], "We use SQLite because it is local.")
+        self.assertFalse([c for c in calls if c["tool"] == "insert_block" and c["slug"] == "d"])
+        (self.path.parent / "docs" / "d.md").write_text(doc("Which store?", "See [Beta](ref:b).\n"))
+        self.plan["documents"].append({"slug": "e", "file": "docs/d.md", "kind": "decision", "status": "decided",
+                                       "answer": self.plan["documents"][2]["answer"]})
+        (self.path.parent / "docs" / "e.md").write_text(doc("Other?", "Yes.\n"))
+        self.plan["documents"][3]["file"] = "docs/e.md"
+        (self.path.parent / "docs" / "d.md").write_text(doc("Which store?", "Like [Other](ref:e).\n"))
+        self.path.write_text(json.dumps(self.plan))
+        run = subprocess.run([sys.executable, str(SCRIPT), "calls", str(self.path), "--tags",
+                              str(self.path.parent / "tags.json")], capture_output=True, text=True)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("links to e, created after it", run.stderr)
+
+    def test_ub_skips_optional_failures_and_adopted_documents(self):
+        calls, _ = self.calls()
+        base = self.path.parent
+        (base / "calls.json").write_text(json.dumps(calls))
+        fake = base / "fake_ub.py"
+        fake.write_text(FAKE_UB)
+        log = base / "log.jsonl"
+        run = subprocess.run([sys.executable, str(SCRIPT), "ub", "--calls", str(base / "calls.json"),
+                              "--checkout", str(base), "--out", str(base / "applied.json"), "--adopt",
+                              "--settle", "0", "--ub", f"{sys.executable} {fake} {log}"],
+                             capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        sent = [json.loads(line) for line in log.read_text().splitlines()]
+        tools = [m["name"] for m in sent]
+        self.assertNotIn(("insert_block", "uuid-existing"),
+                         [(m["name"], m["arguments"].get("uuid")) for m in sent])  # adopted: left as it is
+        self.assertEqual(tools.count("unpin_doc"), 2)  # the first failed, which is fine
+        applied = json.loads((base / "applied.json").read_text())
+        self.assertEqual(applied["done"], len(calls))
+        self.assertEqual(applied["adopted"], ["a"])
+        self.assertNotIn("warnings", applied)  # "not pinned": the cleanup's state already holds
+        self.assertIn({"tool": "create_doc", "slug": "b", "answer": {"uuid": "uuid-Beta"}}, applied["results"])
+
+    def test_one_block_at_a_time(self):
+        calls, _ = self.calls()
+        base = self.path.parent
+        (base / "calls.json").write_text(json.dumps(calls))
+        (base / "fake_ub.py").write_text(FAKE_UB)
+        log = base / "log.jsonl"
+        run = subprocess.run([sys.executable, str(SCRIPT), "ub", "--calls", str(base / "calls.json"),
+                              "--checkout", str(base), "--out", str(base / "applied.json"), "--settle", "0",
+                              "--adopt", "--ub", f"{sys.executable} {base / 'fake_ub.py'} {log} one"],
+                             capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        inserts = [m["arguments"] for m in map(json.loads, log.read_text().splitlines())
+                   if m["name"] == "insert_block"]
+        self.assertTrue(inserts and all("blocks" not in a and "type" in a for a in inserts))
+        by_doc = {}
+        for n, a in enumerate(inserts, 1):
+            by_doc.setdefault(a["uuid"], []).append((n, a.get("after_block_id")))
+        for chain in by_doc.values():  # the first at the top, each next after the block before it
+            self.assertEqual([after for _, after in chain], [None] + [f"b{n}" for n, _ in chain[:-1]])
+        uuids = base / "uuids.json"
+        uuids.write_text(json.dumps({c["slug"]: "u-" + c["slug"] for c in calls if c["tool"] == "create_doc"}))
+        run = subprocess.run([sys.executable, str(SCRIPT), "resolve", "--calls", str(base / "calls.json"),
+                              "--uuids", str(uuids), "--one-block"], capture_output=True, text=True, check=True)
+        lines = [json.loads(line) for line in run.stdout.splitlines()]
+        first = next(c for c in calls if c["tool"] == "insert_block")
+        parts = [x for x in lines if x["call"] == calls.index(first) + 1]
+        self.assertEqual([x["arguments"]["type"] for x in parts][::-1],
+                         [b["type"] for b in first["arguments"]["blocks"]])  # last block first, each at the top
+        self.assertTrue(any(x.get("optional") for x in lines))
+
+    def test_tags_the_catalog_lacks_are_left_off(self):
+        calls, err = self.calls(tags=[])
+        self.assertNotIn("tags", calls[0]["arguments"])
+        self.assertIn("core", err)
+
+    def test_create_tags(self):
+        self.plan["tags"][0]["description"] = "The storage engine and its files."
+        self.path.write_text(json.dumps(self.plan))
+        calls, err = self.calls("--create-tags", tags=[])
+        # only the tags documents use, before any document names them
+        self.assertEqual(calls[0], {"tool": "create_tag", "arguments": {
+            "name": "core", "description": "The storage engine and its files."}})
+        self.assertNotIn("create_tag", [c["tool"] for c in calls[1:]])
+        self.assertEqual(calls[1]["arguments"]["tags"], ["core"])
+        self.assertNotIn("left off", err)
+        calls, _ = self.calls("--create-tags")  # already in the catalog
+        self.assertNotIn("create_tag", [c["tool"] for c in calls])
+        self.plan["tags"][0]["description"] = "two\nlines"
+        errors, _ = intake.validate(self.plan, self.path.parent)
+        self.assertTrue(any("one line" in e for e in errors))
+
+    def run_ub(self, calls, mode=""):
+        base = self.path.parent
+        (base / "calls.json").write_text(json.dumps(calls))
+        (base / "fake_ub.py").write_text(FAKE_UB)
+        log = base / "log.jsonl"
+        run = subprocess.run([sys.executable, str(SCRIPT), "ub", "--calls", str(base / "calls.json"),
+                              "--checkout", str(base), "--out", str(base / "applied.json"), "--settle", "0",
+                              "--adopt", "--ub", f"{sys.executable} {base / 'fake_ub.py'} {log} {mode}"],
+                             capture_output=True, text=True)
+        sent = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+        return run, sent
+
+    def test_ub_needs_create_tag_before_writing(self):
+        calls, _ = self.calls("--create-tags", tags=[])
+        run, sent = self.run_ub(calls)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("Workspace settings", run.stderr)
+        self.assertFalse([m for m in sent if m["name"] not in intake.READ_TOOLS])
+        run, sent = self.run_ub(calls, "new")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(sent[0]["name"], "list_docs")
+        self.assertIn({"name": "create_tag", "arguments": {"name": "core"}}, sent)
+
+    def test_ub_reports_the_servers_drawing_check(self):
+        calls, _ = self.calls()
+        run, _ = self.run_ub(calls, "new")
+        self.assertEqual(run.returncode, 0, run.stderr)  # advisory: the run goes on
+        self.assertIn("block x1 has errors, first at line 2: Unknown line", run.stderr)
+        applied = json.loads((self.path.parent / "applied.json").read_text())
+        insert = next(r for r in applied["results"] if r["tool"] == "insert_block" and "answer" in r)
+        self.assertEqual([d["block"] for d in insert["answer"]["drawings"]], ["x1"])  # clean ones are left out
+        self.assertTrue(any("x1" in w for w in applied["warnings"]))
+
+    def test_calls_after_an_earlier_run(self):
+        applied = self.path.parent / "applied.json"
+        applied.write_text(json.dumps({"uuids": {"a": "uuid-a", "b": "uuid-b"}}))
+        calls, _ = self.calls("--applied", str(applied))
+        self.assertEqual([c["tool"] for c in calls[:5]],
+                         ["existing", "set_metadata", "existing", "set_metadata", "create_doc"])
+        self.assertEqual(calls[1]["arguments"], {"uuid": "uuid-a", "tags": ["t1"]})
+        self.assertFalse([c for c in calls if c["tool"] == "insert_block" and c["slug"] in ("a", "b")])
+
+    def test_sidebar_entry_points(self):
+        _, warnings = intake.validate(self.plan, self.path.parent)
+        side = [w for w in warnings if w.startswith("sidebar")]
+        self.assertIn("names a kind of document", " ".join(side))  # "More"
+        self.assertIn("d is a decision record", " ".join(side))
+        self.assertNotIn("not reachable", " ".join(side))
+        self.plan["sidebar"]["groups"] = [{"name": "Storage", "docs": ["a"]}]
+        (self.path.parent / "docs" / "e.md").write_text(doc("Echo", "Alone.\n", tldr="E."))
+        self.plan["documents"].append({"slug": "e", "file": "docs/e.md", "sources": ["README.md"]})
+        _, warnings = intake.validate(self.plan, self.path.parent)
+        # b through a's link, d as a's record; e has no way in
+        self.assertEqual([w for w in warnings if w.startswith("sidebar")],
+                         ["sidebar: 1 groups; 3 to 6 read best",
+                          "sidebar: e is not reachable from any pinned entry point; link it from its domain's page"])
+
+    def test_globs_and_precedence(self):
+        self.assertTrue(intake.covers("docs/*.md", "docs/a.md"))
+        self.assertFalse(intake.covers("docs/*.md", "docs/x/a.md"))
+        self.assertTrue(intake.covers("docs/**/*.md", "docs/x/y/a.md"))
+        entries = [{"path": "docs/**", "action": "keep"}, {"path": "docs/guide/**", "action": "convert"}]
+        self.assertEqual(intake.entry_for(entries, "docs/guide/a.md")["action"], "convert")
+
+    def test_check_with_the_checkout_and_catalog(self):
+        repo = self.path.parent / "repo"
+        repo.mkdir()
+        (repo / "README.md").write_text("x")
+        errors, warnings = intake.validate(self.plan, self.path.parent, None, repo, {"core", "extra"})
+        self.assertFalse(errors)
+        self.plan["documents"][0]["sources"] = ["src/gone.py:1-4"]
+        errors, warnings = intake.validate(self.plan, self.path.parent, None, repo, {"core"})
+        self.assertIn("source src/gone.py:1-4 does not exist", " ".join(errors))
+        self.assertTrue(any("marked new, but the catalog has it" in w for w in warnings))
+        self.assertTrue(any("extra is used by 0" in w for w in warnings))
+        (repo / "README.md").write_text("# N\n\n### Install\n")
+        self.plan["markdown"][0]["sections"] = [{"heading": "Install", "action": "keep"},
+                                                {"heading": "Usage", "action": "keep"}]
+        _, warnings = intake.validate(self.plan, self.path.parent, None, repo)
+        self.assertEqual([w for w in warnings if "heading" in w],
+                         ["markdown: README.md has no heading 'Usage'; a section names one exactly as the file has it"])
+
+    def test_unknown_container(self):
+        with self.assertRaisesRegex(ValueError, "no Uberblick container"):
+            intake.parse_doc(doc("A", ":::note\nHi\n:::\n"))
+        _, _, refs = intake.parse_doc(doc("A", ":::card\ntitle: Go\n\nSee [B](ref:b).\n:::\n"))
+        self.assertEqual(refs, {"b"})
+
+if __name__ == "__main__":
+    unittest.main()
