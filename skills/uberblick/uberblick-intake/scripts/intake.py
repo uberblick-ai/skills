@@ -7,7 +7,7 @@
     intake.py blocks DOC.md                                    # one Uberblick Markdown file as create_doc arguments
     intake.py check PLAN [--scan scan.json] [--checkout PATH] [--tags tags.json]  # the plan against the scan and the corpus rules
     intake.py review PLAN --scan scan.json --out review.html [--open]  # the page a person approves before writes
-    intake.py calls PLAN --tags tags.json > calls.json         # the ordered corpus writes, with $ref placeholders
+    intake.py calls PLAN --tags tags.json [--create-tags] > calls.json  # the ordered corpus writes, with $ref placeholders
     intake.py ub --calls calls.json --checkout PATH [--out applied.json]  # run them through one `ub mcp serve`
     intake.py resolve --calls calls.json --uuids uuids.json    # for the MCP tools: the rest, UUIDs filled in
     intake.py corpus --checkout PATH --dir DIR                 # the workspace's tags, sidebar and documents
@@ -627,6 +627,10 @@ def brief(text):
         keep["block"] = answer["block"].get("id")
     if isinstance(answer.get("blocks"), list):
         keep["blocks"] = len(answer["blocks"])
+        drawings = [{"block": b.get("id"), **b["drawing"]} for b in answer["blocks"]
+                    if isinstance(b, dict) and isinstance(b.get("drawing"), dict) and b["drawing"].get("status") != "clean"]
+        if drawings:
+            keep["drawings"] = drawings
     if isinstance(answer.get("hub"), dict):
         keep["hub"] = answer["hub"].get("status")
     return keep
@@ -1076,6 +1080,9 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
         if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", t["name"]) or len(t["name"]) > 30:
             errors.append(f"tags: {t['name']!r}: a tag is lowercase letters and digits joined by hyphens, "
                           f"at most 30 characters")
+        about = t.get("description")
+        if about is not None and (not isinstance(about, str) or "\n" in about or len(about.strip()) > 300):
+            errors.append(f"tags: {t['name']!r}: a description is one line of at most 300 characters")
     if not 2 <= len(tags) <= 12:
         warnings.append(f"tags: {len(tags)} tags; 2 to 12 keep the catalog useful")
     slugs = Counter(d.get("slug") for d in plan["documents"])
@@ -1362,6 +1369,15 @@ def cmd_calls(args):
             sys.exit(f"{slug}: a decided record is created with its answer, which links to {', '.join(later)}, "
                      f"created after it; link a page instead, or leave the record open")
     calls, skipped_tags = [], set()
+    if args.create_tags:
+        # create_tag answers an existing name with that tag, so a re-run creates nothing twice; documents then
+        # name these tags, which assignment accepts with case ignored
+        used = {x.lower() for _d, meta, *_ in parsed.values() for x in (meta.get("tags") or [])}
+        for t in plan["tags"]:
+            if t["name"].lower() in used and t["name"].lower() not in catalog:
+                calls.append({"tool": "create_tag", "arguments": {"name": t["name"], **(
+                    {"description": t["description"]} if t.get("description") else {})}})
+                catalog[t["name"].lower()] = t["name"]
 
     def tag_list(meta):
         out = []
@@ -1425,7 +1441,8 @@ def cmd_calls(args):
     for i, g in enumerate(plan["sidebar"].get("groups", [])):
         calls.append({"tool": "sidebar_group", "arguments": {"group": g["name"], "action": "move", "index": i}})
     if skipped_tags:
-        print("tags not in the workspace's catalog, left off: " + ", ".join(sorted(skipped_tags)), file=sys.stderr)
+        print("tags not in the workspace's catalog, left off: " + ", ".join(sorted(skipped_tags)) +
+              " (--create-tags creates them, once the person approved them)", file=sys.stderr)
         bare = sorted(c["slug"] for c in calls if c["tool"] == "create_doc" and not c["arguments"].get("tags"))
         if bare:
             print(f"{len(bare)} document(s) end up with no tag: " + ", ".join(bare), file=sys.stderr)
@@ -1571,6 +1588,10 @@ def cmd_ub(args):
         tools = {t["name"]: t for t in ask("tools/list", {}).get("tools", [])}
         # older ub versions insert one block per call, after a block id they answered with
         one_at_a_time = "blocks" not in tools.get("insert_block", {}).get("inputSchema", {}).get("properties", {"blocks": 1})
+        if "create_tag" not in tools and any(c["tool"] == "create_tag" for c in calls[applied["done"]:]):
+            raise Stop("this ub cannot create tags (create_tag arrived in 0.4.11): update ub, or have a person create "
+                       "them under Workspace settings → Tags, read the workspace again and run calls without "
+                       "--create-tags")
         pending = [c for c in calls[applied["done"]:] if c["tool"] == "create_doc" and c["slug"] not in uuids]
         if pending or any(c["tool"] not in READ_TOOLS for c in calls):
             listing = json.loads(call("list_docs", {}))
@@ -1633,9 +1654,18 @@ def cmd_ub(args):
                 except (ValueError, KeyError):
                     failed = f"call {i + 1}: create_doc answered without a uuid: {text[:200]}"
                     break
-            applied["results"].append({"tool": c["tool"], "slug": c.get("slug"),
-                                       **({"answer": brief(text)} if c["tool"] in ("create_doc", "insert_block",
-                                                                                    "pin_doc") else {"text": text})})
+            result = {"tool": c["tool"], "slug": c.get("slug"),
+                      **({"answer": brief(text)} if c["tool"] in ("create_doc", "insert_block",
+                                                                   "pin_doc") else {"text": text})}
+            applied["results"].append(result)
+            answer = result.get("answer") if isinstance(result.get("answer"), dict) else {}
+            for d in answer.get("drawings", []):
+                # the server's own check of a written drawing; advisory, so the run goes on
+                first = (d.get("diagnostics") or [{}])[0]
+                applied.setdefault("warnings", []).append(f"{c.get('slug')}: drawing in block {d['block']}: {d['status']}")
+                print(f"ub: {c.get('slug')}: the drawing in block {d['block']} has {d['status']}"
+                      + (f", first at line {first['line']}: {first['message']}" if first.get("message") else "")
+                      + "; fix it with edit_block", file=sys.stderr)
             applied["done"] = i + 1
             save()
             print(f"{i + 1}/{len(calls)} {c['tool']} {c.get('slug') or ''}".rstrip(), file=sys.stderr)
@@ -2000,6 +2030,8 @@ def main():
                    help="list_tags output, to pass tag ids and leave off tags the catalog lacks")
     k.add_argument("--applied", help="applied.json of an earlier run: those documents are not created again, "
                                      "only given the plan's tags that exist now")
+    k.add_argument("--create-tags", action="store_true",
+                   help="create the plan's tags the catalog lacks with create_tag first (ub 0.4.11 or newer)")
     v = sub.add_parser("resolve", help="for the MCP tools: the calls with the UUIDs filled in, ready to send")
     v.add_argument("--calls", required=True)
     v.add_argument("--uuids", required=True, help="{slug: uuid} from the create_doc answers (or applied.json)")

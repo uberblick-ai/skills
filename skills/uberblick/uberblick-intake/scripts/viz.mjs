@@ -15,7 +15,7 @@ if (!prefix || !docs.length || docs.some((f) => !f.endsWith(".md"))) {
 const mod = (name) => resolve(prefix, `node_modules/@uberblick/${name}/dist/index.js`);
 for (const name of ["ablauf", "wireframe"]) {
   if (!existsSync(mod(name))) {
-    console.error(`No ${name} in ${prefix}: run npm install --prefix ${prefix} @uberblick/ablauf@0.2.0 @uberblick/wireframe@0.3.0`);
+    console.error(`No ${name} in ${prefix}: run npm install --prefix ${prefix} @uberblick/ablauf@0.2.0 @uberblick/wireframe@0.3.2`);
     process.exit(2);
   }
 }

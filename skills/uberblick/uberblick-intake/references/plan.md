@@ -12,7 +12,7 @@ into corpus writes.
   "date": "2026-10-22",
   "summary": "At most 80 words: what the corpus holds, how it is grouped and what stays in the repository.",
   "tags": [
-    {"name": "signing", "status": "new", "why": "The signing flow, the product's core; 9 pages."},
+    {"name": "signing", "status": "new", "description": "Signing a document: requests, signers and the signed PDF.", "why": "The signing flow, the product's core; 9 pages."},
     {"name": "workflow", "status": "existing", "why": "Already in the catalog; the document lifecycle."}
   ],
   "sidebar": {
@@ -80,7 +80,9 @@ into corpus writes.
   has it (case ignored) and `new` otherwise. Name the catalog's spelling. A
   tag is lowercase letters and digits joined by hyphens, at most 30
   characters. `"core": true` marks a tag that names a core area, which may
-  sit on a single page.
+  sit on a single page. A `new` tag takes a `description`, one line of at
+  most 300 characters on when to use it; `--create-tags` passes it to
+  `create_tag`.
 - `sidebar.groups` in display order, one per domain, each with the entry
   points it pins in order; the other documents are linked from them. A document is pinned once at most; unpinned documents stay
   reachable through search, links and the decision log. `starter` is

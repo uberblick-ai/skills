@@ -161,7 +161,7 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    `ablauf` or `wireframe` block):
 
    ```sh
-   npm install --prefix DIR/node @uberblick/ablauf@0.2.0 @uberblick/wireframe@0.3.0
+   npm install --prefix DIR/node @uberblick/ablauf@0.2.0 @uberblick/wireframe@0.3.2
    node scripts/viz.mjs DIR/node DIR/docs/*.md
    python3 scripts/intake.py check DIR/intake.json --scan DIR/scan.json --checkout CHECKOUT --tags DIR/corpus/tags.json
    ```
@@ -195,9 +195,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    repository changes. Tell the person in a few sentences what the corpus
    will hold and where it overlaps a published docs site, then ask once for
    approval to write it, whether to unpin the starter pages (their emptied
-   "Uberblick" group is deleted; the pages stay in the workspace), and for any
-   new tags to be created under Workspace settings → Tags (MCP cannot
-   create tags). Writes go to a workspace the team shares: wait for the
+   "Uberblick" group is deleted; the pages stay in the workspace), and
+   whether to create the new tags. Writes go to a workspace the team shares: wait for the
    answer. Change the plan as they ask and build the page again. When you
    run unattended and were told the review counts as approved, write the
    page anyway, follow what you were told about the starter pages and the
@@ -207,11 +206,16 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    use only tags that exist, then, with `ub`:
 
    ```sh
-   python3 scripts/intake.py calls DIR/intake.json --tags DIR/corpus/tags.json > DIR/calls.json
+   python3 scripts/intake.py calls DIR/intake.json --tags DIR/corpus/tags.json --create-tags > DIR/calls.json
    python3 scripts/intake.py ub --calls DIR/calls.json --checkout CHECKOUT --out DIR/applied.json
    ```
 
-   `calls` writes in two passes, so every link can name its target. First
+   Leave off `--create-tags` when the person did not approve the new tags.
+   It needs ub 0.4.11 or newer (the server lists `create_tag`); with an
+   older one, a person creates them under Workspace settings → Tags.
+
+   `calls` writes in two passes, so every link can name its target. With
+   `--create-tags` it starts with a `create_tag` for each new tag. Then
    `create_doc` for every document with its metadata only (pages, then
    decision records with `related` naming their page); then `insert_block`
    with each document's blocks, links included; then the pins group by
@@ -226,7 +230,9 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    the one there). It records the workspace, the calls and the UUIDs in
    `DIR/applied.json`, stops at the first refusal (fix it and re-run the
    same calls with `--resume`), waits for the hub to acknowledge and prints
-   the sidebar as written.
+   the sidebar as written. Where the server checks the drawings it writes,
+   `ub` prints each one that is not `clean`, with its first diagnostic; fix
+   those with `edit_block`.
 
    With the MCP tools instead of `ub`, `resolve` hands you the calls in
    batches, one per line, each with the UUIDs it can fill in:
@@ -235,7 +241,7 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    python3 scripts/intake.py resolve --calls DIR/calls.json --uuids DIR/uuids.json
    ```
 
-   The first batch is the pages' `create_doc` calls; notes on where it
+   The first batch is the `create_tag` calls and the pages' `create_doc` calls; notes on where it
    stopped go to stderr. Send each `arguments` to the tool named `tool`, add
    `"slug": "uuid"` from each answer to `DIR/uuids.json` (a plain JSON
    object; each line names its `slug`), and run `resolve` again: it skips
@@ -250,7 +256,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    parallel while their group does not exist yet. The starter cleanup is
    two `unpin_doc` calls and a `sidebar_group` `delete` of the emptied
    starter group, all marked `optional`: a refused one is fine; stop at
-   any other refusal and fix it. The group moves at the
+   any other refusal and fix it. When a write answer carries a `drawing`
+   whose status is not `clean`, fix that block with `edit_block`. The group moves at the
    end can be left out when `get_sidebar` already shows the plan's order.
    Last, call `sync_status`: the writes are done once nothing is unsynced.
    A local workspace has no hub until `ub open` runs in the checkout, so
@@ -264,6 +271,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    already written are not created again, only given their tags with
    `set_metadata` and pinned; their content stays as written. To change a
    written page, edit it with the MCP tools (`get_help` topic `edit_doc`).
+   `get_doc` shows a prose block's formatting as `inline` runs where the
+   server returns them; otherwise `export_markdown` shows it.
 
 9. **Record the grounding.** When the `uberblick-corpus-sync` skill is
    installed, run it in apply mode on the pages just written (their UUIDs

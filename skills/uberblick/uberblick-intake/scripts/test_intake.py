@@ -12,11 +12,13 @@ SCRIPT = Path(__file__).resolve().parent / "intake.py"
 
 
 # A stand-in for `ub mcp serve`: answers the tools intake.py calls and logs each call. The workspace already has
-# a page titled Alpha, and the first unpin_doc fails as it does when the page is unpinned already.
+# a page titled Alpha, and the first unpin_doc fails as it does when the page is unpinned already. A second argument
+# makes it an older ub (`one`) or a newer one that creates tags and checks drawings (`new`).
 FAKE_UB = r"""
 import json, sys
 log = open(sys.argv[1], "a")
-one_block = len(sys.argv) > 2  # an older ub: insert_block takes one block after a block id
+mode = sys.argv[2] if len(sys.argv) > 2 else ""
+one_block = mode == "one"  # an older ub: insert_block takes one block after a block id
 unpins, blocks = 0, 0
 for line in sys.stdin:
     m = json.loads(line)
@@ -25,6 +27,8 @@ for line in sys.stdin:
     result = {}
     if m["method"] == "tools/list" and one_block:
         result = {"tools": [{"name": "insert_block", "inputSchema": {"properties": {"uuid": {}, "type": {}}}}]}
+    if m["method"] == "tools/list" and mode == "new":
+        result = {"tools": [{"name": "create_tag"}, {"name": "insert_block"}]}
     if m["method"] == "tools/call":
         name, args = m["params"]["name"], m["params"]["arguments"]
         log.write(json.dumps({"name": name, "arguments": args}) + "\n"); log.flush()
@@ -36,6 +40,10 @@ for line in sys.stdin:
             text = json.dumps({"uuid": "uuid-" + args["title"]})
         elif name == "get_sidebar":
             text = json.dumps({"groups": []})
+        elif name == "insert_block" and mode == "new":
+            drawing = {"status": "errors", "diagnostics": [{"line": 2, "severity": "error", "message": "Unknown line"}]}
+            text = json.dumps({"uuid": args["uuid"], "blocks": [{"id": "x1", "rev": 1, "drawing": drawing},
+                                                                 {"id": "x2", "rev": 1, "drawing": {"status": "clean", "diagnostics": []}}]})
         elif name == "insert_block" and one_block:
             blocks += 1
             error = "blocks" in args
@@ -390,6 +398,55 @@ class Plan(unittest.TestCase):
         calls, err = self.calls(tags=[])
         self.assertNotIn("tags", calls[0]["arguments"])
         self.assertIn("core", err)
+
+    def test_create_tags(self):
+        self.plan["tags"][0]["description"] = "The storage engine and its files."
+        self.path.write_text(json.dumps(self.plan))
+        calls, err = self.calls("--create-tags", tags=[])
+        # only the tags documents use, before any document names them
+        self.assertEqual(calls[0], {"tool": "create_tag", "arguments": {
+            "name": "core", "description": "The storage engine and its files."}})
+        self.assertNotIn("create_tag", [c["tool"] for c in calls[1:]])
+        self.assertEqual(calls[1]["arguments"]["tags"], ["core"])
+        self.assertNotIn("left off", err)
+        calls, _ = self.calls("--create-tags")  # already in the catalog
+        self.assertNotIn("create_tag", [c["tool"] for c in calls])
+        self.plan["tags"][0]["description"] = "two\nlines"
+        errors, _ = intake.validate(self.plan, self.path.parent)
+        self.assertTrue(any("one line" in e for e in errors))
+
+    def run_ub(self, calls, mode=""):
+        base = self.path.parent
+        (base / "calls.json").write_text(json.dumps(calls))
+        (base / "fake_ub.py").write_text(FAKE_UB)
+        log = base / "log.jsonl"
+        run = subprocess.run([sys.executable, str(SCRIPT), "ub", "--calls", str(base / "calls.json"),
+                              "--checkout", str(base), "--out", str(base / "applied.json"), "--settle", "0",
+                              "--adopt", "--ub", f"{sys.executable} {base / 'fake_ub.py'} {log} {mode}"],
+                             capture_output=True, text=True)
+        sent = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+        return run, sent
+
+    def test_ub_needs_create_tag_before_writing(self):
+        calls, _ = self.calls("--create-tags", tags=[])
+        run, sent = self.run_ub(calls)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("Workspace settings", run.stderr)
+        self.assertFalse([m for m in sent if m["name"] not in intake.READ_TOOLS])
+        run, sent = self.run_ub(calls, "new")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(sent[0]["name"], "list_docs")
+        self.assertIn({"name": "create_tag", "arguments": {"name": "core"}}, sent)
+
+    def test_ub_reports_the_servers_drawing_check(self):
+        calls, _ = self.calls()
+        run, _ = self.run_ub(calls, "new")
+        self.assertEqual(run.returncode, 0, run.stderr)  # advisory: the run goes on
+        self.assertIn("block x1 has errors, first at line 2: Unknown line", run.stderr)
+        applied = json.loads((self.path.parent / "applied.json").read_text())
+        insert = next(r for r in applied["results"] if r["tool"] == "insert_block" and "answer" in r)
+        self.assertEqual([d["block"] for d in insert["answer"]["drawings"]], ["x1"])  # clean ones are left out
+        self.assertTrue(any("x1" in w for w in applied["warnings"]))
 
     def test_calls_after_an_earlier_run(self):
         applied = self.path.parent / "applied.json"

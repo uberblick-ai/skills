@@ -108,8 +108,12 @@ Tags are how people filter the corpus and how agents narrow a search.
   `api`, `self-hosting`, `mobile`.
 - 2 to 12 tags (fewer for a small product), each used by at least two
   documents unless it names a core area. No tags for kinds (`page`, `decision`), statuses or teams.
-- New tags are created by a person under Workspace settings → Tags; the
-  writes leave off any tag that does not exist yet.
+- Give each new tag a `description`: one line on when to use it, which
+  people and agents see in the catalog.
+- New tags are created with the writes once the person approves them
+  (`calls --create-tags`, which needs ub 0.4.11 or newer), or by a person
+  under Workspace settings → Tags. Without either, the writes leave off any
+  tag that does not exist yet.
 
 ## Decision records
 
