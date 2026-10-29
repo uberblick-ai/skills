@@ -32,10 +32,20 @@ files by their path relative to the skill folder, one level deep.
 
 ## Writing a skill
 
-- `description` says what the skill does and when to use it, with the words a
-  user would say. It is the only text an agent sees before choosing the skill.
+- `description` is the only text an agent sees before choosing the skill. In
+  this order: what the skill does, in one sentence; `Use for` with three or
+  four asks quoted in the words a user would say (the `asks` of its site
+  page); what it writes or changes; and `Not for` what it might be mistaken
+  for.
 - The body is the procedure: numbered steps, the exact commands, the shape of
-  any file the skill writes. Leave out what the agent already knows.
+  any file the skill writes. It says what the agent decides; how a script
+  works inside belongs in `references/` or the script's `--help`. Leave out
+  what the agent already knows.
+- Show the reply or report as a short literal example, with the line to give
+  when nothing changed. Number findings and actions, so a person can answer
+  "do 2".
+- Label an estimate as one ("could save about"), and say where the skill
+  measures the real effect later, if it does.
 - Scripts are self-contained, print a clear error on bad input and read only
   unless the skill says otherwise. A skill that needs tools or network access
   says so in `compatibility`.

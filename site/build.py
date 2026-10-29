@@ -107,6 +107,10 @@ def collect():
         if members:
             groups.append({'id': gdir.name, 'name': name, 'description': desc, 'plugin': members[0]['plugin'], 'skills': members})
             skills += members
+    # A page for a skill that was renamed or removed would build silently and never show.
+    orphans = sorted({p.stem for p in (CONTENT / 'skills').glob('*.json')} - {s['slug'] for s in skills})
+    if orphans:
+        sys.exit(f"site/content/skills: no skill named {', '.join(orphans)}")
     return home, groups, skills
 
 # ---------- Page parts ----------

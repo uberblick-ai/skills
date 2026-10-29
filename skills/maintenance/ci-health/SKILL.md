@@ -1,15 +1,15 @@
 ---
 name: ci-health
 description: >-
-  Track CI health on a repository's main branch from GitHub Actions: the
-  median wall time a push waits for CI and its slow tail, the share of runs
-  that fail, the number of tests, optionally coverage and the test-to-code ratio, the changes that
-  made CI slower or faster, and the top three actions that would cut the
-  wait. Use when a maintainer asks how long CI takes, whether it got slower
-  or what would make it faster, or to record CI figures daily; a run fills
-  in every day missing since the last one stored. Works for
-  any repository and language. Not a CI fix, a flaky-test hunt or a merge
-  gate.
+  Track CI health on a repository's main branch from GitHub Actions: the wall
+  time a push waits for CI and its slow tail, the share of failed runs, the
+  test count, optionally coverage and the test-to-code ratio, the changes that
+  made CI slower or faster, and the top three actions that would cut the wait.
+  Use for "how long does CI on main take?", "did CI get slower this week?",
+  "what would make CI faster?" or "record yesterday's CI figures". Works for
+  any repository and language. Writes only to a scratch directory and, when
+  one exists, the repository's CI Health Report document. Not for fixing CI,
+  hunting flaky tests or gating merges.
 license: MIT
 compatibility: >-
   Requires python3 and an authenticated GitHub CLI (gh); reads GitHub only.
@@ -20,25 +20,24 @@ compatibility: >-
   the `ub` command; without either the skill prints a table.
 metadata:
   author: uberblick-ai
-  version: "1.8"
+  version: "1.9"
 ---
 
 # CI health
 
-CI should stay fast as a project grows: the wait that counts is wall time,
+CI should stay fast as a project grows. The wait that counts is wall time,
 from the first job starting to the last one finishing, not the minutes the
-jobs add up to. The wall time chart shows that total only; each job's time
-stays in the data to show which job moved when the total steps. A second
-chart shows how many run attempts on main end red, re-runs included. This skill records
-one repository's days since the last one stored, or yesterday alone when
-nothing is stored yet, keeps the steps that moved the total, with their
-cause, and keeps up to three actions that would most cut the wait, judged
-again on every run.
+jobs add up to. This skill records one repository's days since the last one
+stored, or yesterday alone when nothing is stored yet, names the changes
+that moved the wall time, and keeps up to three actions that would most cut
+the wait, judged again on every run.
 
 `scripts/ci.py` lives next to this file; call it by its path inside this
 skill's directory. `REPO` is `OWNER/NAME`, `DIR` a scratch directory outside
-the repository. Definitions, the records, the `mise` task conventions and
-the document layout are in [references/data.md](references/data.md).
+the repository. What the script measures and how, the records, the `mise`
+task conventions and the document layout are in
+[references/data.md](references/data.md); the steps below are what you
+decide.
 
 1. Decide where the figures will be kept. Each repository keeps its own "CI
    Health Report" document in the Uberblick workspace its checkout is bound
@@ -73,18 +72,17 @@ the document layout are in [references/data.md](references/data.md).
    ```
 
    Days are UTC days. With `DOC`, `--after` collects every day after the
-   newest stored one up to yesterday, so a run fills in each day nobody
-   recorded: three days missing means three days collected. With nothing
-   missing it collects yesterday again. GitHub keeps job logs 90 days, so a
-   gap reaches no further back than that. Without `DOC`, or for a document
-   created in step 9, leave `--after` out: the default is yesterday alone.
-   `--day` picks one day instead when the maintainer names it, and `--since`
-   (with `--until`) a longer history only when they ask for one. Collecting
-   reads each completed, non-skipped run's jobs, so a long span takes minutes.
-   Transient read failures get up to three attempts. Successful reads are
-   checkpointed in `DIR/cache`, so retrying the command resumes those reads.
-   Use one cache for this report's `collect`, `logs` and `tests` commands;
-   start with a fresh scratch directory for a new report to fetch current data.
+   newest stored one up to yesterday, so three days missing means three days
+   collected; with nothing missing it collects yesterday again. GitHub keeps
+   job logs 90 days, so a gap reaches no further back than that. Without
+   `DOC`, or for a document created in step 9, leave `--after` out: the
+   default is yesterday alone. `--day` picks one day instead when the
+   maintainer names it, and `--since` (with `--until`) a longer history only
+   when they ask for one. A long span takes minutes. When the command fails,
+   run it again: the cache resumes the reads that succeeded. Use the same
+   cache for this report's `collect`, `logs` and `tests`, and a fresh scratch
+   directory for a new report.
+
    Pass `--workflow` when the repository also runs a workflow on only some
    pushes (path filters, a release proof), naming the workflow every push
    runs, so a commit that skipped CI does not read as a fast one. Pass
@@ -92,8 +90,7 @@ the document layout are in [references/data.md](references/data.md).
    re-enabled after a gap, or moved to another system. A rework of the
    workflow is not a reason; it is an incident, and the step should show.
    Once a document holds days, reuse their `workflows` and `start` fields on
-   every run, or the history shifts. It also counts every run attempt,
-   re-runs included, for the share that failed. A document whose days lack
+   every run, or the history shifts. A document whose days lack
    `failure_pct` gets it by collecting those days again with `--since`.
 
 3. Count the tests. Test runners differ by language and setup, so you read
@@ -103,22 +100,19 @@ the document layout are in [references/data.md](references/data.md).
    python3 scripts/ci.py logs DIR/data.json --out DIR/logs --cache DIR/cache
    ```
 
-   It saves the cleaned log of each job of the last day's last green commit;
-   `tests` then counts every collected day, reusing downloaded logs from the cache.
+   It saves the cleaned log of each job of the last day's last green commit.
    Find the lines where the repository's test runners say how many tests
    ran; the checkout's languages and test setup tell you which runners to
    look for. Write one regular expression per runner whose groups capture
    the counts to add up: tests run or passed, not skipped ones. When a
    runner's total includes skipped tests, add a pattern for its skipped
    count with a group named `skipped`, which is subtracted, for example
-   `^OK \(skipped=(?P<skipped>\d+)\)`. Then:
+   `^OK \(skipped=(?P<skipped>\d+)\)`. Then count every collected day:
 
    ```sh
    python3 scripts/ci.py tests DIR/data.json --cache DIR/cache --pattern 'REGEX' [--pattern 'REGEX']
    ```
 
-   Every integer the groups capture, on every matching line, is summed per
-   job; jobs that differ only in a parenthesised matrix value count once.
    Check the day's `tests` against the logs before going on. A stored day's
    `tests_pattern` holds the patterns joined by ` || `; reuse them while they
    still match. When no job prints a count, leave `tests` out and say so.
@@ -139,20 +133,16 @@ the document layout are in [references/data.md](references/data.md).
    python3 scripts/ci.py measure DIR/data.json --checkout PATH --path SPEC [--path SPEC]... [--every-day]
    ```
 
-   It fetches the last green commit if the clone lacks it, checks it out in
-   a temporary worktree, which it removes afterwards, and adds
-   `test_ratio` (with `code_lines` and `test_lines`) to the last day, or to
-   every day with `--every-day`, which more than one collected day wants, plus
-   `coverage_pct` when the checkout defines `mise run codecov`. Lines are
-   counted by `scc`, or `cloc` without it, over the files git tracks, so
-   blank and comment lines, prose and data never count; `loc_tool` records
-   which. A `mise run loc` task replaces that count. If installed counters
-   fail their probes, or the selected counter fails its count, `measure`
-   reports the error and leaves the data file unchanged; fix it and retry.
-   When it finds no line counter, say so in one line with the install command it
-   suggests for this host, and go on without the ratio. Without a coverage
-   task, mention once that adding one charts coverage too; the conventions
-   are in `references/data.md`. Skip this step without a clone.
+   It adds `test_ratio` to the last day, or to every day with
+   `--every-day`, which more than one collected day wants, plus
+   `coverage_pct` when the checkout defines `mise run codecov`. If installed
+   counters fail their probes, or the selected counter fails its count,
+   `measure` reports the error and leaves the data file unchanged; fix it
+   and retry. When it finds no line counter, say so in one line with the
+   install command it suggests for this host, and go on without the ratio.
+   Without a coverage task, mention once that adding one charts coverage
+   too; the conventions are in `references/data.md`. Skip this step without
+   a clone.
 
 5. Find the steps:
 
@@ -161,21 +151,17 @@ the document layout are in [references/data.md](references/data.md).
    python3 scripts/ci.py shifts DIR/data.json > DIR/shifts.json
    ```
 
-   Each step is a point where the median wall time of the green commits
-   before it and after it differs by at least a minute and 15 percent, with
-   the jobs' medians on both sides and the commits that can explain it,
-   failed ones included. Each `hang` is a stretch of commits whose CI failed
-   only after an hour or more, such as tests hanging until the job timeout,
-   with the commit that started it and the first one after it. Only
-   candidates on the collected days are listed; the weeks before them only
-   feed the medians. Drop a candidate already in `incidents` within three
-   days, and a step that no change explains, such as one that reverses
-   within a day or moves every job alike (runner speed). A step right after
-   a hang is usually the change that ended it: name it once, as the hang's
-   `faster` incident, with the new green time in `why`. A step needs eight
-   green commits on each side, so a change in the last day or two shows only
-   in the summary; when it shows jobs added or dropped, or the day's wall
-   time moving by a minute and 15 percent, find that change too.
+   `shifts` lists candidate steps in wall time and hangs (CI failing only
+   after an hour or more, such as tests hanging until the job timeout), each
+   with the commits that can explain it; `references/data.md` defines both.
+   Drop a candidate already in `incidents` within three days, and a step
+   that no change explains, such as one that reverses within a day or moves
+   every job alike (runner speed). A step right after a hang is usually the
+   change that ended it: name it once, as the hang's `faster` incident, with
+   the new green time in `why`. A step needs eight green commits on each
+   side, so a change in the last day or two shows only in the summary; when
+   it shows jobs added or dropped, or the day's wall time moving by a minute
+   and 15 percent, find that change too.
 
 6. Name the cause of each remaining step. Look at the suspects' PRs and
    commits: workflow files, test setup, the jobs that moved. Write
@@ -196,17 +182,21 @@ the document layout are in [references/data.md](references/data.md).
    python3 scripts/ci.py signals DIR/data.json > DIR/signals.json
    ```
 
-   It covers the 7 days ending the last day: pushes a day, the job that
-   ends last on green pushes and how far ahead of the next one, failures by
-   job, runner waits and hangs, with a rough count of the minutes of
-   waiting a day each accounts for (`waiting_min_per_day`). Add what the
-   workflow files, the incidents and, with `DOC`, its recent `days` show:
-   a job that sets the wall time (split, shard or cache it, or move work
-   off the critical path), jobs that fail or hang on changes they should
-   not care about, runner waits, a suite that runs twice. Each action is
-   one change a person can make in the repository, with its evidence in
-   numbers and dates and the minutes a day it could save; rank by those
-   minutes.
+   It covers the 7 days ending the last day, with a rough count of the
+   minutes of waiting a day each problem accounts for
+   (`waiting_min_per_day`). Add what the workflow files, the incidents and,
+   with `DOC`, its recent `days` show: a job that sets the wall time (split,
+   shard or cache it, or move work off the critical path), jobs that fail or
+   hang on changes they should not care about, runner waits, a suite that
+   runs twice. Each action is one change a person can make in the
+   repository, with its evidence in numbers and dates and the minutes a day
+   it could save; rank by those minutes.
+
+   Those minutes are an estimate: write them as "could save about", never
+   as a measured result. Measurement comes after the change: once an action's
+   pull request has merged, the step it caused shows in `shifts` and step 6
+   records it as an incident naming that pull request, so the reply can set
+   the estimate beside what the days measured.
 
    With `DOC`, start from its stored `actions`. Keep one while its evidence
    holds, with its `id` and `since` and today's numbers in `why`; drop one
@@ -214,21 +204,16 @@ the document layout are in [references/data.md](references/data.md).
    only when a candidate saves clearly more. An action with an `applied`
    mark is being handled: someone discussed it and opened the pull request
    or issue the mark names. Keep it, struck through, in its place while that
-   pull request or issue is open, and drop it once it is merged or closed;
-   the days after show what it changed. Without `DOC`, nothing keeps
-   actions between runs, so choose them afresh. Fewer than three is fine,
-   and no action goes without data behind it. Write `DIR/actions.json` in
-   rank order, in the shape `references/data.md` gives: `area`, `title`
-   (the change), `why` (the evidence and the expected saving, two or three
-   sentences), `check` (what to read in the repository before changing
-   anything), `impact_min_per_day`, `where` (the workflow file or job it
-   changes), `evidence` (the issues and PRs behind it, if any: a number in
-   the repository or `owner/name#number`), and for a kept action its `id`
-   and `since`. `cost` replaces the footer's "about N min of waiting a day"
-   when the cost reads better in other words.
+   pull request or issue is open, and drop it once it is merged or closed.
+   Without `DOC`, nothing keeps actions between runs, so choose them afresh.
+   Fewer than three is fine, and no action goes without data behind it.
+   Write `DIR/actions.json` in rank order, in the shape `references/data.md`
+   gives: `why` holds the evidence and the expected saving in two or three
+   sentences, `check` what to read in the repository before changing
+   anything, and a kept action its `id` and `since`.
 
-8. Without `DOC`, reply with the summary table, any incidents and the
-   actions; stop here.
+8. Without `DOC`, reply as step 11 shows, with the summary table above it;
+   stop here.
 
 9. Store the day, unless the maintainer asked for the table only. For a new
    document the maintainer said yes to, pick from `list_tags` the active ids
@@ -262,27 +247,30 @@ the document layout are in [references/data.md](references/data.md).
     changelog DIR/all-incidents.json`, and replace the list items under the
     "Incidents" heading, below the charts, with its blocks. On every run,
     since their numbers move, run `ci.py cards DIR/data.json DIR/actions.json
-    --doc DOC [--applied DIR/applied.json]` and replace the cards under the "Recommended Actions" heading,
-    or its "No action proposed yet." paragraph, with its blocks; a document
-    without that heading gets it after the last chart, with the paragraph
-    `create` writes below it. Each card's footer carries the evidence:
-    where the change applies, what the problem costs and the issues and PRs
-    behind it, as GitHub pills. Its button opens a new Claude Code
-    session with a prompt to discuss the action before changing anything.
-    When that discussion settles on applying it, the prompt has the session
-    strike the card through, with the pull request or issue as a GitHub
-    pill below, and store an `applied` mark, so `cards` keeps it that way. If
+    --doc DOC [--applied DIR/applied.json]` and replace the cards under the
+    "Recommended Actions" heading, or its "No action proposed yet."
+    paragraph, with its blocks; a document without that heading gets it
+    after the last chart, with the paragraph `create` writes below it. If
     Uberblick refuses a card with `invalid_card` (0.4.3 has no card buttons),
-    run `cards` or `create` again with `--no-button`. Leave every
-    other block as it is, since people may have edited it. The document has no
-    TL;DR: the charts, actions and incidents are the summary, so do not add
-    one when a tool suggests it. Through `ub`, gather these writes into one
+    run `cards` or `create` again with `--no-button`. Leave every other block
+    as it is, since people may have edited it. The document has no TL;DR:
+    the charts, actions and incidents are the summary, so do not add one
+    when a tool suggests it. Through `ub`, gather these writes into one
     `--calls` file; several blocks inserted after the same block, in reverse
     order, end up in order, so the file needs only ids read before.
 
-11. Reply with the total wall time (the 7-day median with its ± and the
-    P95), the share of failed runs, the tests, the test ratio and any
-    coverage, any new incident with the job that moved, the actions with which are new or dropped, and
-    where the days were stored, naming the days filled in when there was
-    more than one. When the skill runs on a schedule with
-    nothing new, a single line is enough.
+11. Reply in this shape, with your own numbers (these are an example). Leave
+    out a line that has nothing in it, and number the actions so the
+    maintainer can say "discuss 2":
+
+    ```text
+    CI on main, 7 days to 28 October: 9.7 min median (± 1.2), P95 14.1 min. 6% of runs failed. 2,431 tests, test ratio 0.82, coverage 71%.
+    New incident: 27 October, 2.5 min slower, job e2e, after acme/app#412 added browser tests.
+    Actions: 1. Shard the e2e job, could save about 60 min of waiting a day (new). 2. Cache the pnpm store (kept). Dropped: retry the flaky sync test, fixed by acme/app#405.
+    Measured: acme/app#398 (cache Playwright browsers) estimated 20 min a day; the days since show 1.1 min less per push, about 25 min a day.
+    Stored 26 to 28 October in the CI Health Report.
+    ```
+
+    Without `DOC`, the last line says the figures were not stored and why.
+    When the skill runs on a schedule with nothing new, one line is enough:
+    `CI on main: 9.7 min median, P95 14.1 min, no new incident or action.`

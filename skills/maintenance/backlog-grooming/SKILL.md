@@ -2,10 +2,13 @@
 name: backlog-grooming
 description: >-
   Groom a repository backlog, milestone or project for an engineering manager
-  or product owner: challenge unnecessary work, duplicates, superseded scope and
-  unclear value, then produce an actionable evidence report with effort,
-  blockers and milestone load, flagging overloaded milestones. Use for a daily backlog review or to identify what can be cut to
-  deliver a specific outcome sooner. Not an implementation run or release gate.
+  or product owner: challenge unnecessary work, duplicates, superseded scope
+  and unclear value, then produce an evidence report with effort, blockers and
+  milestone load, flagging overloaded milestones. Use for "groom the backlog
+  for the 1.4 milestone", "what can we cut to ship sync sooner?" or "which
+  open issues are already delivered?". Writes a local HTML and JSON report;
+  changes issues, labels, milestones or the corpus only when asked. Not an
+  implementation run or release gate.
 license: MIT
 compatibility: >-
   Requires python3 for the report. Issue, PR and code access are needed for
@@ -13,7 +16,7 @@ compatibility: >-
   Product corpus and ub-agents integrations are optional. No runtime packages.
 metadata:
   author: uberblick-ai
-  version: "1.3"
+  version: "1.4"
 ---
 
 # Backlog grooming

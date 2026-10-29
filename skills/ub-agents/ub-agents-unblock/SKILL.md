@@ -3,11 +3,11 @@ name: ub-agents-unblock
 description: >-
   Walk a maintainer through the issues and pull requests the ub-agents loop
   stopped on (needs-human and other stop labels, blocked or failed runs), one
-  at a time: recommend a
-  decision from the item and the repository's agent guidance, ask with an
-  interactive prompt, then post the answer and resume, merge or close the
-  item. Use when someone asks to unblock the loop, go through needs-human
-  items or answer what agents asked. Not for loop roles.
+  at a time, with a recommended decision for each, then post the answer and
+  resume, merge or close the item. Use for "unblock the loop", "go through the
+  needs-human items" or "what are the agents waiting on me for?". Changes only
+  what the maintainer chooses: a comment, labels, a milestone, a merge or a
+  close. Not for loop roles.
 license: MIT
 compatibility: >-
   Requires an authenticated GitHub CLI (gh) acting as a maintainer; with
@@ -16,7 +16,7 @@ compatibility: >-
   otherwise with gh alone. Its own GitHub calls use the REST API only.
 metadata:
   author: uberblick-ai
-  version: "0.5"
+  version: "0.6"
 ---
 
 # Unblock the loop
@@ -132,3 +132,10 @@ How the launcher works; the project decides the labels, roles and policy.
    or file it, and resume the item only once the notice's condition holds.
 
 7. End with one line per item: what changed and which role picks it up next.
+   For example:
+
+   ```text
+   #2201 answered "Split the migration", needs-human removed, needs-preparation added: the preparer picks it up.
+   #2210 merged at 3f2a9c1: done.
+   #2215 skipped: nothing changed, still waiting on you.
+   ```
