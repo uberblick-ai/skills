@@ -20,7 +20,7 @@ compatibility: >-
   the `ub` command; without either the skill prints a table.
 metadata:
   author: uberblick-ai
-  version: "1.7"
+  version: "1.8"
 ---
 
 # CI health
@@ -69,7 +69,7 @@ the document layout are in [references/data.md](references/data.md).
 2. Collect:
 
    ```sh
-   python3 scripts/ci.py collect --repo REPO --after DIR/days.json [--workflow W] [--start DAY] > DIR/data.json
+   python3 scripts/ci.py collect --repo REPO --after DIR/days.json --cache DIR/cache [--workflow W] [--start DAY] > DIR/data.json
    ```
 
    Days are UTC days. With `DOC`, `--after` collects every day after the
@@ -80,7 +80,11 @@ the document layout are in [references/data.md](references/data.md).
    created in step 9, leave `--after` out: the default is yesterday alone.
    `--day` picks one day instead when the maintainer names it, and `--since`
    (with `--until`) a longer history only when they ask for one. Collecting
-   reads every run's jobs, so a long span takes minutes.
+   reads each completed, non-skipped run's jobs, so a long span takes minutes.
+   Transient read failures get up to three attempts. Successful reads are
+   checkpointed in `DIR/cache`, so retrying the command resumes those reads.
+   Use one cache for this report's `collect`, `logs` and `tests` commands;
+   start with a fresh scratch directory for a new report to fetch current data.
    Pass `--workflow` when the repository also runs a workflow on only some
    pushes (path filters, a release proof), naming the workflow every push
    runs, so a commit that skipped CI does not read as a fast one. Pass
@@ -96,11 +100,11 @@ the document layout are in [references/data.md](references/data.md).
    the summary off the logs rather than the script guessing:
 
    ```sh
-   python3 scripts/ci.py logs DIR/data.json --out DIR/logs
+   python3 scripts/ci.py logs DIR/data.json --out DIR/logs --cache DIR/cache
    ```
 
    It saves the cleaned log of each job of the last day's last green commit;
-   `tests` then counts every collected day from its own logs.
+   `tests` then counts every collected day, reusing downloaded logs from the cache.
    Find the lines where the repository's test runners say how many tests
    ran; the checkout's languages and test setup tell you which runners to
    look for. Write one regular expression per runner whose groups capture
@@ -110,7 +114,7 @@ the document layout are in [references/data.md](references/data.md).
    `^OK \(skipped=(?P<skipped>\d+)\)`. Then:
 
    ```sh
-   python3 scripts/ci.py tests DIR/data.json --pattern 'REGEX' [--pattern 'REGEX']
+   python3 scripts/ci.py tests DIR/data.json --cache DIR/cache --pattern 'REGEX' [--pattern 'REGEX']
    ```
 
    Every integer the groups capture, on every matching line, is summed per
@@ -142,8 +146,10 @@ the document layout are in [references/data.md](references/data.md).
    `coverage_pct` when the checkout defines `mise run codecov`. Lines are
    counted by `scc`, or `cloc` without it, over the files git tracks, so
    blank and comment lines, prose and data never count; `loc_tool` records
-   which. A `mise run loc` task replaces that count. When `measure` finds
-   no line counter, say so in one line with the install command it
+   which. A `mise run loc` task replaces that count. If installed counters
+   fail their probes, or the selected counter fails its count, `measure`
+   reports the error and leaves the data file unchanged; fix it and retry.
+   When it finds no line counter, say so in one line with the install command it
    suggests for this host, and go on without the ratio. Without a coverage
    task, mention once that adding one charts coverage too; the conventions
    are in `references/data.md`. Skip this step without a clone.

@@ -135,7 +135,8 @@ class Tests(unittest.TestCase):
                 (Path(root) / name).write_text(text)
             subprocess.run(["git", "init", "-q", root], check=True)
             subprocess.run(["git", "-C", root, "add", ".", ":!untracked"], check=True)
-            for counter in counters:
+            for tool in counters:
+                counter = ci.line_counter((tool,))
                 self.assertEqual(ci.count_lines(root, counter), {"code_lines": 3, "test_lines": 1},
                                  f"{counter}: tracked code only, no blanks, comments, prose or data")
                 self.assertEqual(ci.count_lines(root, counter, ["src", "tests"]), {"code_lines": 2, "test_lines": 1},
