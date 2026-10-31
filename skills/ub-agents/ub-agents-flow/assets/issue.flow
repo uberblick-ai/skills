@@ -1,0 +1,32 @@
+flow v0
+# OWNER/NAME, issue phase: from a new issue to ready.
+
+columns main stop
+
+end created col=main tone=muted "Issue created"
+pill needs-preparation tone=muted
+decision g1 tone=system "G1 Launcher: may it start?"
+box issue-preparer "states behavior and acceptance criteria"
+decision g2 tone=system "G2 Clear and in scope?"
+pill ready tone=done
+end delivery "Implementation picks it up"
+
+panel human col=stop row=g2 tone=stop
+  pill needs-human
+  strong "G3 A maintainer answers"
+  muted "answers on the issue,"
+  muted "removes needs-human"
+
+created --> needs-preparation : a maintainer adds the label
+needs-preparation --> g1
+g1 --> issue-preparer : yes, before every run
+issue-preparer --> g2
+g2 --> ready : prepared
+ready --> delivery
+g2 --> human tone=stop : needs-human: unclear intent or a scope change
+human --> needs-preparation tone=stop from=top to=right label=end : re-adds needs-preparation
+
+legend
+  decision tone=system "gate, numbered as in the cards"
+  pill tone=done "GitHub label"
+  panel tone=stop "a person decides"
