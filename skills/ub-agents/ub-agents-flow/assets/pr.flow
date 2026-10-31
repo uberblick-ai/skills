@@ -38,7 +38,7 @@ g4 --> needs-changes tone=rework : changes-requested
 g5 --> needs-changes tone=rework to=bottom : changes-requested
 needs-changes --> implementer tone=rework from=top to=left label=end : revise the same PR
 
-g5 --> human tone=stop : maintainer-merge
+g5 --> human tone=stop : maintainer-merge: a guarded path
 
 legend
   decision tone=system "gate, numbered as in the cards"

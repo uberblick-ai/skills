@@ -23,7 +23,7 @@ g1 --> issue-preparer : yes, before every run
 issue-preparer --> g2
 g2 --> ready : prepared
 ready --> delivery
-g2 --> human tone=stop : needs-human
+g2 --> human tone=stop : needs-human: unclear intent or a scope change
 human --> needs-preparation tone=stop from=top to=right label=end : re-adds needs-preparation
 
 legend

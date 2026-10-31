@@ -20,7 +20,7 @@ compatibility: >-
   Uberblick corpus through a connected Uberblick MCP server when there is one.
 metadata:
   author: uberblick-ai
-  version: "0.1"
+  version: "0.2"
 ---
 
 # Loop flow
@@ -31,8 +31,10 @@ item move on, where work goes back and where it waits for a person. The config
 says who runs when; the instruction files say what each agent checks. The
 skill writes three documents: an overview with the whole loop in one drawing,
 then one per phase with its gates: the issue phase, from a new issue to
-`ready`, and the implementation and PR phase, from `ready` to the merge. When
-the maintainer asks for one document, it combines them. It uses only what an
+`ready`, and the implementation and PR phase, from `ready` to the merge. A step
+with its own entries, forks and person gates, such as the merge, can get a
+document of its own that continues its phase's gate numbers. When the
+maintainer asks for one document, it combines them. It uses only what an
 Uberblick document holds (headings, paragraphs, `ablauf` fences, tables, cards
 and lists), so each Markdown file it writes is a document and the page shows
 them the way Uberblick would.
@@ -53,9 +55,10 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    and stop. Note every agent with its `kind`, `trigger`, `outcomes` (the
    labels each adds and removes, any `max-rounds`), `instructions`,
    `different-runtime-from` and timeouts, and the top-level `stop-labels`,
-   `approvals`, `trusted-pr-authors`, `queue`, `limits` and
-   `shared-instructions`. Note any trigger label that no outcome adds, such as
-   a bot's own label: work enters there without an issue.
+   `approvals`, `trusted-pr-authors`, `queue`, `limits`, `events` and
+   `shared-instructions`, and any outcome's `sub-issues` labels. Note any
+   trigger label that no outcome adds, such as a bot's own label: work enters
+   there without an issue.
 
 2. Read the guidance with line numbers: `AGENTS.md`, the
    `shared-instructions` file, each agent's `instructions` file and the policy
@@ -79,10 +82,23 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    Merge what one agent checks into one gate unless the maintainer asks for
    every check. Sort every agent and gate into a phase: issue agents (`kind:
    issue`, such as the issue-preparer and an optional issue-reviewer) up to
-   the label the implementer starts on, the rest after it. Note anything that
-   does not fit: an outcome label no agent picks up, an agent no outcome
-   reaches, a rule in the instructions the config cannot route, a role that
-   can only stop by reporting blocked.
+   the label the implementer starts on, the rest after it. For every stop,
+   note why an agent takes it, in the instructions' words: these reasons
+   label the edges into the stop panel.
+
+   Follow the instructions into the automation they rely on: the CI
+   workflows they name, and the command `events` runs with the filter it
+   applies. Say exactly what each one changes (a pull request's description
+   is not its milestone's) and who hears of what. A hook's failure shows only
+   in the launcher's own output, so check that what the hook needs, such as
+   a secret, can be read where the launcher runs.
+
+   Note anything that does not fit: an outcome label no agent picks up, an
+   agent no outcome reaches, a rule in the instructions the config cannot
+   route, a role that can only stop by reporting blocked (a blocked report
+   adds no label, so label views and hooks that filter on labels miss it),
+   sub-issues that get no label from a `sub-issues` outcome or from the
+   instructions and so wait for a person.
 
 3. Read the corpus, if there is one. The corpus is available when an
    Uberblick MCP server is connected, whatever its name, such as `uberblick`
@@ -101,8 +117,9 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    document, the generated ones included.
 
 4. Write `DIR/flow.json` as [references/page.md](references/page.md)
-   describes: the overview with a short summary, one sentence per way work
-   enters and per phase, and one on where a person steps in; the two phases
+   describes: the overview with a short summary of the delivery model, where
+   work lands and how it reaches a release, in the team's terms, one sentence
+   per phase and one on where a person steps in; the two phases
    with a sentence each, their roles, their gates numbered from `G1` in the
    order an item meets them with one plain sentence each, and their notes, the
    issue phase's starting with one per `queue` setting in use, saying what it
@@ -113,7 +130,9 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    present tense: a route the maintainer has decided is described as running,
    with no "planned", and no issue or PR number, release or date. Describe the
    queue as the launcher runs it; where the repository's own instructions say
-   otherwise, add that as a finding.
+   otherwise, add that as a finding. Keep to how work moves: how a workflow
+   authenticates, which token it uses or how a file is formatted stays in the
+   repository's own files.
 
 5. Draw `DIR/overview.flow`, `DIR/issue.flow` and `DIR/pr.flow` as
    [references/flow.md](references/flow.md) describes, starting from
@@ -122,7 +141,10 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    the path an item takes when every gate passes down the middle, rework on
    the left, the stop panel on the right, every gate numbered as in its phase
    in `flow.json`. The overview stays abstract: the ways work enters, one box
-   per phase, and the merge.
+   per phase, and the merge. Draw a fork on a property of the item as a
+   route, label every edge into the stop panel with its reasons, draw each
+   notification where it fires, and end a drawing that hands over to another
+   document with what the item waits for.
 
 6. Render all three, installing the renderer once per scratch directory:
 
@@ -141,8 +163,8 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    ```
 
    It writes `DIR/overview.md`, `DIR/issue.md` and `DIR/pr.md` in Uberblick
-   Markdown, and `DIR/flow.html`, the same blocks styled like Uberblick
-   documents with each `ablauf` fence drawn. When the maintainer asks for one
+   Markdown (one file per phase document), and `DIR/flow.html`, the same
+   blocks styled like Uberblick documents with each `ablauf` fence drawn. When the maintainer asks for one
    document, add `--combine`: it writes `DIR/flow.md` instead, the overview
    followed by each phase under its own heading. Fix every warning it prints
    (an outcome label that starts nothing, a gate missing from the drawings, a
@@ -154,9 +176,17 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    maintainer asked for files only. Follow the repository's rules for corpus
    pages from step 3. When step 3 found the documents an earlier run wrote,
    update them in place: change only the blocks whose facts changed, and keep
-   every edit a maintainer made (wording, added or removed blocks, links).
-   Otherwise create them: the phase documents first, then the overview, with
-   each phase's name in the overview's summary linked to its document. Tag
+   every edit a maintainer made (wording, added or removed blocks, links,
+   headings, merged paragraphs, a removed TL;DR). Never add back what a
+   maintainer removed. Maintainers edit while you work: read a document again
+   right before editing it. A text edit cannot add a link and can shift the
+   formatting next to it; to add a link, replace the block (only when it
+   carries no comments), and check formatted blocks with `export_markdown`
+   afterwards. Otherwise create them: the phase documents first, then the
+   overview, with each document's name linked in the overview's documents
+   line, and the overview's title linked in each phase document's opening
+   "Details of" line. Set no TL;DR: each document's first paragraph is its
+   summary. Tag
    every document with the corpus's tag for workflow documents, such as
    `workflow`, when it has one; never invent a tag. With
    `--combine`, store the one document. Check that every write was applied

@@ -44,13 +44,17 @@ def words(value):
 
 
 def gate_list(gates, where):
-    """A phase's gates, numbered G1, G2, ... in the order an item meets them."""
+    """A document's gates, numbered in the order an item meets them; consecutive numbering is checked across
+    documents, since a step in a document of its own continues its phase's numbers."""
     if not isinstance(gates, list) or not gates:
         raise ValueError(f"{where}: gates must list at least one gate")
-    for n, gate in enumerate(gates, 1):
+    last = 0
+    for gate in gates:
         gid = text(gate, "id", f"{where} gate")
-        if gid != f"G{n}":
-            raise ValueError(f"{where}: gate {gid!r} must be G{n}; number each phase's gates from G1 in order")
+        if not GATE_ID.match(gid) or int(gid[1:]) <= last:
+            raise ValueError(f"{where}: gate {gid!r} must be G{last + 1} or later; number gates in the order an "
+                             "item meets them")
+        last = int(gid[1:])
         for key in ("name", "at"):
             text(gate, key, f"{where} {gid}")
         if gate.get("decides") not in DECIDERS:
@@ -61,7 +65,30 @@ def gate_list(gates, where):
         for source in sources:
             if not isinstance(source, str) or not SOURCE.match(source):
                 raise ValueError(f"{where} {gid}: source {source!r} must be path or path:line or path:start-end")
-    return [g["id"] for g in gates]
+    return [int(g["id"][1:]) for g in gates]
+
+
+def check_numbering(phases):
+    """Each document counts from G1 unless it continues another; a number one document skips belongs to a document
+    that continues it, and a gate two documents share keeps its name."""
+    by_name = {p["name"]: p for p in phases}
+    for phase in phases:
+        numbers = [int(g["id"][1:]) for g in phase["gates"]]
+        followers = [p for p in phases if p.get("continues") == phase["name"]]
+        if "continues" not in phase:
+            if numbers[0] != 1:
+                raise ValueError(f"{phase['name']}: gates start at G1 unless the document continues another")
+        elif phase["continues"] not in by_name or phase["continues"] == phase["name"]:
+            raise ValueError(f"{phase['name']}: continues must name another phase")
+        else:
+            earlier = {g["id"]: g["name"] for g in by_name[phase["continues"]]["gates"]}
+            for gate in phase["gates"]:
+                if gate["id"] in earlier and earlier[gate["id"]] != gate["name"]:
+                    raise ValueError(f"{phase['name']} {gate['id']}: a gate two documents share keeps its name")
+        later = {int(g["id"][1:]) for p in followers for g in p["gates"]}
+        skipped = [n for n in range(numbers[0], numbers[-1]) if n not in numbers and n not in later]
+        if skipped:
+            raise ValueError(f"{phase['name']}: G{skipped[0]} is in no document; number gates without gaps")
 
 
 def note_list(obj, where):
@@ -123,7 +150,7 @@ def validate(data, flows=None):
         raise ValueError("overview: notes belong to a phase; the overview keeps to the abstract flow")
     points = overview.get("points")
     if not isinstance(points, list) or not points or not all(isinstance(p, str) and p.strip() for p in points):
-        raise ValueError("overview: points must list each input and each phase in a sentence")
+        raise ValueError("overview: points must say what each phase does in a sentence")
     warnings += [f"overview: point {n} is over {BUDGET['point']} words"
                  for n, point in enumerate(points, 1) if words(point) > BUDGET["point"]]
     roles = data.get("roles")
@@ -177,6 +204,7 @@ def validate(data, flows=None):
                 warnings.append(f"{name} {gate['id']}: rule is over {BUDGET['rule']} words")
         section_list(phase, name)
         note_list(phase, name)
+    check_numbering(phases)
     missing = [r["agent"] for r in roles if r["agent"] not in placed]
     twice = sorted({v for v in placed if placed.count(v) > 1})
     if missing or twice:
@@ -209,17 +237,32 @@ def titles(data):
     return data["overview"].get("title") or f"How the loop runs in {repo}", phase
 
 
+def lower(name):
+    return name[0].lower() + name[1:]
+
+
+def documents_line(phases):
+    """The overview's pointer to the phase documents, kept apart from the summary; the corpus links each name."""
+    names = [f"the {lower(p['name'])}" for p in phases]
+    listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    return f"{listed[0].upper()}{listed[1:]} each have their own document." if len(names) > 1 \
+        else f"{listed[0].upper()}{listed[1:]} has its own document."
+
+
 def documents(data):
     """The overview, then one document per phase, each as (name, title, Uberblick blocks in order)."""
     roles = {r["agent"]: r for r in data["roles"]}
     overview, phase_titles = titles(data)
-    docs = [("overview", overview, [("p", data["overview"]["summary"]), ("ablauf", data["overview"]["flow"])]
+    docs = [("overview", overview, [("p", data["overview"]["summary"]), ("p", documents_line(data["phases"])),
+                                    ("ablauf", data["overview"]["flow"]), ("h2", "The steps in detail")]
              + [("li", point) for point in data["overview"]["points"]])]
     for phase in data["phases"]:
         table = [["Agent", "Starts on", "Does"]]
         table += [[f"**{name}** {roles[name].get('kind', 'any')}", ", ".join(f"`{t}`" for t in roles[name]["triggers"]),
                    roles[name]["does"]] for name in phase["roles"]]
-        out = [("p", phase["summary"]), ("ablauf", phase["flow"]), ("table", table)]
+        # The back-link opens every phase document, so a reader who lands there finds the whole loop.
+        out = [("p", f"Details of **{overview}**. {phase['summary']}"), ("ablauf", phase["flow"]), ("table", table),
+               ("h2", "Gates")]
         out += [("card", {"label": f"{g['id']} · {g['at']} · {g['decides']} decides", "title": g["name"],
                           "body": g["rule"]}) for g in phase["gates"]]
         for section in phase.get("sections", []):
@@ -262,8 +305,8 @@ def markdown(title, blocks, flows):
                                    + ["| " + " | ".join(cell(c) for c in row) + " |" for row in rows]))
         elif kind == "card":
             parts.append(f":::card\nlabel: {value['label']}\ntitle: {value['title']}\n\n{value['body']}\n:::")
-    text = "\n\n".join(parts)
-    return re.sub(r"\n(- [^\n]*)\n\n(?=- )", r"\n\1\n", text) + "\n"
+    # Consecutive list items form one list: no blank line between them.
+    return re.sub(r"(?m)^(- [^\n]*)\n\n(?=- )", r"\1\n", "\n\n".join(parts)) + "\n"
 
 
 def inline(value):

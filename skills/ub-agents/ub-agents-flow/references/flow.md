@@ -59,8 +59,11 @@ legend
   named after it, its caption saying in a few words what the phase checks and
   who does it (`"grounds the requirement in the current code, checks the intent
   is clear and the scope an MVP; an issue review when needed"`), and an
-  `end tone=done "Merged"`. No labels, gates, edge labels, rework or stop
-  panel: the phase documents carry those. `issue.flow` starts at an
+  `end tone=done "Merged"`. No labels, gates, rework or stop panel: the
+  phase documents carry those. Leave edges unlabeled too, except where a
+  person chooses when an item moves on, such as landing a release branch
+  (`: when ready for release, a maintainer merges`): a reader cannot infer
+  that timing. `issue.flow` starts at an
   `end created tone=muted "Issue created"` node with an edge to the entry
   label (`needs-preparation`) saying who adds it, and runs to the label the
   implementer starts on, ending in an `end` node such as "Implementation picks
@@ -86,6 +89,23 @@ legend
   label, where it reads as a step rather than a check (`page.py` warns). A
   launcher gate that applies to every run goes once per phase, before the
   first agent, with an edge label that says so.
+- A fork on a property of the item, not a check it can fail (is the issue in
+  a milestone, did a bot open the pull request), is a route: an unnumbered
+  `decision tone=neutral` with an edge per answer, and a legend entry
+  `decision tone=neutral "route, not a gate"`. Do not hide the fork in two
+  edge labels from one box.
+- Every edge into the stop panel says why, in a few of the instructions'
+  words, not only the label it adds: `: needs-human: unclear intent, scope
+  creep or a team decision`. Where an agent can stop both with a stop label
+  and by reporting blocked, name both on the edge (`: needs-human: a scope
+  call; blocked: needs outside help`), since only the first adds a label.
+- A notification the `events` hook sends is part of the flow. One sent when
+  a role starts is a dashed edge from the role's box to a `box tone=neutral`
+  naming where it posts (`: posts on start`); one sent on a stop is a `muted`
+  line in the stop panel.
+- A drawing that hands an item to another document ends in an `end` node
+  saying what the item waits for (`"waiting for the integrator to pick it
+  up"`), never where the next drawing is.
 - Pills: the entry label `tone=muted`, labels that lead to the next agent
   `tone=agent` or `tone=done`, rework labels `tone=rework`, stop labels inside
   a `tone=stop` panel.

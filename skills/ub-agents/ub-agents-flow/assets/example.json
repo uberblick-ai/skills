@@ -4,10 +4,9 @@
   "ref": "a021eaa",
   "date": "2026-10-20",
   "overview": {
-    "summary": "ub-agents develops itself with its own loop. Work enters as an issue and leaves it squash-merged; agents prepare, build, review and merge it, and a maintainer steps in where an agent stops or a change touches a guarded path. Each phase has its own document with its gates.",
+    "summary": "ub-agents develops itself with its own loop: every change reaches main as one reviewed, squash-merged PR. A maintainer labels an issue; agents prepare, build, review and merge it, and a maintainer steps in where an agent stops or a change touches a guarded path.",
     "flow": "overview.flow",
     "points": [
-      "**An issue** enters when a maintainer starts it.",
       "**Preparation.** The issue-preparer states the behavior and the smallest set of acceptance criteria.",
       "**Implementation.** The implementer builds one PR, a reviewer on another model checks the exact head, and the integrator runs the final checks and merges.",
       "**At any point** an agent that meets unclear intent, work too big for one PR or a decision only a maintainer can make stops with `needs-human`."

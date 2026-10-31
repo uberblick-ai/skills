@@ -92,11 +92,15 @@ class PageTests(unittest.TestCase):
         self.assertEqual([name for name, _, _ in docs], ["overview", "issue", "pr"])
         overview, issue, pr = (page.markdown(title, blocks, self.flows) for _, title, blocks in docs)
         self.assertTrue(overview.startswith("# How the loop runs in uberblick-ai/ub-agents\n"))
-        self.assertIn("\n- **An issue** enters when a maintainer starts it.\n- **Preparation.**", overview)
+        self.assertIn("\n\nThe issue phase and the implementation and PR phase each have their own document."
+                      "\n\n```ablauf\n", overview)
+        self.assertIn("## The steps in detail\n\n- **Preparation.**", overview)
         for absent in (":::card", "| ", "## Notes"):
             self.assertNotIn(absent, overview)
         self.assertIn("## Notes\n\n- `queue.milestones: order` Priority always wins", issue)
-        self.assertTrue(issue.startswith("# The loop in uberblick-ai/ub-agents: issue phase\n"))
+        self.assertTrue(issue.startswith("# The loop in uberblick-ai/ub-agents: issue phase\n\n"
+                                         "Details of **How the loop runs in uberblick-ai/ub-agents**. "))
+        self.assertIn("## Gates\n\n:::card\nlabel: G1", issue)
         self.assertEqual(issue.count(":::card\n"), 3)
         self.assertEqual(pr.count(":::card\n"), 5)
         self.assertIn(":::card\nlabel: G3 · reviewer · agent decides\ntitle: Review\n\nAnother model", pr)
@@ -104,6 +108,35 @@ class PageTests(unittest.TestCase):
         for md in (overview, issue, pr):
             self.assertEqual(md.count("```ablauf\nflow v0\n"), 1)
             self.assertNotIn("footer:", md)
+
+    def split_merge_step(self):
+        """The example with its merge step in a document of its own, continuing the PR phase's gate numbers."""
+        pr = self.data["phases"][1]
+        merge, maintainer = pr["gates"][3], pr["gates"][4]
+        pr.update(roles=["implementer", "reviewer"], gates=pr["gates"][:3] + [maintainer])
+        pr["gates"][3] = copy.deepcopy(maintainer)
+        self.data["phases"].append({"name": "Merge step", "summary": "The integrator merges.", "flow": "merge.flow",
+                                    "continues": "Implementation and PR phase", "roles": ["integrator"],
+                                    "gates": [merge, maintainer]})
+        self.flows["pr.flow"] = self.flows["pr.flow"].replace("G4 Green", "Green")
+        self.flows["merge.flow"] = 'decision g4 tone=system "G4 Green Test on head?"\npanel p\n  strong "G5 A maintainer merges"\n'
+
+    def test_a_document_can_continue_another_ones_gate_numbers(self):
+        self.split_merge_step()
+        self.assertEqual(page.validate(self.data, self.flows), [])
+        docs = page.documents(self.data)
+        self.assertEqual([name for name, _, _ in docs], ["overview", "issue", "pr", "merge"])
+        overview = page.markdown(docs[0][1], docs[0][2], self.flows)
+        self.assertIn("The issue phase, the implementation and PR phase and the merge step each have their own document.",
+                      overview)
+        for change in (lambda d: d["phases"][2].pop("continues"),
+                       lambda d: d["phases"][2].update(continues="No such phase"),
+                       lambda d: d["phases"][1]["gates"].reverse(),
+                       lambda d: d["phases"][2]["gates"][1].update(name="Someone else")):
+            data = copy.deepcopy(self.data)
+            change(data)
+            with self.assertRaises(ValueError):
+                page.validate(data)
 
     def test_a_phase_section_comes_before_its_notes(self):
         self.data["phases"][1]["sections"] = [{"heading": "Dependabot pull requests", "text": "They enter at the integrator.",
@@ -127,6 +160,11 @@ class PageTests(unittest.TestCase):
         self.assertEqual(md.count(":::card\n"), 8)
         self.assertIn("## Implementation and PR phase", md)
         self.assertIn("### Notes", md)
+
+    def test_consecutive_list_items_form_one_list(self):
+        self.data["overview"]["points"] = ["One.", "Two.", "Three.", "Four."]
+        _, title, blocks = page.documents(self.data)[0]
+        self.assertIn("- One.\n- Two.\n- Three.\n- Four.\n", page.markdown(title, blocks, self.flows))
 
     def test_table_cells_escape_pipes(self):
         self.data["roles"][0]["does"] = "Reads a | b"
