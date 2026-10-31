@@ -31,7 +31,7 @@ class PageTests(unittest.TestCase):
                       page.validate(self.data, self.flows))
 
     def test_gate_numbers_must_match_their_phase_flow(self):
-        self.flows["pr.flow"] = self.flows["pr.flow"].replace("G4 Green", "Green").replace("G3 Criteria", "G9 Criteria")
+        self.flows["pr.flow"] = self.flows["pr.flow"].replace("G4 Final", "Final").replace("G3 Criteria", "G9 Criteria")
         warnings = page.validate(self.data, self.flows)
         self.assertIn("Implementation and PR phase: G4 is not in pr.flow", warnings)
         self.assertIn("Implementation and PR phase: G3 is not in pr.flow", warnings)
@@ -97,7 +97,7 @@ class PageTests(unittest.TestCase):
         self.assertIn("## The steps in detail\n\n- **Preparation.**", overview)
         for absent in (":::card", "| ", "## Notes"):
             self.assertNotIn(absent, overview)
-        self.assertIn("## Notes\n\n- `queue.milestones: order` Priority always wins", issue)
+        self.assertIn("## Notes\n\n- `queue.milestones: order` At equal priority", issue)
         self.assertTrue(issue.startswith("# The loop in uberblick-ai/ub-agents: issue phase\n\n"
                                          "Details of **How the loop runs in uberblick-ai/ub-agents**. "))
         self.assertIn("## Gates\n\n:::card\nlabel: G1", issue)
@@ -118,7 +118,7 @@ class PageTests(unittest.TestCase):
         self.data["phases"].append({"name": "Merge step", "summary": "The integrator merges.", "flow": "merge.flow",
                                     "continues": "Implementation and PR phase", "roles": ["integrator"],
                                     "gates": [merge, maintainer]})
-        self.flows["pr.flow"] = self.flows["pr.flow"].replace("G4 Green", "Green")
+        self.flows["pr.flow"] = self.flows["pr.flow"].replace("G4 Final", "Final")
         self.flows["merge.flow"] = 'decision g4 tone=system "G4 Green Test on head?"\npanel p\n  strong "G5 A maintainer merges"\n'
 
     def test_a_document_can_continue_another_ones_gate_numbers(self):

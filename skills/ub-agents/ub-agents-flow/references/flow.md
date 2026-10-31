@@ -47,13 +47,16 @@ legend
   puts it beside another node, `span=` lets a panel cover several rows.
 - Edges: `a --> b` or dashed `a -.-> b`, then `tone=`, `from=`/`to=` with
   `top`, `right`, `bottom` or `left` (plus a slot like `bottom.2`), and
-  `label=start|end|inline`, then `: label`.
+  `label=start|end`, then `: label`. Avoid `label=inline`: it sets the label
+  in capitals. Where neither `start` nor `end` fits beside a long route back,
+  send the edge to a label pill of its own beside the gate and route that pill
+  back instead.
 - Tones: `ink`, `muted`, `neutral`, `agent`, `system`, `done`, `rework`,
   `stop`.
 
 ## Conventions for a loop flow
 
-- Three flows. `overview.flow` is the abstract loop: an `end tone=muted`
+- One flow per document. `overview.flow` is the abstract loop: an `end tone=muted`
   node per way work enters, side by side in the top row (a person's issue, an
   agent's follow-up or sub-issue, a bot's pull request), a `box` per phase
   named after it, its caption saying in a few words what the phase checks and
@@ -79,7 +82,8 @@ legend
   where a person steps in. Leave out a column the loop does not need.
 - Main column, top to bottom: the entry label, then per agent its box, its
   gate as a `decision` and the label its passing outcome adds. Edges out of a
-  gate carry the outcome name. Finish with an `end`. When an agent checks
+  gate carry the outcome name, phrased as what happened where a bare route
+  name would read as a step (`self-check passed`, not `self-check`). Finish with an `end`. When an agent checks
   something before it does its work (a contract still valid, a PR it must not
   duplicate), draw that gate between two boxes: the agent's box, the gate, then
   a box for the work itself, such as `box implement "builds the one PR"`.
@@ -112,17 +116,19 @@ legend
 - Rework edges `tone=rework`, edges into the stop panel `tone=stop`. Route a
   loop back with `from=top to=left label=end` so it does not cross the main
   column.
+- Where a side route rejoins the main column, such as a second reviewer's
+  approval leading to the label the passing path reaches, put that label on
+  the row of the gate that leads to it, so the edge runs straight across
+  instead of turning back up.
 - Keep captions to a few words; the detail belongs in the gate cards. A flow with more
   than about 20 nodes no longer fits a page: merge labels into edge text before
   dropping a gate.
 
 ## An issue-reviewer
 
-`ub-agents init` writes an optional issue-reviewer: the preparer's `review`
-outcome adds `needs-review`, and the issue-reviewer approves to `ready` or
-sends it back with `needs-preparation`. When the config has it, draw it in a
-second column of the issue flow, beside the preparer, with its own gate
-(renders clean with ablauf 0.2.0):
+When the config has an issue-reviewer, draw it in a second column beside the
+preparer, with its own gate, and put `ready` on that gate's row (renders clean
+with ablauf 0.2.0):
 
 ```
 columns main review
@@ -131,12 +137,13 @@ end created col=main tone=muted "Issue created"
 pill needs-preparation tone=muted
 box issue-preparer "states behavior and acceptance criteria"
 decision g2 tone=system "G2 Small and clear?"
-pill ready tone=done
-end delivery "Implementation picks it up"
 
 pill needs-review col=review row=g2 tone=agent
-box issue-reviewer row=ready "second opinion on scope and criteria"
-decision g3 row=delivery tone=system "G3 Scope and criteria hold?"
+box issue-reviewer "second opinion on scope and criteria"
+decision g3 tone=system "G3 Scope and criteria hold?"
+
+pill ready col=main row=g3 tone=done
+end delivery "Implementation picks it up"
 
 created --> needs-preparation : a maintainer adds the label
 needs-preparation --> issue-preparer
@@ -150,9 +157,5 @@ g3 --> ready from=left to=right : approved
 g3 --> needs-preparation tone=rework from=right to=right label=end : changes-requested
 ```
 
-`needs-review` then starts both the issue-reviewer (`kind: issue`) and the PR
-reviewer (`kind: pr`); say so in the roles, since one label serves both.
-
-`render.mjs` fails on any diagnostic, warnings included (`edge a → b crosses
-c → d`, an unknown column or key). Fix the line it names, usually by moving a
-node with `row=` or an edge end with `to=`, and render again.
+When one label starts both the issue-reviewer and the PR reviewer, say so in
+the roles.

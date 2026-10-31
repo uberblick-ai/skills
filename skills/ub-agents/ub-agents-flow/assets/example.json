@@ -56,7 +56,7 @@
         }
       ],
       "notes": [
-        "`queue.milestones: order` Priority always wins; at equal priority, issues from earlier milestones, in alphabetical order of their titles, go first. [Queue: Milestones](https://agents.uberblick.ai/docs/configuration/queue.html#milestones)"
+        "`queue.milestones: order` At equal priority, issues from earlier milestones go first. [Queue: Milestones](https://agents.uberblick.ai/docs/configuration/queue.html#milestones)"
       ]
     },
     {

@@ -1,17 +1,9 @@
 # flow.json
 
-`scripts/page.py` reads this file, every `.flow` it names and the `.svg`
-`render.mjs` drew next to each, and writes Uberblick Markdown and a page from
-the same blocks. By default that is three documents: `overview.md`, the whole
-loop at a glance (the summary, a line naming the phase documents, one abstract
-drawing from the ways work enters to the merge, and "The steps in detail", a
-sentence per phase), then one document per phase named after its flow, such as
-`issue.md` and `pr.md`, each opening with a "Details of" line back to the
-overview and its summary, then its drawing, a table of its roles, a card per
-gate under "Gates" and its own notes. `--combine` writes them as one document, `flow.md`, instead.
-`flow.html` shows the documents styled like Uberblick, each starting a new
-printed page. The example in [../assets/example.json](../assets/example.json)
-is uberblick-ai/ub-agents.
+`scripts/page.py` turns this file and the drawings it names into the
+documents: the overview, then one per phase with its drawing, roles, a card
+per gate and its notes. [../assets/example.json](../assets/example.json) is an
+illustration from uberblick-ai/ub-agents, not a default.
 
 ```json
 {
@@ -93,10 +85,9 @@ is uberblick-ai/ub-agents.
   after them, with `"continues": "Implementation and PR phase"`: its gates
   continue that phase's numbers, and that phase's drawing ends where the step
   begins, in an `end` node saying what the item waits for. Use it when one
-  drawing would pass about 20 nodes. `flow` names the phase's ablauf source next to `flow.json`; its
-  Markdown takes the same name, so a phase flow is never `overview.flow` or
-  `flow.flow`. An optional `title` replaces "The loop in OWNER/NAME: issue
-  phase". Every role belongs to exactly one phase. The `summary` follows the
+  drawing would pass about 20 nodes. `flow` names the phase's ablauf source
+  next to `flow.json`. An optional `title` replaces "The loop in OWNER/NAME:
+  issue phase". The `summary` follows the
   "Details of" line, so it reads as one paragraph: the journey of one item
   through the phase and the document it hands over to. When the phase's
   first agent owns more than its box says, such as creating branches or
@@ -132,23 +123,24 @@ is uberblick-ai/ub-agents.
   backoff are operations detail. Each `queue` setting in use gets the issue
   phase's first notes, one each, saying what it does as the launcher runs it
   and linking its section of the
-  [queue page](https://agents.uberblick.ai/docs/configuration/queue.html).
-  Findings follow, in the phase they concern, and only those about how work
+  [queue page](https://agents.uberblick.ai/docs/configuration/queue.html);
+  where the repository's own instructions describe the queue otherwise, that
+  is a finding. Findings follow, in the phase they concern, and only those about how work
   moves: how a workflow authenticates, the tokens it uses or how a file is
-  formatted belong in the repository's own files, not in a note.
+  formatted belong in the repository's own files, not in a note. Every note
+  says what happens at the top level, in a sentence or two: no technical
+  detail (sort rules, tie-breaks, status output, upgrade steps) and no
+  setting or mode the config does not use. A finding is a gap nobody chose:
+  before writing one, check the config's comments and the history of the
+  line, and leave out a deliberate exemption. Settings that only tune detail,
+  such as a trusted bot's feedback or an unset `kind` behaving as its default,
+  get no note.
 
 Write every text in the present tense, as the loop runs. A route the
-maintainer has decided counts as running, even when the config does not have it
-yet: describe it as it works, never as planned. Leave out history and
+maintainer has decided, in the conversation or in an open pull request they
+wrote or approved, counts as running even before the default branch has it:
+describe it as it works, never as planned. Leave out history and
 provenance: no issue or PR number, release, date or "since" clause.
 
 Text fields are inline Markdown as Uberblick reads it: `code`, **bold**,
 *italic* and https links.
-
-`page.py` stops with an error on a missing or malformed field, a role in no
-phase or in two, gates out of order, not starting at `G1` without
-`continues`, with a number no document holds or a shared number under two
-names, or a drawing not yet rendered. It warns, without stopping, when an outcome adds a label that starts
-no agent and is no stop label, when a gate number is missing from its phase's
-drawing or a drawing shows one that is not among its gates, and when a text
-runs past the word budgets above.

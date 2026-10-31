@@ -1,5 +1,5 @@
 flow v0
-# uberblick-ai/ub-agents, implementation and PR phase: from ready to merged.
+# OWNER/NAME, implementation and PR phase: from ready to merged.
 
 columns rework main stop
 
@@ -12,16 +12,16 @@ box reviewer "different model, exact head commit"
 decision g4 tone=system "G3 Criteria met?"
 pill ready-to-merge tone=done
 box integrator "base merge, final checks"
-decision g5 tone=system "G4 Green Test on head, policy?"
-end merged "Squash-merged, issue closed"
+decision g5 tone=system "G4 Final checks pass, policy allows?"
+end merged "Merged, issue closed"
 
 pill needs-changes col=rework row=g4 tone=rework
 
 panel human col=stop row=g5 tone=stop
   pill needs-human
   strong "G5 A maintainer merges"
-  muted "agent config, CI, outside input"
-  muted "or CLI changes"
+  muted "changes the policy reserves"
+  muted "for a person"
 
 ready --> g1
 g1 --> implementer : yes, before every run
