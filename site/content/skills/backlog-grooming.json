@@ -64,7 +64,7 @@
   "shots": [
     {
       "image": "grooming-top",
-      "caption": "The decision table from a real run over 81 open issues: Track only, Defer, Keep and Narrow."
+      "caption": "The decision table from a real run over 81 open issues: Close unnecessary, Defer, Keep and Narrow."
     }
   ]
 }
