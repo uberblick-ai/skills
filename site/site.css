@@ -32,8 +32,12 @@ img { max-width: 100%; display: block }
 .top nav { margin-left: auto; display: flex; gap: 20px; font-size: 14px }
 .top nav a { color: var(--muted); text-decoration: none }
 .top nav a:hover { color: var(--fg) }
-.foot { max-width: 1120px; margin: 64px auto 0; border-top: 1px solid var(--line); padding-block: 24px 48px; font-size: 13px; color: var(--muted); display: flex; gap: 8px 20px; flex-wrap: wrap }
-.foot a { color: var(--muted) }
+.foot { max-width: 1120px; margin: 64px auto 0; border-top: 1px solid var(--line); padding-block: 28px 48px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px 24px; font-size: 13.5px }
+.foot h3 { font-size: 13.5px; font-weight: 600; color: var(--fg); margin: 0 0 10px }
+.foot ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px }
+.foot a { color: var(--muted); text-decoration: none }
+.foot a:hover { color: var(--fg) }
+@media (max-width: 640px) { .foot { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 
 .layout { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 56px; padding-block: 40px 0 }
 .side summary { display: none }
@@ -158,14 +162,9 @@ h2.h { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 1
 .changes .tag { justify-self: start }
 
 .about p { font-size: 15px }
-.cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-top: 24px }
-.cols h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600 }
-.cols ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 14px }
-.cols a { color: var(--muted); text-decoration: none; overflow-wrap: anywhere }
-.cols a:hover { color: var(--fg) }
 
 @media (max-width: 760px) {
-  .qcards, .cols { grid-template-columns: minmax(0, 1fr) }
+  .qcards { grid-template-columns: minmax(0, 1fr) }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)) }
   .stat:nth-child(3) { padding-left: 0; border-left: 0 }
   .stat:nth-child(n+3) { border-top: 1px solid var(--line) }

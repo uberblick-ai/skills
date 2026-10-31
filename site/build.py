@@ -107,6 +107,10 @@ def collect():
         if members:
             groups.append({'id': gdir.name, 'name': name, 'description': desc, 'plugin': members[0]['plugin'], 'skills': members})
             skills += members
+    # A page for a skill that was renamed or removed would build silently and never show.
+    orphans = sorted({p.stem for p in (CONTENT / 'skills').glob('*.json')} - {s['slug'] for s in skills})
+    if orphans:
+        sys.exit(f"site/content/skills: no skill named {', '.join(orphans)}")
     return home, groups, skills
 
 # ---------- Page parts ----------
@@ -149,11 +153,26 @@ def header(pre, skills):
 
 
 FOOTER = f'''<footer class="foot">
-  <span>MIT license</span>
-  <a href="{REPO}">Source</a>
-  <a href="{REPO}/blob/main/AGENTS.md">Add a skill</a>
-  <a href="{REPO}/blob/main/.claude-plugin/marketplace.json">Marketplace</a>
-  <a href="{AGENTS}">ub-agents</a>
+  <div><h3>Projects</h3><ul>
+    <li><a href="https://uberblick.ai">Uberblick</a></li>
+    <li><a href="{AGENTS}">ub-agents</a></li>
+    <li><a href="/">Skills</a></li>
+    <li><a href="https://ablauf.uberblick.ai">ablauf</a></li>
+    <li><a href="https://github.com/uberblick-ai/wireframe-md">wireframe</a></li>
+  </ul></div>
+  <div><h3>Learn</h3><ul>
+    <li><a href="/">All skills</a></li>
+    <li><a href="{REPO}/blob/main/AGENTS.md">Add a skill</a></li>
+    <li><a href="/skills.md">skills.md</a></li>
+    <li><a href="/llms.txt">llms.txt</a></li>
+    <li><a href="{AGENTS}/docs/installation.html">ub-agents docs</a></li>
+  </ul></div>
+  <div><h3>GitHub</h3><ul>
+    <li><a href="{REPO}">Source</a></li>
+    <li><a href="{REPO}/blob/main/.claude-plugin/marketplace.json">Marketplace</a></li>
+    <li><a href="{REPO}/blob/main/CHANGELOG.md">Changelog</a></li>
+    <li><a href="{REPO}/blob/main/LICENSE">MIT license</a></li>
+  </ul></div>
 </footer>'''
 
 JS = r'''<script>
@@ -280,7 +299,6 @@ def overview(home, groups, skills):
         + ''.join(f'<li><span class="tag">{e(t)}</span><a href="{e(h)}">{e(n)}</a></li>' for t, n, h in q['links'])
         + '</ul></article>' for q in home['questions'])
     changes = ''.join(f'<li><time>{d}</time><span class="tag">{e(t)}</span><span>{e(x)}</span></li>' for d, t, x in home['changes'][:5])
-    skill_links = ''.join(f'<li><a href="skills/{s["slug"]}">{s["slug"]}</a></li>' for s in skills)
     return head('uberblick skills', TAGLINE, f'{SITE}/', '') + header('', skills) + f'''
 <div class="layout">
   {sidebar('', groups)}
@@ -310,11 +328,6 @@ def overview(home, groups, skills):
     <section class="blk about">
       <h2>Who builds this.</h2>
       <p>{home["about"]}</p>
-      <div class="cols">
-        <div><h3>Learn</h3><ul><li><a href="{AGENTS}">ub-agents</a></li><li><a href="{AGENTS}/docs/installation.html">Installation</a></li><li><a href="{AGENTS}/docs/configuration/index.html">Configuration</a></li><li><a href="{AGENTS}/docs/best-practices/small-issues.html">Best practices</a></li></ul></div>
-        <div><h3>Skills</h3><ul>{skill_links}<li><a href="{REPO}/blob/main/CHANGELOG.md">Changelog</a></li><li><a href="{REPO}/blob/main/AGENTS.md">Add a skill</a></li></ul></div>
-        <div><h3>Agents</h3><ul><li><a href="skills.md">skills.md</a></li><li><a href="llms.txt">llms.txt</a></li><li><a href="{REPO}/blob/main/.claude-plugin/marketplace.json">marketplace.json</a></li></ul></div>
-      </div>
     </section>
   </main>
 </div>

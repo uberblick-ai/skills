@@ -2,10 +2,13 @@
 name: backlog-grooming
 description: >-
   Groom a repository backlog, milestone or project for an engineering manager
-  or product owner: challenge unnecessary work, duplicates, superseded scope and
-  unclear value, then produce an actionable evidence report with effort and
-  blockers. Use for a daily backlog review or to identify what can be cut to
-  deliver a specific outcome sooner. Not an implementation run or release gate.
+  or product owner: challenge unnecessary work, duplicates, superseded scope
+  and unclear value, then produce an evidence report with effort, blockers and
+  milestone load, flagging overloaded milestones. Use for "groom the backlog
+  for the 1.4 milestone", "what can we cut to ship sync sooner?" or "which
+  open issues are already delivered?". Writes a local HTML and JSON report;
+  changes issues, labels, milestones or the corpus only when asked. Not an
+  implementation run or release gate.
 license: MIT
 compatibility: >-
   Requires python3 for the report. Issue, PR and code access are needed for
@@ -13,7 +16,7 @@ compatibility: >-
   Product corpus and ub-agents integrations are optional. No runtime packages.
 metadata:
   author: uberblick-ai
-  version: "1.2"
+  version: "1.4"
 ---
 
 # Backlog grooming
@@ -46,7 +49,7 @@ instructions govern authority, trusted inputs and issue mutations.
    blockers. When a product corpus exists, discover and read its relevant live
    documents and decisions; code proves implementation, not intended behavior.
 
-3. **Challenge each issue.** Recommend keep, narrow, combine, defer, close
+3. **Challenge each issue, oldest first.** Recommend keep, narrow, combine, defer, close
    delivered, close unnecessary, or track only. Ask what observable user,
    technical or maintenance benefit remains, what has already landed, and
    whether a smaller outcome would suffice. Do not repeat implementation
@@ -55,8 +58,27 @@ instructions govern authority, trusted inputs and issue mutations.
    recorded blockers from proposed prerequisites and mere file overlap.
    Read and use a repository's effort scale when available; disclose unavailable
    fields. Estimates are judgments, not commitments or invented time savings.
+   Record each issue's `created_at`; the report lists the oldest first. Mark
+   an issue `no_change` when it is clear, kept as it is, already in the right
+   milestone and a good fit, with nothing to decide. It then moves from the
+   table to a short "No change required" list near the end of the report,
+   unless it has no workflow label: such an issue stays in the table.
 
-4. **Run a bounded independent challenge** on large or controversial items:
+4. **Keep milestones bounded.** Whenever you recommend placing issues in a
+   milestone, or the scope already has milestones, weigh each affected one:
+   the estimates of its delivered, open and proposed issues, summed with the
+   repository's weights and cap where its instructions set them, otherwise the
+   defaults XS 0, S 1, M 2, L 3, XL 5 and a cap of 25. Above the cap a
+   milestone is overloaded: do not add issues to it. Propose a new milestone
+   in chat instead, with a title, a one-line goal and the issues that move,
+   and create it only when asked. The exception is a milestone that is one
+   bounded heavy step, such as a major refactor that is not useful half done:
+   it may exceed the cap up to the ceiling (default twice the cap) when its
+   description or the maintainer says so. Beyond the ceiling, propose phases.
+   Flag milestones already overloaded even when nothing new goes in. See
+   [references/review.md](references/review.md) for weighing delivered work.
+
+5. **Run a bounded independent challenge** on large or controversial items:
    uncertain closures, substantial rewrites, disputed value or boundary changes.
    Ask a separate agent to argue the strongest case against the recommendation
    using the issue, code and available corpus; request its smallest useful
@@ -67,7 +89,7 @@ instructions govern authority, trusted inputs and issue mutations.
    challenge changed below the table. If independence is unavailable, mark it
    unavailable rather than presenting self-review as independent evidence.
 
-5. **Resolve material choices in chat.** Present a concise recommendation,
+6. **Resolve material choices in chat.** Present a concise recommendation,
    alternatives and consequences when a conflict changes the outcome or scope.
    Reuse prior decisions; silence is not agreement. Continue independent work
    while waiting, leaving the dependent recommendation explicitly pending.
@@ -75,7 +97,7 @@ instructions govern authority, trusted inputs and issue mutations.
    from findings so a refresh preserves them. Do not weaken an agreed guarantee
    under YAGNI or treat missing evidence as proof of no value.
 
-6. **Render the decision report.** Read
+7. **Render the decision report.** Read
    [references/report.md](references/report.md) and write `DIR/input.json` in
    its format. Use [assets/example.json](assets/example.json) only as a fictional
    format example, never as findings. Then run:
@@ -92,16 +114,17 @@ instructions govern authority, trusted inputs and issue mutations.
    “confirmed in chat” banner. Verify the rendered page and evidence expansion
    at desktop and tablet widths. Return its link and the few material findings.
 
-7. **Apply only authorized actions.** A dry run changes no issues, labels,
+8. **Apply only authorized actions.** A dry run changes no issues, labels,
    corpus or project fields. When the user requests particular changes,
    refresh those inputs and apply the concrete authorized scope without asking
    again. Transfer retained scope into a destination before closing combined
    issues as superseded; never call them delivered. Priority alone is not a
    preparation trigger. Refresh loop eligibility and the report after writes.
+   Creating a milestone or moving issues needs the same authorization.
    Omit closed rows unless an open PR or a named remaining concern warrants
    highlighting them. Do not apply other report recommendations implicitly.
 
-8. **Refresh incrementally.** Compare current scope, discussions, source
+9. **Refresh incrementally.** Compare current scope, discussions, source
    revisions, blockers and deliveries with the previous report. Reuse unchanged
    evidence and human answers, refresh affected judgments and disclose reused
    challenge results. Keep recommendations, decisions and applied actions
