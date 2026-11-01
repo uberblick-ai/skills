@@ -54,6 +54,12 @@ Repository maintenance, with no release or delivery-loop requirement. Plugin: `m
 - **[backlog-grooming](skills/maintenance/backlog-grooming/SKILL.md)**: Review all issues, a milestone or a project against current deliveries and available product intent. Challenge duplication and excess scope, resolve decisions in chat, and produce the “Less work. More value.” report with estimates, blockers, milestone load and optional loop eligibility, grouped by milestone when most issues have one.
 - **[ci-health](skills/maintenance/ci-health/SKILL.md)**: Track CI on main from GitHub Actions for any repository: the median wall time a push waits, with its spread and P95, the number of tests, optionally coverage and the test-to-code ratio, the changes that moved CI time up or down, and the top three actions that would cut the wait. Needs only `python3` and an authenticated `gh`; with the Uberblick MCP tools or the `ub` command it stores each day in the repository's own "CI Health Report" document with charts, recommended actions and an incident changelog.
 
+### [Uberblick](skills/uberblick/README.md)
+
+Skills for setting up and keeping an [Uberblick](https://github.com/uberblick-ai/uberblick-2) corpus. Plugin: `uberblick`.
+
+- **[uberblick-intake](skills/uberblick/uberblick-intake/SKILL.md)**: Write a repository's product intent into Uberblick: pages for what a person can do, from its docs and code, with technical and agent docs left in the repository, tags for this repository, decision records from ADRs and the git history, ablauf drawings and wireframes where they help, scenarios that follow the e2e tests (the tests are analysed, not moved), and a sidebar ready for the team. One review page to approve, then the writes. Needs `python3`, `git` and Node.js; writing needs the Uberblick MCP tools or `ub`.
+
 ## Contributing
 
 Read [AGENTS.md](AGENTS.md) for the layout and the checks a change must pass.

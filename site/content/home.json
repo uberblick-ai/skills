@@ -1,5 +1,5 @@
 {
-  "groups": ["ub-agents", "maintenance"],
+  "groups": ["ub-agents", "maintenance", "uberblick"],
   "eyebrow": "Agent skills · by Uberblick",
   "headline": "Agents need feedback, not more instructions.",
   "lede": "Skills for teams that run coding agents on their GitHub issues. They read what the loop already records, report what happened, and propose the smallest change that fixes it.",
@@ -19,6 +19,7 @@
   ],
   "changes": [
     ["2026-11-01", "Skill", "backlog-grooming 1.5: when most issues have a milestone, the report groups them by milestone, and recommends one, or none, for each issue without. A Discuss with Claude link opens the findings in Claude Code."],
+    ["2026-10-22", "Skill", "Added uberblick-intake 0.1 in the new Uberblick group: turns a repository's docs and decisions into an Uberblick corpus, reading its tests for where pages go deeper, with tags and a sidebar, after one review page."],
     ["2026-10-22", "Skill", "ub-agents-flow 0.1: how your loop runs, as an overview and one document per phase, drawn with ablauf, every gate numbered with its rule, as Uberblick Markdown and a page."],
     ["2026-10-21", "Skill", "ub-agents-deliver-report 1.9: the Changelog's issues and PRs show as GitHub pills, with the right issue or pull request icon."],
     ["2026-10-21", "Skill", "ub-agents-deliver-report 1.8: the page's What to change cards open a Claude Code discussion too, and costs carry dates instead of \"today\"."],
