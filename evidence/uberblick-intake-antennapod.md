@@ -185,20 +185,32 @@ misleads; **low** = polish. AntennaPod supplies the evidence; every fix is writt
 - The write step: one command, 65 calls, under a second; the sidebar is printed as written.
 - The review page and `check` ran cleanly once the plan was fixed.
 
-## Proposed changes, ranked
+## Suggestions
 
-All repository-agnostic.
+Filed here for now, not made: more runs will show which ones recur. Each has a stable ID, so another
+run can add itself to **Also seen in** (or "contradicts") instead of filing it again. Ranked by this run;
+**F** is the finding above. Every suggestion is written to hold for any repository.
 
-1. Checkpoint (findings 8 and 9): stop and ask whenever a person is present; the runner counts as
-   the owner; give recommendations with evidence; "don't know" becomes an assumption.
-2. Purpose (findings 13 and 14): one paragraph in analysis.md on product intent versus reference,
-   for pages and for records, with the settings rule of thumb.
-3. Sources beyond the code (findings 10 to 12): when they exist, the homepage, the docs navigation
-   and the wiki, as evidence for groups, principles and early decisions; otherwise the README,
-   manifests, listing metadata and labels, then the person.
-4. Dry run (findings 1 and 2): a clear error when the checkout is unbound, and the scratch-workspace
-   recipe.
-5. Fewer Markdown files (finding 15): an explicit `repo_changes` goal.
-6. Test counts (finding 4): skipped classes, helpers, service tests and device configuration.
-7. Cost (finding 7): ask which areas matter first, and a "where capabilities live" table.
-8. Smaller items: findings 3, 5, 6, 16, 17 and 19.
+| ID | Suggestion | Details | Where | F | Also seen in |
+| --- | --- | --- | --- | --- | --- |
+| S1 | Always stop at the checkpoint | A dry run still stops at step 4 whenever a person is in the session. The person running it counts as the owner unless they say otherwise. Asking beats gathering everything alone. | `SKILL.md` step 4 ("Run unattended…") | 8 | ablauf §2 (checkpoint run by hand; related) |
+| S2 | Recommend, don't quiz | Give every outline item as a recommendation with its evidence, then ask "change anything?". "Don't know" keeps the recommendation and goes into `checkpoint.assumptions`. | `SKILL.md` step 4; `analysis.md` → Confirm before recording | 9 | |
+| S3 | Pages state intent, not reference | Name a setting when it changes what a person experiences, and say what it does for them. Prefer a scenario to a list of values; give exhaustive lists only on request. | `analysis.md` → Writing pages | 13 | ablauf §4.2 (intent is the point; related) |
+| S4 | Records in the product's words | No code symbols or build names. An engineering choice qualifies only where it changes what people get; leave it out, as a candidate with its reason, when the repo records it next to the code. | `analysis.md` → Decision records (the "framework or library" line) | 14 | |
+| S5 | Read what the team publishes, when there is any | When the README, the host's `homepage` field or a manifest links a homepage or docs site, read the homepage and the docs navigation for emphasis, group names and tags. Otherwise use the README's opening, a manifest's `description`, listing metadata in the repo and area labels; with none of these, ask (S2). Never a source for behaviour. Skip pages behind a sign-in, and fetch nothing for a private repository unasked. | `SKILL.md` step 3; `analysis.md` → Product, audience and scope | 10 | ablauf §5 "Product intent from the host" (related) |
+| S6 | Scan the wiki, when there is one | `scan` tries `git ls-remote <repo>.wiki.git` even when the host reports no wiki, skips quietly when it fails, and lists current and deleted pages. Deleted pages are evidence for decisions, never page sources. | `intake.py` `cmd_scan` (beside `labels_of`); `analysis.md` → Decision records | 11 | |
+| S7 | Founding decisions aren't in the history | Say so: they come from the homepage, wiki, docs, specs and agent instructions, not `hot`. Before calling a rewrite experimental, check for build flags that switch the new path on. | `analysis.md` → Decision records, history candidates | 12 | ablauf §1 (`hot` found nothing; the decisions were in docs and the tracker) |
+| S8 | Clear error on an unbound checkout | Look for `.uberblick.json` in the checkout or a parent before starting `ub mcp serve`. Without one, print one line naming both fixes, with no traceback. | `intake.py` `cmd_corpus`, `cmd_ub` | 1 | |
+| S9 | A dry-run recipe | Name it: a separate scratch folder and `ub workspace create`, writing only there. Never read or write a workspace bound to another repository, even when its MCP server is connected. | `SKILL.md` step 1 | 2 | ablauf (a workspace created per run; related) |
+| S10 | Fewer Markdown files as a goal | `repo_changes` also proposes merging stub docs and pointing duplicated prose at the corpus or docs site. It says "nothing to reduce" when that's the answer. Proposals only. | `analysis.md` → Repository changes; `SKILL.md` step 11 | 15 | |
+| S11 | Count skips right | A class-level `@Ignore` counts as one skip, not every case in the class. Count them all, and match custom `@IgnoreOn*` annotations. | `intake.py` `SKIPPED` regex, `scan_tests` | 4 | |
+| S12 | Detect journeys right | Drop zero-case helper files. A file is a journey only when it drives the UI; otherwise it's an integration test. An instrumented-test source set and its runner count as device test configuration. | `intake.py` `test_kind`, `journeys`, `cmd_tests` | 4 | ablauf §5 "Depth without journey tests" (related) |
+| S13 | Cheaper reading of products whose intent lives in code | A "where capabilities live, by product kind" table: settings definitions, menus, navigation and strings for an app; routes for web; help text for a CLI. At the checkpoint, ask which areas matter before reading them all. | `analysis.md` → Capabilities, then pages | 7 | ablauf §5 "the product's kind" (related) |
+| S14 | Catch wrong labels and claims | `check` warns about each backticked label not found in the product's strings (string resources, help output). Claims still need reading against the code. | `intake.py` `validate` | 17 | ablauf §4.3 (a claim the host contradicts) |
+| S15 | Mark areas gone at `ref` | `hot` marks areas with no files at `ref`. | `intake.py` `churn`, `cmd_hot` | 5 | |
+| S16 | Nested workspaces | Read nested module paths, such as Gradle `:a:b`. | `intake.py` `workspaces_of` | 6 | |
+| S17 | Don't list the starter tags | Say "the starter tags `list_tags` shows". | `SKILL.md` step 1 | 3 | |
+| S18 | Renderer versions named in help | `get_help` `ablauf`/`wireframe` names the npm versions; otherwise drop the sentence in step 7. | Uberblick product (help); `SKILL.md` step 7 | 16 | ablauf §1 (renderer version lacked a kind) |
+| S19 | Drawing status on write | The server answers each ablauf write with a `drawing` status. | Uberblick product (`ub mcp serve`) | 19 | |
+
+S18 and S19 belong in the Uberblick product repository, not this skill.
