@@ -1,0 +1,30 @@
+{
+  "question": "Which Python code can we safely remove?",
+  "short": "Find dead code with caller evidence, checks for dynamic entry points and exports, and a plan to preserve useful tests.",
+  "lede": "A function can look active because only tests call it. An unused import can still be a live export. This skill separates those cases and reports small removal candidates with evidence and remaining uncertainty.",
+  "asks": [
+    "Find dead Python code.",
+    "Which functions are only used by tests?",
+    "Show callers before removing this.",
+    "Plan a bounded cleanup."
+  ],
+  "steps": [
+    "Records the repository snapshot, source and test inputs, execution roots and public contracts.",
+    "Compares production-only scans with scans including tests; uses available tools without changing project dependencies.",
+    "Traces callers and private helper chains, checking graph filters against known callers.",
+    "Checks dynamic dispatch, re-exports, compatibility decisions and the history of replaced callers.",
+    "Reports removal candidates, tests to migrate, code to keep and unresolved questions, with numbered actions."
+  ],
+  "facts_title": "What the report distinguishes",
+  "facts": [
+    ["Production and tests", "Test-only usage is investigated separately from production reachability."],
+    ["Graphs", "Function uses and module imports answer different questions; neither proves every possible runtime caller."],
+    ["Safe scope", "Each recommendation names the affected code, useful assertions to preserve and checks needed after removal."],
+    ["Uncertainty", "Missing consumers and unresolved dynamic calls remain explicit rather than becoming deletion recommendations."]
+  ],
+  "needs": [
+    ["Needs", "A local Python checkout, git and a text search tool such as rg."],
+    ["Optional", "Ruff, Vulture and Pyan3; Graphviz for rendered graphs; an authenticated repository connector or CLI for issue context."],
+    ["Leaves", "An evidence report and optional graphs in a scratch directory. No source or tracker changes."]
+  ]
+}
