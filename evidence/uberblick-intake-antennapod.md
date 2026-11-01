@@ -56,6 +56,7 @@ Each line is something the user had to say that the skill should have made unnec
 8. "the skill should also suggest to reduce markdown files if this isn't clear yet": finding 15.
 9. "ensure the skill stays agnostic and nothing from the repo leaks into the skill": applies to every proposed fix below.
 10. "coarser pages is fine - the corpus describes product intent - not the product itself. See guidance doc on uberblick-2. This should be respected by the skill" (said at the immich checkpoint; it applies to this run too): the skill never reads the workspace's writing guidance (finding 21).
+11. "I feel the corpus of PodAntenna is too thin", after the run: the coverage came from the screens, not from the project's own map of the product (finding 22).
 
 ## Findings
 
@@ -184,6 +185,32 @@ misleads; **low** = polish. AntennaPod supplies the evidence; every fix is writt
     - where intent can't be known from the repository, the agent lists the question at the
       checkpoint instead of writing what the code does.
 
+22. **High: the corpus came out thin, because coverage followed the screens, not the project's own
+    map of the product.** About 4,400 words over 20 documents; the five records are 34 to 48 words.
+    Measured against what the project itself names:
+    - **A whole audience is missing.** The published docs have a "For podcasters & hosters"
+      section (listing a podcast, funding tags, moving a feed's URL, the subscribe link). The
+      corpus says nothing to podcasters. The skill asks for "the product's kind and audience" but
+      never asks whether there is more than one.
+    - **Six tracker feature labels have no page:** Chapters, Local feeds, (External) storage,
+      Podcast Index / Podcasting 2.0, Accessibility, Interacting devices. `scan` lists the labels;
+      the skill uses them for tags only, not as a coverage checklist.
+    - **The published docs were read by section title only.** They live in another repository of
+      the same organization (36 English pages). Several hold refusals and promises a listener
+      relies on: `ads`, `central-distributed`, `multiple-queues`, `other-platforms`,
+      `app-permissions`, `episode-deletion`, `episodes-missing`. The skill only covers a docs site
+      inside the repository.
+    - **Refusals are nearly absent.** The pages describe what is there. They hardly say what the
+      app won't do: one queue, not several; no central server; never deletes a favorite. The
+      guidance asks pages for what the product "promises and refuses". The skill names no source
+      for refusals.
+
+    Fix: build coverage from the project's map before reading code. List every audience, every
+    published docs page and every area or feature label, and give each a page or a reason
+    (`capabilities` already has the shape). When the published docs live in another repository,
+    clone and read it like the main one. Look for refusals in the docs, the FAQ and declined
+    requests, and state them as promises on pages, or as records.
+
 ### Checking, review and writing (steps 7 to 10)
 
 16. **Medium: step 7 says the corpus help names the renderer versions; it doesn't.** `get_help`
@@ -221,6 +248,9 @@ run can add itself to **Also seen in** (or "contradicts") instead of filing it a
 | S20 | Follow the workspace's writing guidance (ranked first) | Step 1 reads every `guidance`-tagged page and the welcome page, and they rule over analysis.md. Rewrite analysis.md → Writing pages to match: pages state purpose, promises and boundaries ("the product explains itself"), in the feature and surface shapes; never option lists, defaults, internals or provenance; never fill unknown intent with what the code does today; ask instead. Absorbs S3. | `SKILL.md` step 1; `analysis.md` → Writing pages | 21 | immich (the person supplied the guidance at the checkpoint) |
 | S1 | Always stop at the checkpoint | A dry run still stops at step 4 whenever a person is in the session. The person running it counts as the owner unless they say otherwise. Asking beats gathering everything alone. | `SKILL.md` step 4 ("Run unattended…") | 8 | ablauf §2 (checkpoint run by hand; related) |
 | S2 | Recommend, don't quiz | Give every outline item as a recommendation with its evidence, then ask "change anything?". "Don't know" keeps the recommendation and goes into `checkpoint.assumptions`. | `SKILL.md` step 4; `analysis.md` → Confirm before recording | 9 | |
+| S21 | Coverage from the project's own map | Before reading code, list every audience, every published docs page and every area or feature label (`scan` has the labels). Each gets a page or a reason in `capabilities`; `check` warns about a label or docs page with neither. | `SKILL.md` steps 3 and 5; `analysis.md` → Capabilities, then pages; `intake.py` `validate` | 22 | immich (heaviest suites did not set depth; related) |
+| S22 | Read published docs in another repository | When the README or homepage links docs built from another repository of the same owner, clone it and read its pages, not just its navigation. They are the team's own statement of the product. | `SKILL.md` step 3; `analysis.md` → Markdown files (docs site) | 22 | |
+| S23 | Capture refusals | Pages and records state what the product refuses as well as what it does. Look for refusals in the docs and FAQ, and in declined requests closed by a maintainer (`not planned`, `wontfix`, `by design`). | `analysis.md` → Writing pages, Decision records | 22 | fzf finding 6 (a principle found in declined requests); immich (FAQ refusals became records) |
 | S3 | Pages state intent, not reference | Absorbed by S20. Name a setting only where it carries a promise, and say what it promises; no lists of values. | `analysis.md` → Writing pages | 13 | ablauf §4.2 (intent is the point; related) |
 | S4 | Records in the product's words | No code symbols or build names. An engineering choice qualifies only where it changes what people get; leave it out, as a candidate with its reason, when the repo records it next to the code. | `analysis.md` → Decision records (the "framework or library" line) | 14 | |
 | S5 | Read what the team publishes, when there is any | When the README, the host's `homepage` field or a manifest links a homepage or docs site, read the homepage and the docs navigation for emphasis, group names and tags. Otherwise use the README's opening, a manifest's `description`, listing metadata in the repo and area labels; with none of these, ask (S2). Never a source for behaviour. Skip pages behind a sign-in, and fetch nothing for a private repository unasked. | `SKILL.md` step 3; `analysis.md` → Product, audience and scope | 10 | ablauf §5 "Product intent from the host" (related) |
