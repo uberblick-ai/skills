@@ -112,7 +112,74 @@
       ],
       "placement": {
         "current": null,
-        "proposed": "14"
+        "proposed": "14",
+        "reason": "Fits 1.4's goal of reliable sync, which is due first and stays within its cap."
+      }
+    },
+    {
+      "id": "example/app#5",
+      "title": "Dark theme for the settings screen",
+      "url": "https://github.com/example/app/issues/5",
+      "created_at": "2026-09-30T09:00:00+02:00",
+      "state": "open",
+      "treatment": "defer",
+      "summary": "Defer until the settings screen is redesigned; theming it now would be redone.",
+      "effort": {
+        "estimate": "M",
+        "basis": "Styles for one screen and its tests; tentative."
+      },
+      "workflow_labels": [],
+      "evidence": [
+        {
+          "text": "Fictional review: the settings screen redesign is still an open idea."
+        }
+      ],
+      "challenge": {
+        "status": "not-needed"
+      },
+      "loop": {
+        "state": "no",
+        "reason": "No configured trigger is present.",
+        "short_reason": "No preparation label",
+        "checked_at": "2026-10-09T12:00:00+02:00",
+        "config_source": "Fictional example config"
+      },
+      "placement": {
+        "current": null,
+        "proposed": null,
+        "reason": "Keep without one: closed milestones held only release-scoped work, and ideas waited without a milestone until planned."
+      }
+    },
+    {
+      "id": "example/app#6",
+      "title": "Share a project with a link",
+      "url": "https://github.com/example/app/issues/6",
+      "created_at": "2026-10-02T14:00:00+02:00",
+      "state": "open",
+      "treatment": "keep",
+      "summary": "Keep: the link is the smallest way to invite a teammate, and nothing like it has shipped.",
+      "effort": {
+        "estimate": "M",
+        "basis": "One endpoint, the link view and access checks; tentative."
+      },
+      "workflow_labels": [],
+      "evidence": [
+        {
+          "text": "Fictional review: projects can only be shared by adding members one by one."
+        }
+      ],
+      "challenge": {
+        "status": "not-needed"
+      },
+      "loop": {
+        "state": "no",
+        "reason": "No configured trigger is present.",
+        "short_reason": "No preparation label",
+        "checked_at": "2026-10-09T12:00:00+02:00",
+        "config_source": "Fictional example config"
+      },
+      "placement": {
+        "current": "15"
       }
     }
   ],
@@ -135,7 +202,21 @@
       "url": "https://github.com/example/app/milestone/14",
       "delivered_weight": 21,
       "other_open_weight": 2,
-      "basis": "Illustrative: delivered weight from recorded estimates of closed issues."
+      "basis": "Illustrative: delivered weight from recorded estimates of closed issues.",
+      "state": "open",
+      "due_on": "2026-10-31",
+      "goal": "Sync never loses local changes and says when it last succeeded."
+    },
+    {
+      "id": "15",
+      "title": "1.5: Shared projects",
+      "url": "https://github.com/example/app/milestone/15",
+      "state": "open",
+      "due_on": "2026-12-12",
+      "goal": "Invite a teammate to a project with one link.",
+      "delivered_weight": 0,
+      "other_open_weight": 6,
+      "basis": "Illustrative: nothing delivered yet."
     }
   ],
   "challenge_summary": "One illustrative independent challenge retained delivered last-sync behavior.",
@@ -143,5 +224,9 @@
     "Fictional example; no repository was reviewed and no external changes were made."
   ],
   "decisions": [],
-  "actions": []
+  "actions": [],
+  "milestone_usage": {
+    "summary": "Illustrative: milestones are releases named by version, one about every six weeks with 8 to 15 issues and a one-line goal. Ideas and chores stay without one until planned.",
+    "basis": "Fictional example: 2 open and 6 closed milestones read with scripts/milestones.py."
+  }
 }

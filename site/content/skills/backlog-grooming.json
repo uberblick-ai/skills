@@ -11,6 +11,7 @@
     "Agrees on the goal and scope in chat: the whole repository, a milestone or a project, and whether you want a smaller backlog or a named outcome sooner.",
     "Reads every open issue in scope, linked deliveries, blockers and, where one exists, the product corpus.",
     "Challenges each issue, oldest first, and recommends one treatment with a tentative effort estimate. Issues that need no change move to a short list at the end.",
+    "Reads every milestone, open and closed, to learn what they mean here. When 40% or more of the issues have one, the report groups them by milestone, with a No milestone group whose issues each get a milestone or a reason to stay without one.",
     "Weighs each milestone by its estimates and flags those over the cap (25 by default), proposing a new milestone instead of piling more issues in.",
     "Asks a separate agent to argue against the large or disputed calls, and labels the rows it challenged.",
     "Settles material choices with you in chat, then renders <em>Less work. More value.</em> as HTML and JSON.",
@@ -64,7 +65,7 @@
   "shots": [
     {
       "image": "grooming-top",
-      "caption": "The decision table from a real run over 81 open issues: Close unnecessary, Defer, Keep and Narrow."
+      "caption": "The decision table from a real run over the 21 open issues of ub-agents, grouped by milestone, each with its weight against the cap."
     }
   ]
 }
