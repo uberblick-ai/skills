@@ -59,6 +59,7 @@ Each line is something the user had to say that the skill should have made unnec
 11. "I feel the corpus of PodAntenna is too thin", after the run: the coverage came from the screens, not from the project's own map of the product (finding 22).
 12. "the corpus felt thin - in width and depth .. some topics might have deserved to get sub-pages. Compare how the uberblick-2 corpus is structured": the skill produces one flat level of pages (finding 23).
 13. "I would like to cover the product intent sufficiently and surface relevant technical aspects - uberblick-2 corpus is probably quite detailed": the target is sufficient intent plus the technical interfaces that matter. uberblick-2 is the reference for structure, not the size target (finding 24).
+14. "the corpus is there to understand the technical structure too. Finding the balance to give a birds-eye view to understand the data flow and models - without going into details and have too much detail is the challenge": the skill gives no bird's-eye technical view and no test for its height (finding 25).
 
 ## Findings
 
@@ -286,6 +287,36 @@ misleads; **low** = polish. AntennaPod supplies the evidence; every fix is writt
     file formats, links and intents, protocols with outside servers, a CLI's or API's contract
     where it is part of the product. And give the person a sufficiency test at the checkpoint.
 
+25. **Medium: no bird's-eye view of the technical structure, and nothing that says how high to fly.**
+    The corpus should also let someone understand how the product is built: its models and how
+    data moves. The skill offers two extremes. It leaves out "stack, architecture … data
+    structures", and its only technical outlet would be reference detail. The AntennaPod intake
+    had neither a model page nor a data-flow view. The episode state model became a decision record
+    because the corpus had no other place for it.
+
+    uberblick-2's "Domain model" page shows the height. It is one table, `Model | Purpose`, each
+    row one sentence linking to the model's own page (Workspaces, Regular documents, Decision
+    records, Tags, Comments), then a short note on how special cases (RFCs, reports) use the
+    models. It has no fields, schemas, classes or storage. Its flows work the same way: an overview
+    drawing with one box per phase, each phase on its own page.
+
+    For AntennaPod, the bird's-eye view would be two things:
+    - a domain model: podcast (feed), episode and its media, the episode states, queue, tag,
+      download, playback position and history, sync account;
+    - one data-flow drawing: feeds refresh → new episodes → Inbox or queue → download → play →
+      played → deleted, with where data leaves and enters (sync server, backup file, OPML, the
+      watch).
+
+    A test for the balance, to put in the skill:
+    - **Enough:** someone new can say what each model is for, how the models relate, where a piece
+      of data comes from and goes, and which page owns its rules.
+    - **Too much:** the page would change if the code were refactored without changing behaviour
+      (fields, tables, classes, modules, queues). That belongs in the repository.
+
+    Fix: every intake proposes a domain-model entry page and, where data moves between stages,
+    devices or services, one data-flow overview drawing. Both link to the feature pages and
+    stay at the height above.
+
 ### Checking, review and writing (steps 7 to 10)
 
 16. **Medium: step 7 says the corpus help names the renderer versions; it doesn't.** `get_help`
@@ -328,6 +359,7 @@ run can add itself to **Also seen in** (or "contradicts") instead of filing it a
 | S23 | Capture refusals | Pages and records state what the product refuses as well as what it does. Look for refusals in the docs and FAQ, and in declined requests closed by a maintainer (`not planned`, `wontfix`, `by design`). | `analysis.md` → Writing pages, Decision records | 22 | fzf finding 6 (a principle found in declined requests); immich (FAQ refusals became records) |
 | S24 | A page structure, not a page list | An overview and a domain-model entry; feature pages that own promises; surface pages (`<Surface>: …`) that present them and link back; sub-pages when an area has capabilities with their own promises, tests or docs pages. Few groups and pins, each pin the entry to a family; drop the "more than 3 pins" warning for a check that every family has an entry page. A `parent` per document lets the review show the tree. | `SKILL.md` step 5; `analysis.md` → Capabilities, then pages, and Sidebar; `plan.md`; `intake.py` `validate`, `review` | 23 | |
 | S25 | Surface the technical interfaces that matter | Replace "technical material stays in the repository" with the guidance's line: internals stay, but interfaces that people or other programs act on (feed and file formats, links and intents, protocols with outside servers, a CLI's or API's contract) get `technical-reference` pages. Add a sufficiency test to the checkpoint: audiences, docs pages and labels covered; promises and refusals stated; sub-pages where capabilities carry their own promises; every outside interface referenced. uberblick-2 sets the structure, not the size. | `analysis.md` intro, Markdown files table, Writing pages; `SKILL.md` steps 4 and 5 | 24 | |
+| S26 | A bird's-eye technical view, at the right height | Every intake proposes a domain-model entry page (a `Model / Purpose` table, one sentence per model, linking to its page, with how the models relate) and, where data moves between stages, devices or services, one data-flow overview drawing (ablauf, one box per stage, showing where data enters and leaves). Height test: enough when someone new can say what each model is for, where data comes from and goes, and which page owns its rules; too much when the page would change under a refactor that keeps behaviour (fields, tables, classes, modules). | `analysis.md` → Capabilities, then pages, and Writing pages; `references/visuals.md` (overview drawing); `SKILL.md` steps 4 and 5 | 25 | |
 | S3 | Pages state intent, not reference | Absorbed by S20. Name a setting only where it carries a promise, and say what it promises; no lists of values. | `analysis.md` → Writing pages | 13 | ablauf §4.2 (intent is the point; related) |
 | S4 | Records in the product's words | No code symbols or build names. An engineering choice qualifies only where it changes what people get; leave it out, as a candidate with its reason, when the repo records it next to the code. | `analysis.md` → Decision records (the "framework or library" line) | 14 | |
 | S5 | Read what the team publishes, when there is any | When the README, the host's `homepage` field or a manifest links a homepage or docs site, read the homepage and the docs navigation for emphasis, group names and tags. Otherwise use the README's opening, a manifest's `description`, listing metadata in the repo and area labels; with none of these, ask (S2). Never a source for behaviour. Skip pages behind a sign-in, and fetch nothing for a private repository unasked. | `SKILL.md` step 3; `analysis.md` → Product, audience and scope | 10 | ablauf §5 "Product intent from the host" (related) |
