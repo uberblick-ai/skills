@@ -57,6 +57,7 @@ Each line is something the user had to say that the skill should have made unnec
 9. "ensure the skill stays agnostic and nothing from the repo leaks into the skill": applies to every proposed fix below.
 10. "coarser pages is fine - the corpus describes product intent - not the product itself. See guidance doc on uberblick-2. This should be respected by the skill" (said at the immich checkpoint; it applies to this run too): the skill never reads the workspace's writing guidance (finding 21).
 11. "I feel the corpus of PodAntenna is too thin", after the run: the coverage came from the screens, not from the project's own map of the product (finding 22).
+12. "the corpus felt thin - in width and depth .. some topics might have deserved to get sub-pages. Compare how the uberblick-2 corpus is structured": the skill produces one flat level of pages (finding 23).
 
 ## Findings
 
@@ -211,6 +212,39 @@ misleads; **low** = polish. AntennaPod supplies the evidence; every fix is writt
     clone and read it like the main one. Look for refusals in the docs, the FAQ and declined
     requests, and state them as promises on pages, or as records.
 
+23. **High: the corpus is thin in depth as well as width: one flat level of pages, no sub-pages.**
+    The skill's shape rules push toward it:
+    - SKILL.md step 5 asks for "one per product area or concept a person acts on, small";
+    - analysis.md asks for 3 to 6 groups, each pinning "usually one and at most three";
+    - `check` warns about a group pinning more than 3 entry points.
+
+    Nothing in the skill mentions sub-pages, page families, or splitting what a feature promises
+    from how a surface presents it. The corpus the guidance comes from (uberblick-2, read
+    2026-11-01) is built the other way:
+
+    | | AntennaPod intake | uberblick-2 corpus |
+    | --- | --- | --- |
+    | Pages and records | 15 pages, 5 records | 64 pages, 11 records |
+    | Sidebar | 5 groups, 11 pins, every page one level below a pin | 3 groups, 8 pins; the product sits in one group with 5 pins |
+    | Structure | One page per area | Entry pages that fan out into families: Domain model → model pages; `CLI` → 12 command pages; `MCP` → 17 tool and help pages; `Web UI system` → 9 screen pages; Uberblick Markdown → 4 extension pages |
+    | Promises versus surfaces | Mixed on each page | Feature pages own the promises (Comments, Notifications, Permissions, Archiving and deleting); surface pages (`Web UI: …`, `CLI: …`, `MCP: …`) show how one surface presents them and link back |
+    | Records | 5, all `open`, 34 to 48 words | 11, all `decided`, each naming who decided |
+
+    In AntennaPod, several areas deserved sub-pages:
+    - **The player:** chapters, transcripts, video, Cast, speed and audio.
+    - **Episode lists:** Inbox, Downloads, Playback history, Favorites, swipe actions.
+    - **Downloads and refresh:** refresh, automatic download, automatic deletion, mobile data and storage.
+    - **Controls outside the app:** notifications, widget, Android Auto, Wear OS.
+    - **Add podcasts:** search and discovery, OPML, local folders.
+    - **A domain model entry** (podcast, episode and its states, queue, tag) that the feature pages hang from.
+
+    Fix: give the skill a page structure, not just a page list. That means an overview and
+    a domain-model entry. Feature pages own the promises; surface pages present them, one per
+    screen, command or tool where a surface has several; sub-pages appear when an area has
+    capabilities with their own promises, tests or docs pages. Few groups and pins, each pin the
+    entry to a family. Replace the "at most three pins" warning with a check that every family has
+    one entry page. The plan could gain a `parent` per document so the review shows the tree.
+
 ### Checking, review and writing (steps 7 to 10)
 
 16. **Medium: step 7 says the corpus help names the renderer versions; it doesn't.** `get_help`
@@ -251,6 +285,7 @@ run can add itself to **Also seen in** (or "contradicts") instead of filing it a
 | S21 | Coverage from the project's own map | Before reading code, list every audience, every published docs page and every area or feature label (`scan` has the labels). Each gets a page or a reason in `capabilities`; `check` warns about a label or docs page with neither. | `SKILL.md` steps 3 and 5; `analysis.md` → Capabilities, then pages; `intake.py` `validate` | 22 | immich (heaviest suites did not set depth; related) |
 | S22 | Read published docs in another repository | When the README or homepage links docs built from another repository of the same owner, clone it and read its pages, not just its navigation. They are the team's own statement of the product. | `SKILL.md` step 3; `analysis.md` → Markdown files (docs site) | 22 | |
 | S23 | Capture refusals | Pages and records state what the product refuses as well as what it does. Look for refusals in the docs and FAQ, and in declined requests closed by a maintainer (`not planned`, `wontfix`, `by design`). | `analysis.md` → Writing pages, Decision records | 22 | fzf finding 6 (a principle found in declined requests); immich (FAQ refusals became records) |
+| S24 | A page structure, not a page list | An overview and a domain-model entry; feature pages that own promises; surface pages (`<Surface>: …`) that present them and link back; sub-pages when an area has capabilities with their own promises, tests or docs pages. Few groups and pins, each pin the entry to a family; drop the "more than 3 pins" warning for a check that every family has an entry page. A `parent` per document lets the review show the tree. | `SKILL.md` step 5; `analysis.md` → Capabilities, then pages, and Sidebar; `plan.md`; `intake.py` `validate`, `review` | 23 | |
 | S3 | Pages state intent, not reference | Absorbed by S20. Name a setting only where it carries a promise, and say what it promises; no lists of values. | `analysis.md` → Writing pages | 13 | ablauf §4.2 (intent is the point; related) |
 | S4 | Records in the product's words | No code symbols or build names. An engineering choice qualifies only where it changes what people get; leave it out, as a candidate with its reason, when the repo records it next to the code. | `analysis.md` → Decision records (the "framework or library" line) | 14 | |
 | S5 | Read what the team publishes, when there is any | When the README, the host's `homepage` field or a manifest links a homepage or docs site, read the homepage and the docs navigation for emphasis, group names and tags. Otherwise use the README's opening, a manifest's `description`, listing metadata in the repo and area labels; with none of these, ask (S2). Never a source for behaviour. Skip pages behind a sign-in, and fetch nothing for a private repository unasked. | `SKILL.md` step 3; `analysis.md` → Product, audience and scope | 10 | ablauf §5 "Product intent from the host" (related) |
