@@ -57,7 +57,7 @@ Repository maintenance, with no release or delivery-loop requirement. Plugin: `m
 
 Skills for setting up and keeping an [Uberblick](https://github.com/uberblick-ai/uberblick-2) corpus. Plugin: `uberblick`.
 
-- **[uberblick-intake](skills/uberblick/uberblick-intake/SKILL.md)**: Move a repository's knowledge into Uberblick: product pages from its Markdown, with technical and agent docs left in the repository, tags for this repository, decision records from ADRs and the git history, ablauf drawings and wireframes where they help, scenarios that follow the e2e tests, and a sidebar ready for the team. One review page to approve, then the writes. Needs `python3`, `git` and Node.js; writing needs the Uberblick MCP tools or `ub`.
+- **[uberblick-intake](skills/uberblick/uberblick-intake/SKILL.md)**: Set up an Uberblick corpus from a repository: product pages from its Markdown, with technical and agent docs left in the repository, tags for this repository, decision records from ADRs and the git history, ablauf drawings and wireframes where they help, scenarios that follow the e2e tests (the tests are analysed, not moved), and a sidebar ready for the team. One review page to approve, then the writes. Needs `python3`, `git` and Node.js; writing needs the Uberblick MCP tools or `ub`.
 
 ## Contributing
 

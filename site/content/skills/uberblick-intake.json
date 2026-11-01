@@ -1,6 +1,6 @@
 {
   "question": "What would our repository look like as an Uberblick corpus?",
-  "short": "Sort a repository's Markdown, history and tests into an Uberblick corpus: product pages, decision records, tags and a sidebar, approved on one review page before anything is written.",
+  "short": "Sort a repository's Markdown and history into an Uberblick corpus, with its tests deciding where pages go deeper: product pages, decision records, tags and a sidebar, approved on one review page before anything is written.",
   "lede": "Product intent becomes pages a person can trust; technical, implementation and agent docs stay next to the code. Every Markdown file gets one fate, every page is checked against the code, and nothing reaches the workspace before a person approves the plan.",
   "asks": [
     "Set up Uberblick for this repository.",

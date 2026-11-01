@@ -1,13 +1,16 @@
 ---
 name: uberblick-intake
 description: >-
-  Move a repository's knowledge into Uberblick. Reads every Markdown file,
-  the git history and the test suite, then proposes the corpus: which files
+  Set up an Uberblick corpus from an existing repository. Reads every
+  Markdown file, the git history and the test suite, then proposes the
+  corpus: which files
   become product pages and which stay in the repository as technical,
   implementation or agent Markdown, the tags for this repository, decision
   records for the questions the history keeps reopening, ablauf drawings
   and wireframes where a picture says it better, pages as deep as the tests
-  show the team cares, and a sidebar ready for the team. Shows the whole
+  show the team cares, and a sidebar ready for the team. Tests are only
+  analysed, never moved: they decide which areas need a page and how deep
+  it goes. Shows the whole
   plan on one review page and writes it to the workspace once approved. Use
   when someone wants to set up Uberblick for an existing repository, migrate
   their docs into the corpus, or asks what an intake would create.

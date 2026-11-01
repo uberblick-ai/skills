@@ -29,7 +29,7 @@
     },
     {
       "name": "uberblick",
-      "description": "Skills for setting up and keeping an Uberblick corpus: intake of a repository's docs, history and tests.",
+      "description": "Skills for setting up and keeping an Uberblick corpus: intake of a repository's docs and history, weighted by what its tests protect.",
       "source": "./",
       "strict": false,
       "skills": [
