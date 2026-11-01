@@ -75,9 +75,11 @@ into corpus writes.
 
 - `ref` is the commit the scan read (`scan.json`'s `ref`; its full hash is
   `commit`, for links and code checks), `date` today.
-- `scope`: `full` (pages and decision records, the default), `decisions`
+- `scope`: `full`, the default and the point of an intake: product intent
+  as pages, with the decision records that constrain it. `decisions`
   (records only: no capabilities needed, records pinned as entry points, one
-  to six groups) or `pages`, as the person chose at the checkpoint.
+  to six groups) or `pages` only when the person asked for it at the
+  checkpoint; `check` warns about either.
 - `checkpoint`: the outline and decision candidates as the person confirmed
   them before drafting: `"status": "confirmed"` with `who`, `when` and
   `where`, or, run unattended, `"status": "assumed"` with `assumptions`, a
@@ -110,7 +112,8 @@ into corpus writes.
   `decided` and one without is `open`. A decided record is written with its answer in one call, so its
   answer links only to pages or to records listed before it. A document already in the corpus takes `existing: UUID`
   and its `title`, with no `file`: it is not created again or checked, but
-  can be pinned and linked.
+  can be pinned and linked. List its `tags` too, so tag counts include it
+  (`retag: true` also writes them).
 - `markdown`: every Markdown file the scan found is covered by exactly one
   entry, an exact path or a glob (`dir/**`, `*.mdx`); an exact path wins over
   a glob. `action` is `convert` (with `doc`, one slug or a list), `keep` or

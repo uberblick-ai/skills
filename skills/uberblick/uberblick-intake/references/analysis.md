@@ -57,11 +57,15 @@ SDK, a service or API, a data format or specification, infrastructure, or a
 monorepo of several) and who acts on it: an end user, an operator, a
 developer calling it, an agent writing it. That decides where capabilities
 come from (screens and routes, commands, exported API, configuration schema,
-grammar) and what a page means by "a person". Repositories often say where
-their intent lives already (a contributing guide, the agent instructions);
-when one says, for example, that the corpus holds decisions only, propose
-that scope. The person confirms the kind, the audience and the scope (`full`,
-`decisions` or `pages`) at the checkpoint.
+grammar) and what a page means by "a person". The corpus states product
+intent: every intake writes pages for what a person can do, with the
+decision records that constrain them. Repositories often say where their
+rules live (a specification, an authoring guide, the agent instructions);
+that decides which files stay authoritative as Markdown and what the pages
+link to, not whether intent is written. When a repository says its corpus
+holds something else, raise it at the checkpoint. The person confirms the
+kind and the audience there; scope `decisions` or `pages` only when they
+ask for it.
 
 ## Capabilities, then pages
 

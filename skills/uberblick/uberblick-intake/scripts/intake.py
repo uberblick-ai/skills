@@ -1147,6 +1147,9 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
         errors.append("checkpoint: a confirmed outline names who confirmed it, when and where")
     elif cp["status"] == "assumed" and not cp.get("assumptions"):
         errors.append("checkpoint: an assumed outline lists its assumptions")
+    if scope != "full":
+        warnings.append(f"scope: {scope} only; an intake states product intent as pages with the records that "
+                        f"constrain them, so keep this only when the person asked for it")
     if scope == "decisions" and any(d.get("kind", "page") == "page" for d in plan.get("documents", [])):
         warnings.append("scope: decisions only, yet the plan has pages")
     tags = {t["name"].lower(): t for t in plan["tags"]}

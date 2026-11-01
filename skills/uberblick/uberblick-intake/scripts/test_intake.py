@@ -306,6 +306,7 @@ class Plan(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertFalse(any(w.startswith(("sidebar:", "capabilities:")) or "no sources" in w for w in warnings),
                          warnings)
+        self.assertTrue(any(w.startswith("scope: decisions only;") for w in warnings))
         self.plan["scope"] = "everything"
         errors, _ = intake.validate(self.plan, self.path.parent)
         self.assertIn("plan: scope is one of full, decisions, pages", errors)

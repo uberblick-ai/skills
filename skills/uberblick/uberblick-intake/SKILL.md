@@ -1,10 +1,11 @@
 ---
 name: uberblick-intake
 description: >-
-  Set up an Uberblick corpus from an existing repository in any language,
-  structure or code host: product pages, decision records, tags and a
-  sidebar, from its docs, history and tracker, with the tests analysed, never
-  moved, to decide where pages go deeper. Use for "set up Uberblick for this
+  Write a repository's product intent into an Uberblick corpus: pages that
+  state what a person can do with the product, the decision records that
+  constrain it, tags and a sidebar, from its docs, code, history and tracker,
+  in any language, structure or code host. Tests are analysed, never moved,
+  to decide where pages go deeper. Use for "set up Uberblick for this
   repository", "move our product docs into the corpus", "which decisions
   should our corpus record?" or "what would an intake of this repo create?".
   Confirms the outline and every decision candidate with the person before
@@ -142,8 +143,12 @@ finished plan before anything is written (step 8).
 4. **Confirm the outline.** Before drafting anything, show the person a
    short outline and wait for the answer:
 
-   - the scope: a full corpus, decision records only, or pages only, and
-     how it sits beside a published docs site;
+   - the product intent the corpus will state: what a person can do, as
+     pages, with the decision records that constrain it. That is the point of
+     an intake; records only or pages only is a scope the person asks for,
+     never one you propose to save work. Say how the pages sit beside a
+     published docs site and the files that stay authoritative in the
+     repository;
    - the product's kind and audience;
    - the groups in order, each with its entry page, and the pages with a
      line each on what they cover; capabilities left without a page and why;
@@ -305,6 +310,9 @@ finished plan before anything is written (step 8).
    A local workspace has no hub until `ub open` runs in the checkout, so
    there the writes are done once applied; say they sync while `ub open`
    runs, and leave starting it to the person.
+
+   A changed plan unpins nothing: unpin with `unpin_doc` each document the
+   new sidebar no longer pins, such as records that now hang off a page.
 
    Tags the catalog still lacks are left off and named. Once a person
    creates them, or to write a changed plan, read the workspace again and
