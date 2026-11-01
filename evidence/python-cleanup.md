@@ -167,3 +167,34 @@ included. With Ruff 0.17.2, explicit `--select F401,F841` reported a local that
 the normal globally ignored F841 check omitted. This trial removed an
 unnecessary ignore-list override from the proposed instructions. No fixture
 code or analysis dependencies were added to the skill package.
+
+## Public-library dry run and version 0.4
+
+A third read-only dry run used `python-cleanup` 0.3 on
+[`celery/celery` at `57cb15f`](https://github.com/celery/celery/tree/57cb15ff99ab47a6e72d5a70c5522b8fabb59a57)
+on 2026-11-01. It scanned 161 package files, 242 test/support files and 48
+supplemental Python files. Vulture 2.16 reported 258 package-only findings;
+123 disappeared with tests. These are leads, not verified dead symbols.
+
+| Observation | General guidance added in 0.4 |
+| --- | --- |
+| Seven apparently unused `AsynPool` methods were invoked by the installed Billiard 4.3.1 superclass, including an empty override. | Inspect standard-library and dependency hook callers at relevant versions; removing an override can expose different parent behavior. |
+| Pyan3 2.9.0 on Python 3.12.8 failed on the 403-file package-plus-tests graph with a scope `KeyError`. A six-file graph resolved the selected target and known cross-package consumers. | Preserve failure evidence, use focused graphs or source inspection, and report their actual input coverage. Missing nodes and failed analysis do not establish non-use. |
+| The strongest candidate was already proposed in an open PR. Its description still listed pool-method removals that its current diff had restored. | Read the checked PR head/diff and discussion; distinguish remaining scope from abandoned changes and resolved review concerns. |
+
+The supported first area was the private `_start_worker_process` helper:
+22 definition-span lines including its decorator, with no test removals.
+Eight existing focused tests collected and passed on the unchanged snapshot
+using an in-memory broker. No deletion or post-removal verification was run.
+
+The current diff and discussion of
+[PR #10201](https://github.com/celery/celery/pull/10201), checked at head
+`1e128a82ad5b74390a8ee9634fa29de93ef9f0dc`, corroborated both the candidate and
+the inherited-hook trap. The author had already restored those hooks. The
+recommendation was to review or isolate the existing bounded change, not
+create a duplicate PR or endorse all its other removals.
+
+This is qualitative evidence from an author-run audit, not an independent
+evaluation or a precision estimate over all findings. Repository names,
+symbols and commits stay in this evidence document; the added workflow rules
+apply to Python applications and libraries generally.

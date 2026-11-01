@@ -20,7 +20,9 @@ Snapshot: relevant working-tree changes; inputs, exclusions and tool versions
 2. Findings
    ID | path:line / symbol | disposition | evidence | remaining uncertainty
    Distinguish production/test callers, dynamic roots and public contracts.
+   Include dependency or standard-library hook callers and checked versions.
    Include relevant history/issue links and rejected false positives.
+   For overlapping PRs: checked head, current diff/discussion, remaining scope.
 
 3. Test impact
    ID | test/case/assertion | retain/migrate/remove | behavior protected
@@ -45,6 +47,7 @@ Snapshot: relevant working-tree changes; inputs, exclusions and tool versions
    Separate successful collection, compilation/lint and runtime execution.
    Commands planned after edits; collected-case comparison if supported.
    Tool/coverage limitations and unavailable checks.
+   Failed graph attempts, fallback inputs and the coverage actually achieved.
 
 7. Other areas (optional)
    Numbered inventory for later. No unrelated changes in this area.
@@ -58,15 +61,15 @@ After execution:
 Example actionable reply (illustrative):
 
 ```text
-I recommend one area first: the retired label-provisioning path. Its wrapper
-has only two test callers; one private formatter is used only by that wrapper.
+I recommend one area first: the retired command wrapper. It has only two
+test callers; one private formatter is used only by that wrapper.
 
 1. Remove the wrapper and formatter. Could save about 23 source lines,
    measured from their definition spans; test changes are counted separately.
-2. Move confirmation and EOF checks to the active Doctor entry point,
+2. Move confirmation and EOF checks to the current command entry point,
    preserving their inputs, expected writes and refusal behavior.
 3. Decision D1: remove test_legacy_command_listing, which checks only the
-   retired interface's output. Doctor label creation remains covered.
+   retired interface's output. The current command remains covered.
 
 Cleanup was requested, but D1 needs confirmation before edits to this area.
 Do you approve D1? The full evidence and planned checks are in report.md.
@@ -86,7 +89,7 @@ Do not count setup errors as failed assertions or claim a passing baseline.
 Example result:
 
 ```text
-Completed area 1: retired label provisioning. Removed the agreed wrapper,
+Completed area 1: retired command wrapper. Removed the agreed wrapper,
 formatter and approved legacy test; preserved confirmation and EOF checks
 on the active path. Focused tests and required checks pass.
 Actual change: 23 source lines removed; 8 test lines added, 14 removed.

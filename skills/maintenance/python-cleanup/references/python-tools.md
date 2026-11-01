@@ -139,6 +139,14 @@ for a bounded finding. Record analyzed files, exclusions and elapsed time.
 When filtering a view, retain the raw incoming relationships for the selected
 symbols so omitted imports or comprehension scopes remain inspectable.
 
+If broad analysis crashes or cannot finish, save the failure, command, versions
+and attempted input set. Try a smaller graph containing the selected group and
+known consumers, or continue with qualified source inspection. Verify the
+target and known caller relationships in any fallback graph before interpreting
+absence. Keep repository-wide consumer searches and relevant dependency checks;
+record what the smaller graph omits. Do not present a focused result as a
+successful whole-project graph or count an omitted node as having no callers.
+
 Label a graph collapsed from symbol uses as **module uses**, not module
 imports: references between functions are not import statements. Unknown or
 external nodes remain analysis limits. Graph size does not establish coverage.

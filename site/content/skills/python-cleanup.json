@@ -10,7 +10,8 @@
   ],
   "steps": [
     "Records the repository snapshot, separate source and test inputs, execution roots and public contracts, with framework checks for Django, Ninja and Celery.",
-    "Compares production-only scans with scans including tests, traces callers and private helpers, and checks dynamic use and compatibility decisions.",
+    "Compares production-only scans with scans including tests, traces callers in the repository and dependencies, and checks dynamic use and compatibility decisions.",
+    "Falls back to focused analysis when broad graphs fail, and checks overlapping PRs against their current diff and discussion.",
     "Recommends one coherent area first and presents a pre-execution report with exact changes, test impact, uncertainty and planned checks.",
     "Confirms meaningful test removals before editing the affected area; lists minor or obvious leftovers that can proceed without confirmation.",
     "Checks test-service prerequisites, records a focused baseline for cleanup, and preserves useful assertions without weakening tests to get green.",
@@ -36,11 +37,11 @@
     ],
     [
       "Uncertainty",
-      "Dynamic callers, external contracts and unresolved findings are checked before removal. Static graphs are supporting evidence."
+      "Dynamic callers, inherited hooks and external contracts are checked before removal. Even an empty override can protect behavior."
     ],
     [
       "Verification limits",
-      "Reports collection, static checks and runtime tests separately. Missing test infrastructure leaves runtime behavior unverified."
+      "Reports graph failures and fallback scope, and separates collection, static checks and runtime tests. Missing test infrastructure leaves runtime behavior unverified."
     ]
   ],
   "needs": [

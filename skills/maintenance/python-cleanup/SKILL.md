@@ -19,7 +19,7 @@ compatibility: >-
   Cleanup uses the repository's existing test runner and development checks.
 metadata:
   author: uberblick-ai
-  version: "0.3"
+  version: "0.4"
 ---
 
 # Python cleanup
@@ -77,6 +77,9 @@ recommend working on one coherent area at a time and explain the choice.
    graph makes this easier. Verify the graph contains the target and a known
    caller, including a caller in another package, before interpreting absence.
    Record inputs, tool version, filters, missing modules and analysis errors.
+   If broad analysis fails, retain the failure and attempted inputs, then use
+   a focused graph or qualified source inspection with explicit coverage limits.
+   A failed build or a missing target node is not evidence of zero callers.
 
    Trace backwards to an execution root and forwards through private helpers.
    A caller can itself be dead. Mutually recursive functions can form a dead
@@ -92,6 +95,12 @@ recommend working on one coherent area at a time and explain the choice.
    - **Indirect use:** `getattr`/`setattr`, string registries, decorators,
      framework overrides, fixtures, dependency injection, serialization and
      monkey patches. Follow the dispatch or registration to the definition.
+   - **Inherited and protocol use:** inspect relevant base classes and hook
+     callers in the standard library and dependency sources matching the
+     project's versions, not just the checkout. Record the caller and version.
+     Removing even an empty override can expose different parent behavior;
+     a private name or an "unused" comment does not make it dead. If this
+     evidence is needed but unavailable, leave the candidate unresolved.
    - **Exports and compatibility:** check re-exports, `__all__`, documented
      imports, supported CLI options and consumers outside the scanned tree.
      Local absence cannot settle an externally supported API's retirement.
@@ -101,8 +110,12 @@ recommend working on one coherent area at a time and explain the choice.
    - **History and intent:** use `git log -S 'symbol' -- path` and inspect the
      relevant diff to find the last caller's removal or replacement. Read
      linked or matching issues/PRs when available; a refactor may deliberately
-     preserve an adapter. State when tracker context is unavailable. History
-     supports the current-code check; it does not replace it.
+     preserve an adapter. For overlapping work, read the current PR head/diff
+     and relevant discussion: descriptions may retain abandoned scope, and
+     review objections may already be resolved. Record existing work and what
+     remains instead of recommending a duplicate. State when tracker context
+     is unavailable. History supports the current-code check; it does not
+     replace it.
    - **Tests:** distinguish retired behavior, current behavior tested through
      an old wrapper, and deliberate test support. Recommend moving useful
      assertions to the active entry point before retiring a wrapper. Never
