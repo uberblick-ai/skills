@@ -1,4 +1,4 @@
-# Findings behind python-cleanup 0.2
+# Findings behind python-cleanup
 
 Checked on 2026-11-01 against `uberblick-ai/ub-agents` at `6956308`.
 The repository was read only. Tool trials used an exported snapshot and an
@@ -115,3 +115,55 @@ skill. The following scenario checks apply the final rules to concrete cases:
 These are manual scenario checks, not a measured guarantee of future agent
 behavior. The actual tool trials above remain the evidence for graph and
 unused-name behavior on ub-agents; no ub-agents code or tests were removed.
+
+## Framework dry run and version 0.3
+
+A second read-only dry run on 2026-11-01 exercised the skill on a Django,
+Django Ninja and Celery backend. The backend-specific report, paths and raw
+graphs remain outside this repository. These are the reusable observations:
+
+| Observation | Change to the skill |
+| --- | --- |
+| Tests and factories were nested under the source root; migrations and operational scripts had separate execution roles. | Require distinct input sets, and retain omitted migration/tooling consumers in searches or a supplementary scan. |
+| Many unused-name findings were mounted handlers, schema resolvers, signals or tasks invoked through strings. | Add a conditional framework reference that distinguishes registration from an identified consumer and leaves unchecked external task producers unresolved. |
+| A 90-line retired reader had five exclusive helpers totaling another 219 definition-span lines. Shared schemas remained live through another builder. | Check outside callers for every group member and retain shared dependencies. |
+| One compatibility assertion called the retired reader; a supported route used a different reader. | Map the scenario to the actual mounted path rather than deciding from a function's version suffix. Keep every meaningful assertion or request confirmation. |
+| The proposed async test rewrite needed to remove a redundant local import; otherwise its earlier use would be locally unbound. | Inspect binding and sync/async details of the concrete rewrite; report static and runtime feasibility separately. |
+| The configured Ruff rules ignored F841. | Verify explicit advisory rule selection and report remaining per-file/inline suppression limits without editing the configuration. |
+| A graph of more than 2,000 source/test files completed in about 84 seconds, with roughly 200,000 uses edges. | Make whole-project graphs optional, retain focused raw edges, and label collapsed module uses separately from import graphs. |
+| Test collection succeeded, but an autouse database fixture made every attempted test need unavailable PostgreSQL. Docker was also unavailable. | Check test-service prerequisites before execution, avoid multiplying the same setup error and continue audits with an explicit runtime limit. |
+
+Tools were Python 3.13.11, Vulture 2.16, Pyan3 2.9.0 and Ruff 0.17.2.
+Production-only Vulture produced 1,657 findings; 185 disappeared with tests.
+Those counts are candidates, not verified removals. The graph contained the
+selected definitions, their known test caller, active API callers and a
+cross-package fixture-to-helper control edge.
+
+The repository's format/lint check passed. A 93-case related set collected;
+execution of the initial 31-case subset produced database setup errors, not
+passing tests. The proposed three-assertion migration compiled and passed
+Ruff in memory only. No cleanup or runtime verification of that migration
+was performed. The dry run was conducted by the authoring agent, not an
+independent behavioral evaluation of version 0.3.
+
+Additional decision checks for the new reference:
+
+| Case | Required disposition/action |
+| --- | --- |
+| Task named by a live beat schedule but no lexical caller | Keep; the schedule is a concrete consumer. |
+| Registered task with no local producer and unchecked queued/external consumers | Unresolved; neither automatic deletion nor an assertion that registration proves active use. |
+| Old-version helper still used by a mounted supported route | Keep regardless of its suffix. |
+| Resolver on a schema with no established consumer | Trace the schema; framework naming alone does not prove that the schema is live. |
+| Test-only client reset called by an autouse fixture | Keep intentional support. |
+| Collection and lint succeed while the test database is unavailable | Continue the audit, state runtime verification is unavailable, and preserve the tests. |
+
+These checks review decisions against observed cases. They do not claim an
+independent agent trial or a post-removal test pass.
+
+A separate scratch fixture exercised the revised scan guidance: a nested
+test hid its source function only in the source-plus-tests pass, while a
+migration consumer hid another function only when migration inputs were
+included. With Ruff 0.17.2, explicit `--select F401,F841` reported a local that
+the normal globally ignored F841 check omitted. This trial removed an
+unnecessary ignore-list override from the proposed instructions. No fixture
+code or analysis dependencies were added to the skill package.

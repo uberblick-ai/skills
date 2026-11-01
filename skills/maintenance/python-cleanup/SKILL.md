@@ -19,7 +19,7 @@ compatibility: >-
   Cleanup uses the repository's existing test runner and development checks.
 metadata:
   author: uberblick-ai
-  version: "0.2"
+  version: "0.3"
 ---
 
 # Python cleanup
@@ -48,6 +48,9 @@ recommend working on one coherent area at a time and explain the choice.
    Classify roots as production, test, tooling or external/unknown. A file
    launched by pathname or `python -m` needs no ordinary import caller.
    Migrations, callbacks and hooks may be live without a lexical call site.
+   For Django, Django Ninja or Celery, read
+   [references/django-celery.md](references/django-celery.md) to check route,
+   schema, signal and task registration against actual consumers.
 
 3. **Collect candidates in two passes.** Use the commands and limitations in
    [references/python-tools.md](references/python-tools.md). Prefer available
@@ -56,6 +59,10 @@ recommend working on one coherent area at a time and explain the choice.
    tests. Compare findings at production locations: disappearing findings are
    *possibly test-only*, not automatically live or dead. Check qualified uses
    because unrelated symbols with the same name can suppress a finding.
+   When tests live under source, build separate input sets; scanning `src`
+   already includes them. Keep migrations and tooling in consumer searches
+   even when they are outside the candidate scan or graph, and report that
+   difference in scope.
 
    Include unused functions, private helper chains, constants, write-only
    state, imports and unreachable statements. Ruff's F401 is local to the
@@ -77,6 +84,8 @@ recommend working on one coherent area at a time and explain the choice.
    roots, not just incoming-edge counts. Keep import, definition, reference and
    call relationships distinct. A module defining a function does not call it.
    Show small caller/callee views alongside any whole-project graph.
+   For a proposed group, check each member for callers outside that group.
+   Keep shared schemas and helpers even when the old root imports them.
 
 5. **Challenge each proposed removal.** Resolve the relevant cases:
 
@@ -98,6 +107,9 @@ recommend working on one coherent area at a time and explain the choice.
      an old wrapper, and deliberate test support. Recommend moving useful
      assertions to the active entry point before retiring a wrapper. Never
      count every test mentioning the candidate as safely removable.
+     Inspect the concrete rewrite for imports, local-name binding, async
+     execution and fixture changes as well as its behavioral mapping. Mark
+     compilation or lint-only feasibility checks as static, not runtime proof.
 
    Existing coverage or runtime traces can confirm use. Missing execution only
    describes the observed workload, especially for recovery and scheduled
@@ -168,10 +180,18 @@ recommend working on one coherent area at a time and explain the choice.
    does not imply such a contract.
 
 8. **Execute and verify the selected area.** Recheck the relevant snapshot and
-   approval scope. Run focused tests before editing to establish a baseline;
-   record pre-existing failures or unavailable checks. Where the existing
-   runner supports it, capture collected test cases before and after. Do not
-   install a new test framework just to collect IDs.
+   approval scope. Before running a baseline or migration trial, including in
+   an audit, inspect the runner and autouse fixtures for required services.
+   Check the repository's test-service configuration and availability first;
+   fixtures can make apparently pure tests depend on a database. If setup is
+   unavailable, record the missing prerequisite and continue the audit without
+   claiming runtime verification. Do not repeat a known setup failure across
+   larger suites unless its cause has changed.
+
+   Run focused tests before cleanup edits to establish a baseline; record
+   pre-existing failures or unavailable checks. Where the existing runner
+   supports it, capture collected test cases before and after. Collection is
+   not execution. Do not install a new test framework just to collect IDs.
 
    Execute only removal candidates and migrate-first items with a concrete
    preservation plan. Leave keep and unresolved items alone. Remove immediate

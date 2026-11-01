@@ -18,6 +18,7 @@
     {"label": "Contribute", "question": "How do I write a skill for this repository?", "links": [["Guide", "AGENTS.md", "https://github.com/uberblick-ai/skills/blob/main/AGENTS.md"], ["Spec", "Agent Skills specification", "https://agentskills.io/specification"]]}
   ],
   "changes": [
+    ["2026-11-01", "Skill", "python-cleanup 0.3: find dead Python code and clean up one area at a time, with a pre-execution report, confirmed test removals and Django/Celery root checks."],
     ["2026-11-01", "Skill", "backlog-grooming 1.5: when most issues have a milestone, the report groups them by milestone, and recommends one, or none, for each issue without. A Discuss with Claude link opens the findings in Claude Code."],
     ["2026-10-22", "Skill", "ub-agents-flow 0.1: how your loop runs, as an overview and one document per phase, drawn with ablauf, every gate numbered with its rule, as Uberblick Markdown and a page."],
     ["2026-10-21", "Skill", "ub-agents-deliver-report 1.9: the Changelog's issues and PRs show as GitHub pills, with the right issue or pull request icon."],

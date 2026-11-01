@@ -13,11 +13,26 @@ checkout. Inspect existing exclusions and configuration first.
 
 ```sh
 ruff --version
-ruff check src --select F401,F841 --no-fix > "$DEAD_CODE_OUT/ruff.txt"
+ruff check src --select F401,F841 --no-fix --no-cache > "$DEAD_CODE_OUT/ruff.txt"
 vulture --version
 vulture src --min-confidence 60 --sort-by-size > "$DEAD_CODE_OUT/source.txt"
 vulture src tests --min-confidence 60 --sort-by-size > "$DEAD_CODE_OUT/with-tests.txt"
 ```
+
+These Vulture examples assume tests are outside `src`. For nested test trees,
+inventory tracked Python paths and classify production, test/support,
+migration and tooling inputs first. Supply the intended files or inspect
+`--exclude` patterns against that inventory. Test helpers may also have tooling
+consumers; classify by use as well as directory name. Keep omitted migration
+and tooling consumers in a supplementary scan or qualified search. Record
+the exact inputs of each pass so the comparison measures what tests add.
+
+Compare the advisory rule selection with the repository's normal check.
+In the Ruff 0.17.2 trial, explicit `--select F401,F841` enabled F841 despite
+its global configuration ignore; no configuration edit was needed. Per-file
+ignores and inline suppressions still apply. Inspect and report those limits
+rather than treating no findings as proof of non-use or the advisory scan as
+the repository's normal check.
 
 Run the scans independently and retain each exit status. Vulture exits 3 for
 findings; 1 or 2 indicates an invalid invocation or analysis error. Ruff exits
@@ -118,8 +133,17 @@ render a focused graph with:
 dot -Tsvg "$DEAD_CODE_OUT/callees.dot" -o "$DEAD_CODE_OUT/callees.svg"
 ```
 
-Keep the whole graph as an artifact and use focused views for decisions.
-Large graphs become difficult to read; their size does not establish coverage.
+If a whole-project graph is useful and practical, keep it as an artifact and
+use focused views for decisions. A large graph is optional, not a prerequisite
+for a bounded finding. Record analyzed files, exclusions and elapsed time.
+When filtering a view, retain the raw incoming relationships for the selected
+symbols so omitted imports or comprehension scopes remain inspectable.
+
+Label a graph collapsed from symbol uses as **module uses**, not module
+imports: references between functions are not import statements. Unknown or
+external nodes remain analysis limits. Graph size does not establish coverage.
+For Python API exports, plain node/edge records with qualified names and source
+locations are enough; the whole analyzer object need not be serializable.
 
 ## Other available tools
 

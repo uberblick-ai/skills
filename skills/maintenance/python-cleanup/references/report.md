@@ -25,6 +25,8 @@ Snapshot: relevant working-tree changes; inputs, exclusions and tool versions
 3. Test impact
    ID | test/case/assertion | retain/migrate/remove | behavior protected
    For migrations: old scenario/check -> new scenario/check and location.
+   Feasibility: proposed, checked statically, or exercised at runtime.
+   Name the snapshot and command supporting that status.
    For removal: what guarantee disappears and what still covers active behavior.
 
 4. Decisions before execution
@@ -38,7 +40,9 @@ Snapshot: relevant working-tree changes; inputs, exclusions and tool versions
    State why each qualifies for the confirmation exception.
 
 6. Validation
+   Test-service prerequisites and availability, including autouse fixtures.
    Baseline checks run and their results, including pre-existing failures.
+   Separate successful collection, compilation/lint and runtime execution.
    Commands planned after edits; collected-case comparison if supported.
    Tool/coverage limitations and unavailable checks.
 
@@ -72,6 +76,12 @@ Ask about all pending decisions for the area together, with the precise test
 names and consequences. If cleanup is authorized and only verified minor
 leftovers are involved, state them and proceed after presenting the report.
 Do not add a confirmation request just because a report was written.
+
+When runtime verification is unavailable, say what still holds and what does
+not: "Caller/history evidence supports this candidate; 31 tests collected,
+but test setup failed because PostgreSQL was unavailable. The proposed test
+migration passes static checks only; its runtime behavior remains unverified."
+Do not count setup errors as failed assertions or claim a passing baseline.
 
 Example result:
 
