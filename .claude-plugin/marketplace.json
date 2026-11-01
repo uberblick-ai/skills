@@ -20,11 +20,11 @@
     },
     {
       "name": "maintenance",
-      "description": "Repository-agnostic dead Python code audits, backlog grooming, scope reduction and CI health tracking.",
+      "description": "Repository-agnostic Python dead-code cleanup, backlog grooming, scope reduction and CI health tracking.",
       "source": "./",
       "strict": false,
       "skills": [
-        "./skills/maintenance/find-dead-code",
+        "./skills/maintenance/python-cleanup",
         "./skills/maintenance/backlog-grooming",
         "./skills/maintenance/ci-health"
       ]

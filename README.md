@@ -51,7 +51,7 @@ Skills for repositories that run the [ub-agents](https://agents.uberblick.ai) lo
 
 Repository maintenance, with no release or delivery-loop requirement. Plugin: `maintenance`.
 
-- **[find-dead-code](skills/maintenance/find-dead-code/SKILL.md)**: Find dead Python code with caller evidence, checks for dynamic entry points and exports, and a plan to preserve useful tests. Produces a report and optional graphs; changes no source or tracker items.
+- **[python-cleanup](skills/maintenance/python-cleanup/SKILL.md)**: Identify dead Python code and, when asked, clean up one area at a time after a pre-execution report. Checks callers and dynamic entry points, preserves useful assertions and confirms meaningful test removals; minor, verified leftovers can proceed without confirmation.
 - **[backlog-grooming](skills/maintenance/backlog-grooming/SKILL.md)**: Review all issues, a milestone or a project against current deliveries and available product intent. Challenge duplication and excess scope, resolve decisions in chat, and produce the “Less work. More value.” report with estimates, blockers, milestone load and optional loop eligibility, grouped by milestone when most issues have one.
 - **[ci-health](skills/maintenance/ci-health/SKILL.md)**: Track CI on main from GitHub Actions for any repository: the median wall time a push waits, with its spread and P95, the number of tests, optionally coverage and the test-to-code ratio, the changes that moved CI time up or down, and the top three actions that would cut the wait. Needs only `python3` and an authenticated `gh`; with the Uberblick MCP tools or the `ub` command it stores each day in the repository's own "CI Health Report" document with charts, recommended actions and an incident changelog.
 

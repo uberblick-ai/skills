@@ -1,0 +1,56 @@
+{
+  "question": "Which Python code can we safely remove?",
+  "short": "Identify dead code and clean up one area at a time, with a pre-execution report and confirmation for meaningful test removals.",
+  "lede": "A function can look active because only tests call it. An unused import can still be a live export. This skill checks those cases, reports the evidence and test impact before edits, and performs cleanup only when requested.",
+  "asks": [
+    "Find dead Python code.",
+    "Which functions are only used by tests?",
+    "Plan a bounded cleanup.",
+    "Clean up this area after reporting test impact."
+  ],
+  "steps": [
+    "Records the repository snapshot, source and test inputs, execution roots and public contracts.",
+    "Compares production-only scans with scans including tests, traces callers and private helpers, and checks dynamic use and compatibility decisions.",
+    "Recommends one coherent area first and presents a pre-execution report with exact changes, test impact, uncertainty and planned checks.",
+    "Confirms meaningful test removals before editing the affected area; lists minor or obvious leftovers that can proceed without confirmation.",
+    "For authorized cleanup, records a focused test baseline, preserves useful assertions and verifies the selected area without weakening tests to get green.",
+    "Reports actual changes and check results, then recommends the next area."
+  ],
+  "facts_title": "How cleanup stays bounded",
+  "facts": [
+    [
+      "One area at a time",
+      "A broad audit can inventory several areas; each cleanup targets and verifies one coherent behavior."
+    ],
+    [
+      "Report before edits",
+      "The report states evidence, exact changes, retained and lost test guarantees, pending decisions and validation."
+    ],
+    [
+      "Meaningful test removals",
+      "Test cases, parameter cases and assertions need confirmation. Verified unused imports, effect-free leftovers and true empty stubs may proceed."
+    ],
+    [
+      "Preserved behavior",
+      "Assertion migrations map old checks to new ones; failures are investigated rather than hidden by weakening tests."
+    ],
+    [
+      "Uncertainty",
+      "Dynamic callers, external contracts and unresolved findings are checked before removal. Static graphs are supporting evidence."
+    ]
+  ],
+  "needs": [
+    [
+      "Needs",
+      "A local Python checkout, git and text search; cleanup uses the existing test runner and repository checks."
+    ],
+    [
+      "Optional",
+      "Ruff, Vulture and Pyan3; Graphviz for rendering; an authenticated repository connector or CLI for issue context."
+    ],
+    [
+      "Leaves",
+      "A report and optional graphs in a scratch directory; source and test changes only for authorized cleanup. Publishing requires existing user authorization."
+    ]
+  ]
+}

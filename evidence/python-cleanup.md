@@ -1,4 +1,4 @@
-# Findings behind find-dead-code 0.1
+# Findings behind python-cleanup 0.2
 
 Checked on 2026-11-01 against `uberblick-ai/ub-agents` at `6956308`.
 The repository was read only. Tool trials used an exported snapshot and an
@@ -63,7 +63,7 @@ Read the source instructions rather than judging names or install counts alone.
 | --- | --- |
 | [parcadei/continuous-claude-v3: dead-code](https://github.com/parcadei/continuous-claude-v3/blob/main/.claude/skills/dead-code/SKILL.md) | Closest integrated alternative: `tldr dead`, custom entry patterns and `tldr impact`. The short recipe does not cover the test-only, re-export and graph-validation decisions above. Directory search reported 734 installs; repository metadata reported 3,947 stars. |
 | [laurigates/claude-plugins: vulture-dead-code](https://github.com/laurigates/claude-plugins/blob/main/python-plugin/skills/vulture-dead-code/SKILL.md) | Useful tool overview, but recommends high thresholds that omit many unused functions, broad decorator ignores and adding development dependencies. Directory search reported 327 installs; repository metadata reported 59 stars. |
-| [skillmedev/skills: Dead Code Eliminator](https://www.skills.sh/skillmedev/skills/dead-code-eliminator) | Broad removal workflow, with mandatory production observation windows and a deletion PR as the deliverable. Does not fit a bounded, report-only Python audit. |
+| [skillmedev/skills: Dead Code Eliminator](https://www.skills.sh/skillmedev/skills/dead-code-eliminator) | Broad removal workflow, with mandatory production observation windows and a deletion PR as the deliverable. Its default removal workflow does not fit an audit request or the requested bounded, report-first cleanup. |
 
 Install and star counts are observations on the check date, not quality
 guarantees. No third-party skill was installed or copied into this skill.
@@ -75,3 +75,43 @@ call-graph resolver. The tool reference records the version-specific pitfalls
 observed here. pydeps covers imports; code2flow documents ambiguity omissions;
 the original PyCG is archived. TLDR remains an option for repositories already
 using it. None establishes every possible Python runtime caller.
+
+## Review of the cleanup workflow
+
+The maintainer requested the name `python-cleanup`, a pre-execution report,
+a recommendation to work one area at a time, and confirmation of test removals
+except minor or obvious leftovers. Claude reviewed the plan through Claude
+Code with tools disabled and returned "approve with changes."
+
+The resulting workflow addresses three gaps: pending decisions hold the
+affected area before source edits; only removal candidates and explicit
+migrations may be executed; and baseline checks plus failure handling prevent
+deleting or weakening tests simply to get a passing result. The report format
+makes the scope, test impact and decisions concrete.
+
+The review also tightened exceptions for parameter cases, mock and existence
+assertions, side-effecting setup and implicit fixtures. Approval carries across
+unchanged scope; material new behavior needs preservation or a new decision.
+Collected test cases can be compared when the existing runner supports it,
+alongside inspection of assertion changes. Dirty files do not by themselves
+require permission, and environmental failures do not establish a live caller.
+
+The plan review was independent; it was not an execution test of the completed
+skill. The following scenario checks apply the final rules to concrete cases:
+
+| Case | Required disposition/action |
+| --- | --- |
+| `provision_labels` and its formatter, with two meaningful test callers | Removal/migration candidates in one area. Map confirmation and EOF behavior to the active path; any remaining test removal needs a numbered decision before editing that area. |
+| `view_widgets.pane_line` consumed by `view_log_pane` | Keep the live re-export despite F401. |
+| `_attach_tail` read by `getattr`, or `helper_command.py` launched by path | Keep the dynamic/process entry point; absence of ordinary calls or imports is insufficient. |
+| An unread setup field assigned from a seeding call | Preserve the call's effects; only the binding may be a leftover. |
+| An unused test import with no side effects, or a stub that exercises nothing | With cleanup authorized, report the exception and proceed without asking. |
+| A one-line export assertion, a parameter case or an implicitly requested fixture | The assertion/case is meaningful coverage; confirm its removal. Keep the fixture with a consumer. |
+| Generic cleanup permission given before any test-removal proposal | Show the report and batch the precise decisions; edit nothing in the affected area while pending. |
+| A new consumer discovered after an approved removal starts | Stop that removal, restore the affected cleanup edits if necessary and reclassify. Do not delete the consumer's test. |
+| An approved test gains an assertion about active behavior | Preserve or migrate that assertion; a proposal to drop it needs a new decision. Formatting-only changes do not require re-approval. |
+| Existing user edits or an environmental test failure | Preserve the edits and distinguish baseline/environment failures from new regressions; do not manufacture approval gates or change tests to hide failures. |
+
+These are manual scenario checks, not a measured guarantee of future agent
+behavior. The actual tool trials above remain the evidence for graph and
+unused-name behavior on ub-agents; no ub-agents code or tests were removed.
