@@ -8,7 +8,13 @@ opinion panels or chat-confirmation banners. Decisions are asked in chat, never
 through report controls.
 
 Rows run from the oldest issue to the newest, by `created_at`; items without
-it follow in input order. Priority shows on the row but does not reorder it.
+it follow in input order. When 40% or more of the open and draft items have a
+current milestone, the table groups them by it: one group per milestone in the
+order of `milestones`, then "No milestone", each oldest first. A group header
+shows the milestone's due date (or that it is overdue), the number of rows, its
+weight and status from the Milestone load, and its goal. Below 40%, or when
+every row would land in one group, the table stays flat and the count line
+gives the share. Priority shows on the row but does not reorder it.
 Items marked `no_change` that carry a workflow label leave the table for a "No
 change required" list below the Milestone load table; without a label they
 stay in the table, since they still need one. The list shows id, title,
@@ -54,11 +60,16 @@ Optional top-level fields:
   map an estimate (case-insensitive) to a number; numeric estimates count as
   themselves and `none` as 0. Defaults: XS 0, S 1, M 2, L 3, XL 5, cap 25,
   ceiling twice the cap.
-- `milestones`: `[{id, title, url?, delivered_weight?, other_open_weight?,
-  bounded?, new?, basis?}]`. `delivered_weight` is the weight already shipped,
+- `milestones`: `[{id, title, url?, state?, due_on?, goal?, delivered_weight?,
+  other_open_weight?, bounded?, new?, basis?}]`, listed in the order they are
+  due. Every milestone an item names in `placement` must be here. `state` is
+  `open` (default) or `closed`; `due_on` a date or timestamp; `goal` the
+  one-line intent from its description. `delivered_weight` is the weight already shipped,
   `other_open_weight` that of open issues not among the items. `bounded` is the
   reason the milestone is one bounded heavy step; `new` marks a proposed
   milestone not yet created; `basis` says how the weights were measured.
+- `milestone_usage`: `{summary, basis?}`, how this tracker uses milestones,
+  as concluded from open and closed ones. Shown as a Milestone usage section.
 
 With `milestones`, the report adds a Milestone load table below the decisions:
 weight now and after the proposed placements, and a status. Within cap; Bounded
@@ -106,8 +117,13 @@ Optional per-item fields:
 - `open_prs`: `[{id, url}]`, verified currently open. Keeps a closed issue visible.
 - `highlight_reason`: another specific reason a closed issue warrants attention.
 - `applied_action`: short verified outcome displayed in evidence, not a proposal.
-- `placement`: `{current?, proposed?}` milestone ids from `milestones`. A
-  missing `proposed` keeps the current milestone; `null` takes the item out.
+- `placement`: `{current?, proposed?, reason?}` milestone ids from
+  `milestones`. A missing `proposed` keeps the current milestone; `null` takes
+  the item out, or keeps an item without one. The row shows "Add to", "Move
+  to", "Take out of its milestone" or "Keep without milestone" under the
+  treatment, and `reason` below the summary. In a grouped report, an open
+  issue without a current milestone needs both `proposed` and `reason`, unless
+  its treatment is combine or a closure; the renderer refuses it otherwise.
 
 All text is escaped, URLs must be HTTP(S), and priority colors are validated.
 Unknown additional JSON fields are preserved so collection metadata and human

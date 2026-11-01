@@ -11,9 +11,13 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 TREATMENTS = {'keep', 'narrow', 'combine', 'defer', 'close delivered', 'close unnecessary', 'track only'}
+# Treatments that end an issue, so it needs no milestone recommendation.
+UNPLACED = {'combine', 'close delivered', 'close unnecessary'}
 # Defaults only: a repository's own scale and cap, passed as `capacity`, replace them.
 DEFAULT_WEIGHTS = {'XS': 0, 'S': 1, 'M': 2, 'L': 3, 'XL': 5}
 DEFAULT_CAP = 25
+# The table groups by milestone once this share of open items has one.
+GROUPING_SHARE = 0.4
 
 def esc(value):
     return html.escape(str(value), quote=True)
@@ -138,14 +142,46 @@ def validate_milestones(data):
             url(m['url'])
         for k in ('delivered_weight', 'other_open_weight'):
             number(m.get(k, 0), f'{ident}: {k}')
-        if 'bounded' in m:
-            text(m, 'bounded')
+        for k in ('bounded', 'goal'):
+            if k in m:
+                text(m, k)
+        if m.get('due_on'):
+            due_date(m['due_on'])
+        if m.get('state', 'open') not in {'open', 'closed'}:
+            raise ValueError(f'{ident}: milestone state must be open or closed')
     for item in data['items']:
-        for k, v in (item.get('placement') or {}).items():
+        placement = item.get('placement') or {}
+        for k, v in placement.items():
+            if k == 'reason':
+                text(placement, 'reason')
+                continue
             if k not in {'current', 'proposed'}:
-                raise ValueError(f'{item["id"]}: placement takes current and proposed')
+                raise ValueError(f'{item["id"]}: placement takes current, proposed and reason')
             if v is not None and str(v) not in ids:
                 raise ValueError(f'{item["id"]}: placement.{k} names no milestone in milestones: {v!r}')
+    usage = data.get('milestone_usage')
+    if usage is not None:
+        text(usage, 'summary')
+    if grouping(data)['grouped']:
+        for item in data['items']:
+            placement = item.get('placement') or {}
+            needs = item['state'] == 'open' and placement.get('current') is None and item['treatment'] not in UNPLACED
+            if needs and ('proposed' not in placement or not placement.get('reason')):
+                raise ValueError(f'{item["id"]}: the report groups by milestone, so an open issue without one needs '
+                                 'placement.proposed (a milestone id, or null to keep it without) and placement.reason')
+
+def due_date(value):
+    """A due date as YYYY-MM-DD or a timestamp with timezone."""
+    if not isinstance(value, str):
+        raise ValueError(f'due_on must be a date: {value!r}')
+    return datetime.fromisoformat(value.replace('Z', '+00:00')).date()
+
+def grouping(data):
+    """How many open items have a milestone now, and whether the table groups by it."""
+    open_items = [i for i in data['items'] if i['state'] != 'closed']
+    placed = sum((i.get('placement') or {}).get('current') is not None for i in open_items)
+    share = placed / len(open_items) if open_items else 0
+    return {'placed': placed, 'open': len(open_items), 'share': share, 'grouped': bool(placed) and share >= GROUPING_SHARE}
 
 def weight(estimate, weights):
     """Weight of one estimate, or None when the scale does not know it."""
@@ -248,6 +284,73 @@ def priority_badge(priority):
         style = f' style="background:#{color};color:{foreground}"'
     return f'<span class="priority"{style}>{esc(priority["name"])}</span>'
 
+def placement_label(item, titles):
+    """What the row recommends for its milestone, or '' when it stays put."""
+    placement = item.get('placement') or {}
+    current = placement.get('current')
+    if 'proposed' not in placement or item['treatment'] in UNPLACED:
+        return ''
+    target = placement['proposed']
+    if target is None:
+        return 'Keep without milestone' if current is None else 'Take out of its milestone'
+    if current is None:
+        return f'Add to {titles[str(target)]}'
+    return '' if str(target) == str(current) else f'Move to {titles[str(target)]}'
+
+def pretty_date(value):
+    d = due_date(value)
+    return f'{d.day} {d:%b %Y}'
+
+def milestone_groups(items, data):
+    """Table groups by current milestone, No milestone last; [] for a flat table."""
+    if not grouping(data)['grouped']:
+        return []
+    order = [str(m['id']) for m in data.get('milestones', [])]
+    by_id = {str(m['id']): m for m in data.get('milestones', [])}
+    members = {}
+    for item in items:
+        current = (item.get('placement') or {}).get('current')
+        members.setdefault(None if current is None else str(current), []).append(item)
+    keys = [k for k in order if k in members] + ([None] if None in members else [])
+    if len(keys) < 2:
+        return []
+    loads = {str(l['milestone']['id']): l for l in milestone_load(data)[0]}
+    groups = []
+    for key in keys:
+        group = members[key]
+        count = f'{len(group)} issue{"s" if len(group) != 1 else ""}'
+        if key is None:
+            labels = [placement_label(i, {k: '' for k in by_id}) for i in group]
+            add = sum(l.startswith('Add to') for l in labels)
+            keep = sum(l == 'Keep without milestone' for l in labels)
+            meta = [count] + ([f'{add} to add to a milestone'] if add else []) + ([f'{keep} to keep without one'] if keep else [])
+            title, goal = esc('No milestone'), ''
+        else:
+            m, load = by_id[key], loads[key]
+            weight = fmt(load['before']) if load['before'] == load['after'] else f'{fmt(load["before"])} → {fmt(load["after"])}'
+            is_open = m.get('state', 'open') == 'open'
+            due = 'No due date'
+            if m.get('due_on'):
+                late = is_open and due_date(m['due_on']) < timestamp(data['reviewed_at']).date()
+                due = f'{"Overdue, due" if late else "Due"} {pretty_date(m["due_on"])}'
+            meta = ([] if is_open else ['Closed']) + [due, count, f'weight {weight}, {load["status"].lower()}']
+            title, goal = link(m['title'], m.get('url')), m.get('goal', '')
+        goal_html = f'<small>{esc(goal)}</small>' if goal else ''
+        header = f'<tr class="group"><th colspan="5" scope="rowgroup"><strong>{title}</strong> <span>{esc(" · ".join(meta))}</span>{goal_html}</th></tr>'
+        groups.append((header, group))
+    return groups
+
+def grouping_note(data, grouped):
+    g = grouping(data)
+    if not g['placed']:
+        return ''
+    share = f'{g["placed"]} of {g["open"]} open items in a milestone ({g["share"]:.0%})'
+    if grouped:
+        return f' · grouped by milestone: {share}'
+    if g['grouped']:
+        return f' · {share}, all in one, so not grouped'
+    return f' · {share}, under {GROUPING_SHARE:.0%}, so not grouped'
+
 def render(data):
     validate(data)
     shown = oldest_first(i for i in data['items'] if visible(i))
@@ -255,7 +358,8 @@ def render(data):
     fits = [i for i in shown if i.get('no_change') and i.get('workflow_labels')]
     items = [i for i in shown if i not in fits]
     has_loop = any(i.get('loop') is not None for i in items)
-    rows = []
+    titles = {str(m['id']): m['title'] for m in data.get('milestones', [])}
+    rows = {}
     for item in items:
         loop = item.get('loop')
         status = ''
@@ -286,19 +390,31 @@ def render(data):
             evidence.append(f'<p><strong>Challenge:</strong> {esc(c["summary"])}</p>')
         previous = item['effort'].get('previous')
         labels = ' · '.join(([item['state'].capitalize()] if item['state'] != 'open' else []) + item.get('workflow_labels', []))
-        rows.append(f'''<tr><td>{link(item['id'], item.get('url'))}<strong class="issue-title">{esc(item['title'])}</strong><small>{esc(labels)}</small>{priority_badge(item.get('priority'))}{badge}</td><td><span class="treatment">{esc(item['treatment'].capitalize())}</span></td><td>{esc(item['effort']['estimate'])}{('<small>Was '+esc(previous)+'</small>') if previous else ''}</td><td>{status}</td><td><p>{esc(item['summary'])}</p><details><summary>Evidence and scope</summary>{''.join(evidence)}</details></td></tr>''')
+        move = placement_label(item, titles)
+        reason = (item.get('placement') or {}).get('reason')
+        finding = f'<p>{esc(item["summary"])}</p>' + (f'<p class="placement"><strong>Milestone:</strong> {esc(reason)}</p>' if reason else '')
+        rows[item['id']] = f'''<tr><td>{link(item['id'], item.get('url'))}<strong class="issue-title">{esc(item['title'])}</strong><small>{esc(labels)}</small>{priority_badge(item.get('priority'))}{badge}</td><td><span class="treatment">{esc(item['treatment'].capitalize())}</span>{f'<small>{esc(move)}</small>' if move else ''}</td><td>{esc(item['effort']['estimate'])}{('<small>Was '+esc(previous)+'</small>') if previous else ''}</td><td>{status}</td><td>{finding}<details><summary>Evidence and scope</summary>{''.join(evidence)}</details></td></tr>'''
+    groups = milestone_groups(items, data)
+    if groups:
+        body = ''.join(f'<tbody>{header}{"".join(rows[i["id"]] for i in members)}</tbody>' for header, members in groups)
+    else:
+        body = f'<tbody>{"".join(rows.values())}</tbody>'
     scope = data['scope']
     baselines = '; '.join(f'{b["repository"]}@{b["revision"]}' for b in data.get('baselines', []))
     limitations = ''.join(f'<li>{esc(x)}</li>' for x in data.get('limitations', []))
     challenge = data.get('challenge_summary')
     load, overloaded = load_section(data)
+    usage = data.get('milestone_usage')
+    if usage:
+        basis = f'<small>{esc(usage["basis"])}</small>' if usage.get('basis') else ''
+        load = f'<section><h2>Milestone usage</h2><p>{esc(usage["summary"])}</p>{basis}</section>' + load
     tail = load + no_change_section(fits, data)
     tail += f'<section><h2>Independent challenge</h2><p>{esc(challenge)}</p></section>' if challenge else ''
     tail += f'<section><h2>Grounding &amp; limitations</h2><p>{esc(baselines)}</p><ul>{limitations}</ul></section>'
     if has_loop:
         tail += '<p class="note">Loop eligibility is a checked snapshot, not a guarantee of the next dispatch. Reasons and configuration sources are in the evidence.</p>'
     template = (Path(__file__).resolve().parent.parent/'assets'/'report.html').read_text(encoding='utf-8')
-    values = {'SCOPE':esc(scope['label']), 'DATE':esc(data['reviewed_at']), 'GOAL':esc(scope['goal']), 'COUNT':str(len(items)), 'COUNT_NOTES':(f' · {len(fits)} with no change required' if fits else '') + (f' · {overloaded} milestone{"s" if overloaded != 1 else ""} over the cap' if overloaded else ''), 'LOOP_HEADER':'Loop / blockers' if has_loop else 'Blocked by', 'ROWS':''.join(rows), 'TAIL':tail}
+    values = {'SCOPE':esc(scope['label']), 'DATE':esc(data['reviewed_at']), 'GOAL':esc(scope['goal']), 'COUNT':str(len(items)), 'COUNT_NOTES':(f' · {len(fits)} with no change required' if fits else '') + (f' · {overloaded} milestone{"s" if overloaded != 1 else ""} over the cap' if overloaded else '') + grouping_note(data, bool(groups)), 'LOOP_HEADER':'Loop / blockers' if has_loop else 'Blocked by', 'ROWS':body, 'TAIL':tail}
     # One pass: text in source data must never become another template directive.
     return re.sub(r'@@([A-Z_]+)@@', lambda m: values[m.group(1)], template)
 
