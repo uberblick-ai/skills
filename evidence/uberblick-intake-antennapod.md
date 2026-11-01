@@ -58,6 +58,7 @@ Each line is something the user had to say that the skill should have made unnec
 10. "coarser pages is fine - the corpus describes product intent - not the product itself. See guidance doc on uberblick-2. This should be respected by the skill" (said at the immich checkpoint; it applies to this run too): the skill never reads the workspace's writing guidance (finding 21).
 11. "I feel the corpus of PodAntenna is too thin", after the run: the coverage came from the screens, not from the project's own map of the product (finding 22).
 12. "the corpus felt thin - in width and depth .. some topics might have deserved to get sub-pages. Compare how the uberblick-2 corpus is structured": the skill produces one flat level of pages (finding 23).
+13. "I would like to cover the product intent sufficiently and surface relevant technical aspects - uberblick-2 corpus is probably quite detailed": the target is sufficient intent plus the technical interfaces that matter. uberblick-2 is the reference for structure, not the size target (finding 24).
 
 ## Findings
 
@@ -245,6 +246,46 @@ misleads; **low** = polish. AntennaPod supplies the evidence; every fix is writt
     entry to a family. Replace the "at most three pins" warning with a check that every family has
     one entry page. The plan could gain a `parent` per document so the review shows the tree.
 
+24. **Medium: the skill shuts out every technical aspect, including the ones a corpus should
+    surface.** analysis.md opens: "Technical, implementation and agent material stays in the
+    repository as Markdown". Writing pages says "Leave out stack, architecture, file paths, data
+    structures and implementation mechanics". The guidance draws the line elsewhere: a
+    `technical-reference` page (a starter tag in every workspace) is for "readers who act on
+    exact names, fields, codes or formats". There, "the interface belongs: names, fields,
+    values, error codes, recovery steps, syntax. The mechanism behind it (storage, queues,
+    logging, schema design) does not."
+
+    AntennaPod has interfaces that others build against, and the intake left all of them out:
+    - the feed elements podcasters can rely on (chapters, transcripts, funding, comments), and
+      how a moved feed's redirect is followed;
+    - the subscribe link a podcaster can publish;
+    - the automation intents other apps (Tasker) send;
+    - what sync exchanges with a gpodder or Nextcloud server;
+    - the backup and OPML files.
+
+    **Calibration.** The target is sufficient intent, not uberblick-2's size. uberblick-2 is a
+    mature, hand-curated corpus (64 pages) and serves as the reference for structure and an upper
+    bound for detail. "Sufficient" can be tested: every audience, docs page and feature label is
+    covered (S21); every feature page states its promises and refusals (S20, S23); an area with
+    several capabilities that carry their own promises gets sub-pages (S24); and every interface
+    someone outside the team builds against gets a `technical-reference` page. For AntennaPod
+    that is about 30 to 35 documents rather than 20, for example:
+    - **Listening:** Player, with Chapters, Transcripts, Video, Cast, Sleep timer.
+    - **The queue and lists:** Queue, Inbox, Episode lists.
+    - **Podcasts:** Subscriptions, Add podcasts with Local folders, Podcast settings.
+    - **Automation:** Automatic download, Automatic deletion, Refresh, Mobile data and storage.
+    - **Outside the app:** Notifications, Widget, Android Auto, Wear OS.
+    - **Your data:** Sync, Backup, Statistics and Echo.
+    - **For podcasters:** Feeds AntennaPod reads, Moving a feed, the Subscribe link.
+    - **Technical reference:** Automation intents, the sync exchange.
+    - **A domain model entry:** podcast, episode and its states, queue, tag.
+    - **Records:** at least the refusals the docs state (one queue, no central server, no ads).
+
+    Fix: replace the blanket rule with the guidance's line. Internals stay in the repository.
+    Interfaces that people or other programs act on become `technical-reference` pages: feed or
+    file formats, links and intents, protocols with outside servers, a CLI's or API's contract
+    where it is part of the product. And give the person a sufficiency test at the checkpoint.
+
 ### Checking, review and writing (steps 7 to 10)
 
 16. **Medium: step 7 says the corpus help names the renderer versions; it doesn't.** `get_help`
@@ -286,6 +327,7 @@ run can add itself to **Also seen in** (or "contradicts") instead of filing it a
 | S22 | Read published docs in another repository | When the README or homepage links docs built from another repository of the same owner, clone it and read its pages, not just its navigation. They are the team's own statement of the product. | `SKILL.md` step 3; `analysis.md` → Markdown files (docs site) | 22 | |
 | S23 | Capture refusals | Pages and records state what the product refuses as well as what it does. Look for refusals in the docs and FAQ, and in declined requests closed by a maintainer (`not planned`, `wontfix`, `by design`). | `analysis.md` → Writing pages, Decision records | 22 | fzf finding 6 (a principle found in declined requests); immich (FAQ refusals became records) |
 | S24 | A page structure, not a page list | An overview and a domain-model entry; feature pages that own promises; surface pages (`<Surface>: …`) that present them and link back; sub-pages when an area has capabilities with their own promises, tests or docs pages. Few groups and pins, each pin the entry to a family; drop the "more than 3 pins" warning for a check that every family has an entry page. A `parent` per document lets the review show the tree. | `SKILL.md` step 5; `analysis.md` → Capabilities, then pages, and Sidebar; `plan.md`; `intake.py` `validate`, `review` | 23 | |
+| S25 | Surface the technical interfaces that matter | Replace "technical material stays in the repository" with the guidance's line: internals stay, but interfaces that people or other programs act on (feed and file formats, links and intents, protocols with outside servers, a CLI's or API's contract) get `technical-reference` pages. Add a sufficiency test to the checkpoint: audiences, docs pages and labels covered; promises and refusals stated; sub-pages where capabilities carry their own promises; every outside interface referenced. uberblick-2 sets the structure, not the size. | `analysis.md` intro, Markdown files table, Writing pages; `SKILL.md` steps 4 and 5 | 24 | |
 | S3 | Pages state intent, not reference | Absorbed by S20. Name a setting only where it carries a promise, and say what it promises; no lists of values. | `analysis.md` → Writing pages | 13 | ablauf §4.2 (intent is the point; related) |
 | S4 | Records in the product's words | No code symbols or build names. An engineering choice qualifies only where it changes what people get; leave it out, as a candidate with its reason, when the repo records it next to the code. | `analysis.md` → Decision records (the "framework or library" line) | 14 | |
 | S5 | Read what the team publishes, when there is any | When the README, the host's `homepage` field or a manifest links a homepage or docs site, read the homepage and the docs navigation for emphasis, group names and tags. Otherwise use the README's opening, a manifest's `description`, listing metadata in the repo and area labels; with none of these, ask (S2). Never a source for behaviour. Skip pages behind a sign-in, and fetch nothing for a private repository unasked. | `SKILL.md` step 3; `analysis.md` → Product, audience and scope | 10 | ablauf §5 "Product intent from the host" (related) |
