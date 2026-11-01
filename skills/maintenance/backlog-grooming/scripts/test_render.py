@@ -246,6 +246,10 @@ class ReportTests(unittest.TestCase):
         self.assertIn('Sync never loses local changes', headers[0])
         self.data['reviewed_at'] = '2026-11-02T09:00:00+01:00'
         self.assertIn('Overdue, due 31 Oct 2026', self.group_headers(render.render(self.data))[0])
+        self.data['milestones'][1].pop('due_on')
+        self.assertIn('No due date · 1 issue', self.group_headers(render.render(self.data))[1])
+        self.data['milestones'][0].pop('due_on')
+        self.assertNotIn('due date', ' '.join(self.group_headers(render.render(self.data))))
         self.data['milestones'][0]['due_on'] = 'soon'
         with self.assertRaises(ValueError): render.render(self.data)
 

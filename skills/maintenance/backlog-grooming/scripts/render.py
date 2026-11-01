@@ -332,11 +332,12 @@ def milestone_groups(items, data):
             m, load = by_id[key], loads[key]
             weight = fmt(load['before']) if load['before'] == load['after'] else f'{fmt(load["before"])} → {fmt(load["after"])}'
             is_open = m.get('state', 'open') == 'open'
-            due = 'No due date'
+            # "No due date" only says something when other milestones have one.
+            due = 'No due date' if any(x.get('due_on') for x in by_id.values()) else ''
             if m.get('due_on'):
                 late = is_open and due_date(m['due_on']) < timestamp(data['reviewed_at']).date()
                 due = f'{"Overdue, due" if late else "Due"} {pretty_date(m["due_on"])}'
-            meta = ([] if is_open else ['Closed']) + [due, count, f'weight {weight}, {load["status"].lower()}']
+            meta = ([] if is_open else ['Closed']) + ([due] if due else []) + [count, f'weight {weight}, {load["status"].lower()}']
             title, goal = link(m['title'], m.get('url')), m.get('goal', '')
         goal_html = f'<small>{esc(goal)}</small>' if goal else ''
         header = f'<tr class="group"><th colspan="5" scope="rowgroup"><strong>{title}</strong> <span>{esc(" · ".join(meta))}</span>{goal_html}</th></tr>'
