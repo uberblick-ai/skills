@@ -19,7 +19,7 @@ import json, sys
 log = open(sys.argv[1], "a")
 mode = sys.argv[2] if len(sys.argv) > 2 else ""
 one_block = mode == "one"  # an older ub: insert_block takes one block after a block id
-unpins, blocks = 0, 0
+unpins, blocks, syncs = 0, 0, 0
 for line in sys.stdin:
     m = json.loads(line)
     if "id" not in m:
@@ -33,8 +33,16 @@ for line in sys.stdin:
         name, args = m["params"]["name"], m["params"]["arguments"]
         log.write(json.dumps({"name": name, "arguments": args}) + "\n"); log.flush()
         error, text = False, "{}"
-        if name == "list_docs":
-            docs = [] if args.get("kind") else [{"title": "Alpha", "uuid": "uuid-existing"}]
+        if name == "sync_status" and mode in ("connecting", "stuck"):
+            syncs += 1
+            up = mode == "connecting" and syncs > 2  # the first connection takes two polls
+            text = json.dumps({"hub": {"status": "connected" if up else "connecting", "recoveryClass": "retry",
+                                       "reason": "first connection in flight"},
+                               "caughtUp": up, "pendingRooms": [], "unsyncedChanges": 0 if up else 1})
+        elif name == "list_docs":
+            # before the first sync the directory is empty: a read then misses documents already in the workspace
+            synced = mode not in ("connecting", "stuck") or syncs > 2
+            docs = [] if args.get("kind") or not synced else [{"title": "Alpha", "uuid": "uuid-existing"}]
             text = json.dumps({"workspace": "w", "docs": docs})
         elif name == "create_doc":
             text = json.dumps({"uuid": "uuid-" + args["title"]})
@@ -415,6 +423,27 @@ class Plan(unittest.TestCase):
         self.assertNotEqual(run.returncode, 0)
         self.assertIn("links to e, created after it", run.stderr)
 
+    def run_ub_mode(self, mode, *extra):
+        calls, _ = self.calls()
+        base = self.path.parent
+        (base / "calls.json").write_text(json.dumps(calls))
+        (base / "fake_ub.py").write_text(FAKE_UB)
+        return subprocess.run([sys.executable, str(SCRIPT), "ub", "--calls", str(base / "calls.json"), "--checkout",
+                               str(base), "--out", str(base / f"applied-{mode}.json"), *extra, "--ub",
+                               f"{sys.executable} {base / 'fake_ub.py'} {base / 'log.jsonl'} {mode}"],
+                              capture_output=True, text=True)
+
+    def test_ub_waits_for_the_first_sync_before_checking_titles(self):
+        run = self.run_ub_mode("connecting", "--settle", "0", "--sync-wait", "20")
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("already has a document titled like a", run.stderr)  # seen once synced: no duplicate
+
+    def test_ub_reports_a_hub_still_connecting_as_such(self):
+        run = self.run_ub_mode("stuck", "--adopt", "--settle", "3", "--sync-wait", "0")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("the hub is still connecting after 3s", run.stderr)
+        self.assertNotIn("not reachable", run.stderr)
+
     def test_ub_skips_optional_failures_and_adopted_documents(self):
         calls, _ = self.calls()
         base = self.path.parent
@@ -509,7 +538,7 @@ class Plan(unittest.TestCase):
         self.assertFalse([m for m in sent if m["name"] not in intake.READ_TOOLS])
         run, sent = self.run_ub(calls, "new")
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual(sent[0]["name"], "list_docs")
+        self.assertEqual([m for m in sent if m["name"] != "sync_status"][0]["name"], "list_docs")
         self.assertIn({"name": "create_tag", "arguments": {"name": "core"}}, sent)
 
     def test_ub_reports_the_servers_drawing_check(self):

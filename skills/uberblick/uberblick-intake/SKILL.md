@@ -74,7 +74,13 @@ finished plan before anything is written (step 8).
    holds two starter pages in an "Uberblick" group (older versions spell
    it "Überblick"; go by what `get_sidebar` shows) and six starter tags
    (auth, billing, mcp, permissions, rfc, sync); reuse a starter tag only
-   where it fits. A catalog marked `complete: false` has not synced yet:
+   where it fits. `corpus` and `ub` wait up to `--sync-wait` seconds (30)
+   for the replica to catch up with the hub before they read: a session
+   that reads at once sees an unsynced directory, misses documents already
+   there and reads the catalog as empty. A hub that is still connecting is
+   waited for, not reported as down. Through the MCP tools, call
+   `sync_status` until the hub is `connected` and `caughtUp` before you read.
+   A catalog still marked `complete: false` after that has not synced:
    read it again before the writes. A local workspace (`"hubUrl": null` in
    `.uberblick.json`) syncs with the hub `ub open` serves on this machine:
    while that is not running, its catalog reads `complete: false` yet is the

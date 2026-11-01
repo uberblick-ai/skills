@@ -1601,6 +1601,33 @@ def target_slug(call):
 
 
 SETTLE_POLL = 2
+# Hub states that may still turn into `connected`: `connecting` (servers that tell it apart, uberblick-2#2532),
+# and `hub-down` with `retry`, which older servers report while their first connection is in flight.
+PENDING_HUB = ("connecting",)
+
+
+def hub_pending(status):
+    hub = status.get("hub") or {}
+    return hub.get("status") in PENDING_HUB or (hub.get("status") == "hub-down" and hub.get("recoveryClass") == "retry")
+
+
+def wait_synced(call, seconds):
+    """Poll sync_status until the replica has caught up with the hub, before reading or checking titles. Returns the
+    last status, with `waited_out` set when the time ran out. A server without hub state (a local workspace, an older
+    or a stand-in server) is ready at once."""
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            status = json.loads(call("sync_status", {}))
+        except (ValueError, RuntimeError):
+            return {}
+        hub = (status.get("hub") or {}).get("status")
+        if hub in (None, "local") or (hub == "connected" and status.get("caughtUp") is not False
+                                      and not status.get("pendingRooms")):
+            return status
+        if time.monotonic() > deadline:
+            return {**status, "waited_out": True}
+        time.sleep(SETTLE_POLL)
 # The pages and group `ub workspace create` seeds; fixed ids, so every workspace's starter is recognisable.
 STARTER_DOCS = ("2d56b281-5614-43bd-b8d8-edd1c270a85a", "d7ddd0b1-fee9-4ef0-8f1e-42882f925c31")
 STARTER_GROUP = "57a27e40-0000-4000-8000-000000000001"
@@ -1674,6 +1701,15 @@ def cmd_ub(args):
             raise Stop("this ub cannot create tags (create_tag arrived in 0.4.11): update ub, or have a person create "
                        "them under Workspace settings → Tags, read the workspace again and run calls without "
                        "--create-tags")
+        # Read nothing before the replica has caught up: a short session would see an unsynced directory, miss
+        # documents already there and create duplicates, or read the tag catalog as empty.
+        if getattr(args, "sync_wait", 0) and not local_workspace(checkout):
+            ready = wait_synced(call, args.sync_wait)
+            if ready.get("waited_out"):
+                hub = ready.get("hub") or {}
+                print(f"ub: the replica had not caught up with the hub after {args.sync_wait}s ({hub.get('status')}"
+                      f"{': ' + hub['reason'] if hub.get('reason') else ''}); reads may miss documents and tags",
+                      file=sys.stderr)
         pending = [c for c in calls[applied["done"]:] if c["tool"] == "create_doc" and c["slug"] not in uuids]
         if pending or any(c["tool"] not in READ_TOOLS for c in calls):
             listing = json.loads(call("list_docs", {}))
@@ -1772,14 +1808,18 @@ def cmd_ub(args):
                 break
             if not status.get("unsyncedChanges") and not status.get("inFlightUpdates"):
                 break
-            if hub == "hub-down":
+            if hub_pending(status) and time.monotonic() <= deadline:
+                time.sleep(SETTLE_POLL)  # still connecting: the writes are saved and sync once it does
+                continue
+            if hub == "hub-down" or hub in PENDING_HUB:
                 if local_workspace(checkout):
                     print(f"ub: the writes are applied in this local workspace; `ub open` in {checkout} serves its "
                           f"hub, and they sync while it runs", file=sys.stderr)
                 else:
-                    print(f"ub: no hub is reachable ({(status.get('hub') or {}).get('reason')}); the writes are in "
-                          f"this machine's replica and reach the hub when a server next runs in {checkout} with it up",
-                          file=sys.stderr)
+                    still = "is still connecting" if hub_pending(status) else "is not reachable"
+                    print(f"ub: the hub {still} after {args.settle}s ({(status.get('hub') or {}).get('reason')}); the "
+                          f"writes are in this machine's replica and reach the hub when a server next runs in "
+                          f"{checkout} with it up", file=sys.stderr)
                 break
             if time.monotonic() > deadline:
                 print(f"ub: the hub has not acknowledged {status.get('unsyncedChanges')} change(s) after "
@@ -2079,7 +2119,7 @@ def cmd_corpus(args):
     applied = out / "read-applied.json"
     applied.unlink(missing_ok=True)
     cmd_ub(argparse.Namespace(calls=str(out / "read.json"), checkout=args.checkout, out=str(applied), resume=False,
-                              adopt=False, settle=0, ub=args.ub, print=False, quiet=True))
+                              adopt=False, settle=0, sync_wait=args.sync_wait, ub=args.ub, print=False, quiet=True))
     tags, sidebar, docs, records = (json.loads(r["text"]) for r in load(applied)["results"])
     docs["docs"] += records["docs"]
     for name, value in (("tags", tags), ("sidebar", sidebar), ("docs", docs)):
@@ -2136,6 +2176,8 @@ def main():
     w.add_argument("--checkout", required=True)
     w.add_argument("--dir", required=True)
     w.add_argument("--ub", default="ub", help="the command that runs ub (default: ub)")
+    w.add_argument("--sync-wait", type=int, default=30,
+                   help="seconds to wait for the replica to catch up with the hub before reading (0: read at once)")
     u = sub.add_parser("ub", help="run the calls through one `ub mcp serve`")
     u.add_argument("--calls", required=True)
     u.add_argument("--checkout", required=True)
@@ -2144,6 +2186,8 @@ def main():
     u.add_argument("--adopt", action="store_true",
                    help="a page whose title the workspace already has is used as it is, not created again")
     u.add_argument("--settle", type=int, default=60)
+    u.add_argument("--sync-wait", type=int, default=30,
+                   help="seconds to wait for the replica to catch up with the hub before reading (0: read at once)")
     u.add_argument("--ub", default="ub", help="the command that runs ub (default: ub)")
     u.add_argument("--print", action="store_true", help="print each answer, for reads such as list_tags")
     args = parser.parse_args()
