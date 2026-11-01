@@ -20,6 +20,15 @@ change required" list below the Milestone load table; without a label they
 stay in the table, since they still need one. The list shows id, title,
 estimate and milestone, with the summary.
 
+Rows are numbered in table order, so a person can say "discuss 3". A subtle
+"Discuss with Claude" link at the right of the count line opens a new Claude
+Code session (`claude://code/new?q=PROMPT`) with the scope, goal, milestone
+usage, overloaded milestones, the path of `report.json` and every row by number
+with its treatment, estimate, summary and milestone recommendation, up to about
+6,000 characters; the rest is named as "more in the report". The prompt is
+filled in, not sent, and asks for no change until the person says so. It is
+the report's only control; decisions still happen in chat.
+
 The columns are Issue, Treatment, Est., Loop / blockers (or Blocked by without
 a loop), and Finding & evidence. Evidence gets the widest right-hand column and
 expands inline. Use words only for Yes / No / Blocked; put a short reason below

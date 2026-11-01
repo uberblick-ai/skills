@@ -135,6 +135,8 @@ instructions govern authority, trusted inputs and issue mutations.
    the table carries the decisions. No introductory opinion panels or
    “confirmed in chat” banner. Verify the rendered page and evidence expansion
    at desktop and tablet widths. Return its link and the few material findings.
+   Rows are numbered; the page's subtle "Discuss with Claude" link opens a new
+   Claude Code session with every finding by number, for talking them through.
 
 9. **Apply only authorized actions.** A dry run changes no issues, labels,
    corpus or project fields. When the user requests particular changes,

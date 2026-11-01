@@ -8,7 +8,7 @@ import sys
 import webbrowser
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 TREATMENTS = {'keep', 'narrow', 'combine', 'defer', 'close delivered', 'close unnecessary', 'track only'}
 # Treatments that end an issue, so it needs no milestone recommendation.
@@ -18,6 +18,9 @@ DEFAULT_WEIGHTS = {'XS': 0, 'S': 1, 'M': 2, 'L': 3, 'XL': 5}
 DEFAULT_CAP = 25
 # The table groups by milestone once this share of open items has one.
 GROUPING_SHARE = 0.4
+CLAUDE_CODE = 'claude://code/new?q='
+# Keeps the discuss link a size browsers and the desktop app accept; the rest stays in report.json.
+PROMPT_LIMIT = 6000
 
 def esc(value):
     return html.escape(str(value), quote=True)
@@ -351,7 +354,40 @@ def grouping_note(data, grouped):
         return f' · {share}, all in one, so not grouped'
     return f' · {share}, under {GROUPING_SHARE:.0%}, so not grouped'
 
-def render(data):
+def one_line(value, limit=240):
+    value = ' '.join(str(value).split())
+    return value if len(value) <= limit else value[:limit - 1].rstrip() + '…'
+
+def discuss_link(data, items, report=None):
+    """Opens a new Claude Code session with a prompt to discuss the findings, numbered as in the table. The prompt is
+    filled in, not sent, and asks for no change until the person says so."""
+    scope = data['scope']
+    titles = {str(m['id']): m['title'] for m in data.get('milestones', [])}
+    head = (f"From the backlog grooming report for {one_line(scope['label'])}, reviewed {data['reviewed_at']}"
+            + (f", in {report}" if report else '') + f".\nGoal: {one_line(scope['goal'])}\n")
+    usage = data.get('milestone_usage')
+    if usage:
+        head += f"Milestone usage: {one_line(usage['summary'])}\n"
+    over = [l['milestone']['title'] for l in milestone_load(data)[0] if l['status'] == 'Overloaded']
+    if over:
+        head += f"Over the cap: {', '.join(over)}\n"
+    tail = ("\nLet's discuss these findings before changing anything. Ask me which numbers to start with, read the "
+            "issues and the evidence in the report for those, and challenge any recommendation that looks wrong. "
+            "Change no issues, labels or milestones until I say so.")
+    lines, budget = [], PROMPT_LIMIT - len(head) - len(tail)
+    for n, item in enumerate(items, 1):
+        move = placement_label(item, titles)
+        reason = (item.get('placement') or {}).get('reason')
+        line = (f"{n}. {item['id']} {one_line(item['title'], 90)}: {item['treatment']}, {item['effort']['estimate']}. "
+                f"{one_line(item['summary'])}" + (f" Milestone: {move}" + (f" ({one_line(reason, 160).rstrip('.')})" if reason else '') + '.' if move else ''))
+        if len(line) + 1 > budget:
+            lines.append(f"…and {len(items) - n + 1} more in the report.")
+            break
+        lines.append(line)
+        budget -= len(line) + 1
+    return CLAUDE_CODE + quote(head + '\nFindings, numbered as in the table:\n' + '\n'.join(lines) + '\n' + tail, safe='')
+
+def render(data, report=None):
     validate(data)
     shown = oldest_first(i for i in data['items'] if visible(i))
     # An issue without a workflow label still needs one, so it stays a decision.
@@ -359,8 +395,12 @@ def render(data):
     items = [i for i in shown if i not in fits]
     has_loop = any(i.get('loop') is not None for i in items)
     titles = {str(m['id']): m['title'] for m in data.get('milestones', [])}
+    groups = milestone_groups(items, data)
+    # Rows are numbered in table order, so "discuss 3" means the same row on the page and in the prompt.
+    ordered = [i for _, members in groups for i in members] if groups else items
+    number = {item['id']: n for n, item in enumerate(ordered, 1)}
     rows = {}
-    for item in items:
+    for item in ordered:
         loop = item.get('loop')
         status = ''
         if has_loop:
@@ -393,8 +433,7 @@ def render(data):
         move = placement_label(item, titles)
         reason = (item.get('placement') or {}).get('reason')
         finding = f'<p>{esc(item["summary"])}</p>' + (f'<p class="placement"><strong>Milestone:</strong> {esc(reason)}</p>' if reason else '')
-        rows[item['id']] = f'''<tr><td>{link(item['id'], item.get('url'))}<strong class="issue-title">{esc(item['title'])}</strong><small>{esc(labels)}</small>{priority_badge(item.get('priority'))}{badge}</td><td><span class="treatment">{esc(item['treatment'].capitalize())}</span>{f'<small>{esc(move)}</small>' if move else ''}</td><td>{esc(item['effort']['estimate'])}{('<small>Was '+esc(previous)+'</small>') if previous else ''}</td><td>{status}</td><td>{finding}<details><summary>Evidence and scope</summary>{''.join(evidence)}</details></td></tr>'''
-    groups = milestone_groups(items, data)
+        rows[item['id']] = f'''<tr><td><span class="n">{number[item['id']]}</span>{link(item['id'], item.get('url'))}<strong class="issue-title">{esc(item['title'])}</strong><small>{esc(labels)}</small>{priority_badge(item.get('priority'))}{badge}</td><td><span class="treatment">{esc(item['treatment'].capitalize())}</span>{f'<small>{esc(move)}</small>' if move else ''}</td><td>{esc(item['effort']['estimate'])}{('<small>Was '+esc(previous)+'</small>') if previous else ''}</td><td>{status}</td><td>{finding}<details><summary>Evidence and scope</summary>{''.join(evidence)}</details></td></tr>'''
     if groups:
         body = ''.join(f'<tbody>{header}{"".join(rows[i["id"]] for i in members)}</tbody>' for header, members in groups)
     else:
@@ -414,7 +453,7 @@ def render(data):
     if has_loop:
         tail += '<p class="note">Loop eligibility is a checked snapshot, not a guarantee of the next dispatch. Reasons and configuration sources are in the evidence.</p>'
     template = (Path(__file__).resolve().parent.parent/'assets'/'report.html').read_text(encoding='utf-8')
-    values = {'SCOPE':esc(scope['label']), 'DATE':esc(data['reviewed_at']), 'GOAL':esc(scope['goal']), 'COUNT':str(len(items)), 'COUNT_NOTES':(f' · {len(fits)} with no change required' if fits else '') + (f' · {overloaded} milestone{"s" if overloaded != 1 else ""} over the cap' if overloaded else '') + grouping_note(data, bool(groups)), 'LOOP_HEADER':'Loop / blockers' if has_loop else 'Blocked by', 'ROWS':body, 'TAIL':tail}
+    values = {'SCOPE':esc(scope['label']), 'DATE':esc(data['reviewed_at']), 'GOAL':esc(scope['goal']), 'COUNT':str(len(items)), 'COUNT_NOTES':(f' · {len(fits)} with no change required' if fits else '') + (f' · {overloaded} milestone{"s" if overloaded != 1 else ""} over the cap' if overloaded else '') + grouping_note(data, bool(groups)), 'DISCUSS':esc(discuss_link(data, ordered, report)) if ordered else '', 'LOOP_HEADER':'Loop / blockers' if has_loop else 'Blocked by', 'ROWS':body, 'TAIL':tail}
     # One pass: text in source data must never become another template directive.
     return re.sub(r'@@([A-Z_]+)@@', lambda m: values[m.group(1)], template)
 
@@ -426,7 +465,7 @@ def main(argv=None):
     args = p.parse_args(argv)
     try:
         data = json.loads(args.input.read_text(encoding='utf-8'))
-        page = render(data)
+        page = render(data, (args.output/'report.json').resolve())
         args.output.mkdir(parents=True, exist_ok=True)
         target = args.output/'report.html'
         target.write_text(page, encoding='utf-8')

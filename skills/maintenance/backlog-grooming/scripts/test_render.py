@@ -265,4 +265,35 @@ class ReportTests(unittest.TestCase):
         self.data['milestone_usage'] = {'summary': ' '}
         with self.assertRaises(ValueError): render.render(self.data)
 
+    def discuss_prompt(self, page):
+        import html, re
+        from urllib.parse import unquote
+        href = html.unescape(re.search(r'<a class="discuss" href="([^"]*)"', page).group(1))
+        self.assertTrue(href.startswith('claude://code/new?q='), 'a new Claude Code session')
+        return unquote(href[len('claude://code/new?q='):])
+
+    def test_discuss_link_numbers_findings_as_the_table_does(self):
+        page = render.render(self.data, '/tmp/run/report.json')
+        prompt = self.discuss_prompt(page)
+        self.assertIn('in /tmp/run/report.json', prompt)
+        self.assertIn('1. example/app#1 Install at the project root: keep, S.', prompt)
+        self.assertIn('3. example/app#3 Improve the sync summary: narrow, S.', prompt)
+        self.assertIn('Milestone: Add to 1.4: Reliable sync (Fits 1.4', prompt)
+        self.assertIn('Change no issues, labels or milestones until I say so.', prompt)
+        self.assertIn('<span class="n">3</span><a href="https://github.com/example/app/issues/3"', page)
+        self.assertNotIn('<script', prompt)
+
+    def test_discuss_link_stays_bounded(self):
+        base = self.data['items'][3]
+        for n in range(200):
+            extra = copy.deepcopy(base); extra['id'] = f'example/app#{100+n}'; extra['summary'] = 'x' * 400
+            self.data['items'].append(extra)
+        prompt = self.discuss_prompt(render.render(self.data))
+        self.assertLessEqual(len(prompt), render.PROMPT_LIMIT + 200)
+        self.assertRegex(prompt, r'…and \d+ more in the report\.')
+
+    def test_discuss_link_hidden_without_rows(self):
+        self.data['items'] = []
+        self.assertIn('class="discuss" href=""', render.render(self.data))
+
 if __name__ == '__main__': unittest.main()
