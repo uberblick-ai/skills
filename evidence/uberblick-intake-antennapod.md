@@ -116,12 +116,18 @@ misleads; **low** = polish. AntennaPod supplies the evidence; every fix is writt
    `assumptions`.
 10. **Medium: the project's homepage and published docs navigation aren't mentioned.** Two fetches
     gave the product's stated principles (absent from the repository) and the group names; the
-    docs' sections matched the app's own settings words. Fix: in step 3, read the homepage and the
-    published docs navigation, which the README or the host's `homepage` field links. Their words
-    are good group and tag names.
+    docs' sections matched the app's own settings words. Fix: in step 3, *when* the README, the
+    host's `homepage` field or a package manifest links a homepage or published docs, read the
+    homepage and the docs navigation; their words are good group and tag names. Many repositories
+    have neither. Then fall back to what the repository says about itself: the README's opening, a
+    manifest's `description`, store or package listing metadata kept in the repo, and the tracker's
+    area labels. With none of these, ask at the checkpoint (finding 9). Outside sources show
+    emphasis and words, never behaviour: the code still wins. Skip pages that need signing in, and
+    for a private repository fetch nothing unless the person says so.
 11. **Medium: GitHub wikis aren't scanned.** The repository reports `has_wiki: false`, yet
     `<repo>.wiki.git` clones with 309 commits. Its deleted pages held the episode state model, which
-    became a decision record. Fix: `scan` tries the wiki remote and lists current and deleted pages.
+    became a decision record. Fix: `scan` tries the wiki remote, quietly skipping it when there is
+    none (most repositories), and lists current and deleted pages.
     Deleted pages are evidence for decision candidates, never a source for pages.
 12. **Medium: the history heuristics miss decisions made at the start.** Two of the five records
     (the episode state model and the listener promises) never had a "switch to" commit; the wiki and
@@ -187,8 +193,9 @@ All repository-agnostic.
    the owner; give recommendations with evidence; "don't know" becomes an assumption.
 2. Purpose (findings 13 and 14): one paragraph in analysis.md on product intent versus reference,
    for pages and for records, with the settings rule of thumb.
-3. Sources beyond the repository (findings 10 to 12): the homepage, the docs navigation and the
-   wiki, as evidence for groups, principles and early decisions.
+3. Sources beyond the code (findings 10 to 12): when they exist, the homepage, the docs navigation
+   and the wiki, as evidence for groups, principles and early decisions; otherwise the README,
+   manifests, listing metadata and labels, then the person.
 4. Dry run (findings 1 and 2): a clear error when the checkout is unbound, and the scratch-workspace
    recipe.
 5. Fewer Markdown files (finding 15): an explicit `repo_changes` goal.
