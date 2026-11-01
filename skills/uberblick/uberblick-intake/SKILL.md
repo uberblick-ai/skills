@@ -1,19 +1,17 @@
 ---
 name: uberblick-intake
 description: >-
-  Set up an Uberblick corpus from an existing repository. Reads every
-  Markdown file, the git history and the test suite, then proposes the
-  corpus: which files
-  become product pages and which stay in the repository as technical,
-  implementation or agent Markdown, the tags for this repository, decision
-  records for the questions the history keeps reopening, ablauf drawings
-  and wireframes where a picture says it better, pages as deep as the tests
-  show the team cares, and a sidebar ready for the team. Tests are only
-  analysed, never moved: they decide which areas need a page and how deep
-  it goes. Shows the whole
-  plan on one review page and writes it to the workspace once approved. Use
-  when someone wants to set up Uberblick for an existing repository, migrate
-  their docs into the corpus, or asks what an intake would create.
+  Set up an Uberblick corpus from an existing repository in any language,
+  structure or code host: product pages, decision records, tags and a
+  sidebar, from its docs, history and tracker, with the tests analysed, never
+  moved, to decide where pages go deeper. Use for "set up Uberblick for this
+  repository", "move our product docs into the corpus", "which decisions
+  should our corpus record?" or "what would an intake of this repo create?".
+  Confirms the outline and every decision candidate with the person before
+  drafting, keeps records open unless a person decided them, writes drafts
+  and a review page to a scratch directory, and writes the workspace only
+  once approved; changes no file in the repository. Not for keeping an
+  existing corpus in step with the code or reviewing a pull request.
 license: MIT
 compatibility: >-
   Requires python3 and git, and Node.js 22.18 or newer with npm to check and

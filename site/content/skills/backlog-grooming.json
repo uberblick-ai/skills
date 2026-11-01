@@ -64,7 +64,7 @@
   "shots": [
     {
       "image": "grooming-top",
-      "caption": "The decision table. Example data from the skill's format sample."
+      "caption": "The decision table from a real run over 81 open issues: Close unnecessary, Defer, Keep and Narrow."
     }
   ]
 }

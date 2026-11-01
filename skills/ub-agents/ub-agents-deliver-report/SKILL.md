@@ -1,14 +1,15 @@
 ---
 name: ub-agents-deliver-report
 description: >-
-  Report a calendar day of ub-agents loop deliveries in a GitHub repository
-  when a maintainer asks: how many items the loop delivered on its own, which
-  runs were wasted, where a person had to step in, the causes behind them and
-  the few changes that would have saved runs. Writes an HTML report, opens it
-  in the browser, leaves a JSON record of the day and, when an Uberblick MCP
-  server is connected, stores the day in an Uberblick document's data to track
-  KPIs over time, filling in every day missing since the last one stored. Do
-  not use for a loop role, a PR review or a merge gate.
+  Report a calendar day of ub-agents loop deliveries in a GitHub repository:
+  how many items the loop delivered on its own, which runs were wasted, where
+  a person had to step in, the causes behind them and the few changes that
+  would have saved runs. Use for "how did the loop do yesterday?", "run the
+  deliver report for 2026-10-07" or "why did the preparer keep retrying last
+  Tuesday?". Writes an HTML report and a JSON record of the day and, when an
+  Uberblick MCP server is connected, stores every day missing since the last
+  one in the project's delivery report document. Not for a loop role, a PR
+  review or a merge gate.
 license: MIT
 compatibility: >-
   Requires python3 and an authenticated GitHub CLI (gh); reads GitHub only.
@@ -17,7 +18,7 @@ compatibility: >-
   the page.
 metadata:
   author: uberblick-ai
-  version: "1.9"
+  version: "1.10"
 ---
 
 # Deliver report
@@ -202,6 +203,18 @@ classes, the page and the records are defined in
 8. Reply with the newest day's headline, the KPIs against their targets, one
    line per change, and where the days were stored or why they were not. For
    each earlier day filled in, add one line: the day, its headline and its
-   autonomous and wasted share. The page and the
+   autonomous and wasted share. In this shape, with your own figures (these
+   are an example), leaving out a line that has nothing in it:
+
+   ```text
+   14 October: 6 of 8 deliveries went through alone; the preparer asked twice about scope the corpus already settles.
+   Autonomous 75% (target 75% or more), wasted runs 12% (under 10%), runs with denials 4% (under 10%).
+   Changes: acme/app#2201, the preparer reads the corpus before asking, ends 3 wasted runs a day.
+   Stored 12 to 14 October in the Delivery report.
+   12 October: every delivery alone. Autonomous 100%, wasted 0%.
+   13 October: one stop on a migration question. Autonomous 80%, wasted 5%.
+   ```
+
+   A day without loop runs gets one line saying so. The page and the
    records may be shared: keep credentials, local paths and hostnames out of
    the notes.

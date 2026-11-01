@@ -5,11 +5,13 @@
   "asks": [
     "Set up Uberblick for this repository.",
     "Move our product docs into the corpus.",
+    "Which decisions should our corpus record?",
     "What would an intake of this repo create?"
   ],
   "steps": [
     "Reads the workspace: its tags, sidebar and documents.",
     "Scans every tracked Markdown file, the git history and the test suite: hot areas, direction changes, the largest changes on the main line, test cases by kind and topic.",
+    "Confirms the outline and every decision candidate with the person before drafting; records stay open unless a person decided them.",
     "Lists what a person can do with the product, and writes one small page per area, with scenarios where the tests and docs show the team's weight.",
     "Turns accepted ADRs and the few lasting choices in the history into decision records, open until a person decides them.",
     "Draws flows with ablauf and screens with wireframes where a picture says it better, and checks every drawing.",
