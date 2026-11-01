@@ -55,6 +55,7 @@ Each line is something the user had to say that the skill should have made unnec
 7. "it can be, where it matters - but product intent and pages to allow an easy understanding of the product is the key": same as finding 14.
 8. "the skill should also suggest to reduce markdown files if this isn't clear yet": finding 15.
 9. "ensure the skill stays agnostic and nothing from the repo leaks into the skill": applies to every proposed fix below.
+10. "coarser pages is fine - the corpus describes product intent - not the product itself. See guidance doc on uberblick-2. This should be respected by the skill" (said at the immich checkpoint; it applies to this run too): the skill never reads the workspace's writing guidance (finding 21).
 
 ## Findings
 
@@ -159,6 +160,30 @@ misleads; **low** = polish. AntennaPod supplies the evidence; every fix is writt
     pointing duplicated prose to the corpus or the docs site, and say so even when the answer is
     "nothing to reduce". It stays a proposal, made only when asked.
 
+21. **High: the skill never reads the workspace's writing guidance, and its own page rules
+    contradict it.** The corpus's "Writing pages" page (tag `guidance`) says: "The product explains
+    itself. A page does not teach how to use it: it shapes the product and sets its boundaries,
+    stating what it must do, what it promises and what it refuses." It gives a feature page a
+    shape (purpose, what it promises, what you can do, scenarios, notes). It bans option lists,
+    defaults, internals and provenance, and says "Never fill unknown intent by describing what
+    the code does today." analysis.md → Writing pages says the opposite in places:
+    - "Write the product as it is";
+    - "When the docs and the code disagree, the code wins. Write what the code does";
+    - "a short section per command, screen or setting with a snippet".
+
+    The skill only lets "the repository's own rules for corpus pages" win. A fresh workspace has
+    the `guidance` tag, described as rules agents read before their first write, but no page
+    carries it, and the skill reads neither the tag nor the "Welcome to Uberblick" page. This run's
+    pages follow the skill and break the guidance: they state defaults ("every 12 hours by
+    default", "25 by default"), list option values, and describe what the code does instead of
+    what the product promises. Findings 13 and 14 were symptoms of this. Fix:
+    - step 1 reads every `guidance`-tagged page (and the welcome page) and treats them as the
+      rules for pages, above analysis.md;
+    - analysis.md → Writing pages is rewritten to match the product's guidance: promises and
+      boundaries first, the page shapes, the never-on-a-page list;
+    - where intent can't be known from the repository, the agent lists the question at the
+      checkpoint instead of writing what the code does.
+
 ### Checking, review and writing (steps 7 to 10)
 
 16. **Medium: step 7 says the corpus help names the renderer versions; it doesn't.** `get_help`
@@ -188,14 +213,15 @@ misleads; **low** = polish. AntennaPod supplies the evidence; every fix is writt
 ## Suggestions
 
 Filed here for now, not made: more runs will show which ones recur. Each has a stable ID, so another
-run can add itself to **Also seen in** (or "contradicts") instead of filing it again. Ranked by this run;
+run can add itself to **Also seen in** (or "contradicts") instead of filing it again. Ranked by this run (S20 was added last but ranks first);
 **F** is the finding above. Every suggestion is written to hold for any repository.
 
 | ID | Suggestion | Details | Where | F | Also seen in |
 | --- | --- | --- | --- | --- | --- |
+| S20 | Follow the workspace's writing guidance (ranked first) | Step 1 reads every `guidance`-tagged page and the welcome page, and they rule over analysis.md. Rewrite analysis.md → Writing pages to match: pages state purpose, promises and boundaries ("the product explains itself"), in the feature and surface shapes; never option lists, defaults, internals or provenance; never fill unknown intent with what the code does today; ask instead. Absorbs S3. | `SKILL.md` step 1; `analysis.md` → Writing pages | 21 | immich (the person supplied the guidance at the checkpoint) |
 | S1 | Always stop at the checkpoint | A dry run still stops at step 4 whenever a person is in the session. The person running it counts as the owner unless they say otherwise. Asking beats gathering everything alone. | `SKILL.md` step 4 ("Run unattended…") | 8 | ablauf §2 (checkpoint run by hand; related) |
 | S2 | Recommend, don't quiz | Give every outline item as a recommendation with its evidence, then ask "change anything?". "Don't know" keeps the recommendation and goes into `checkpoint.assumptions`. | `SKILL.md` step 4; `analysis.md` → Confirm before recording | 9 | |
-| S3 | Pages state intent, not reference | Name a setting when it changes what a person experiences, and say what it does for them. Prefer a scenario to a list of values; give exhaustive lists only on request. | `analysis.md` → Writing pages | 13 | ablauf §4.2 (intent is the point; related) |
+| S3 | Pages state intent, not reference | Absorbed by S20. Name a setting only where it carries a promise, and say what it promises; no lists of values. | `analysis.md` → Writing pages | 13 | ablauf §4.2 (intent is the point; related) |
 | S4 | Records in the product's words | No code symbols or build names. An engineering choice qualifies only where it changes what people get; leave it out, as a candidate with its reason, when the repo records it next to the code. | `analysis.md` → Decision records (the "framework or library" line) | 14 | |
 | S5 | Read what the team publishes, when there is any | When the README, the host's `homepage` field or a manifest links a homepage or docs site, read the homepage and the docs navigation for emphasis, group names and tags. Otherwise use the README's opening, a manifest's `description`, listing metadata in the repo and area labels; with none of these, ask (S2). Never a source for behaviour. Skip pages behind a sign-in, and fetch nothing for a private repository unasked. | `SKILL.md` step 3; `analysis.md` → Product, audience and scope | 10 | ablauf §5 "Product intent from the host" (related) |
 | S6 | Scan the wiki, when there is one | `scan` tries `git ls-remote <repo>.wiki.git` even when the host reports no wiki, skips quietly when it fails, and lists current and deleted pages. Deleted pages are evidence for decisions, never page sources. | `intake.py` `cmd_scan` (beside `labels_of`); `analysis.md` → Decision records | 11 | |
