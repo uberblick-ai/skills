@@ -65,7 +65,7 @@
   "shots": [
     {
       "image": "grooming-top",
-      "caption": "The decision table from a real run over 81 open issues: Close unnecessary, Defer, Keep and Narrow."
+      "caption": "The decision table from a real run over the 21 open issues of ub-agents, grouped by milestone, each with its weight against the cap."
     }
   ]
 }
