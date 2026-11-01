@@ -56,7 +56,7 @@ controls.
 
 - Read the format first: `AUTHORING.md` ships in the package, at
   `DIR/node/node_modules/@uberblick/wireframe/AUTHORING.md` after the install
-  in step 6.
+  in step 7.
 - One screen per block, its essential controls only: a wireframe is a sketch,
   not a screenshot.
 

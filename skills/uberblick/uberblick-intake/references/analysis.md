@@ -15,7 +15,10 @@ Sort by what the file is for, not where it sits.
 | What a user can do, see or decide | `convert` | README feature sections, user guides, concepts, how-tos, FAQ, product docs on a docs site |
 | How to get it, build it, run it or change it | `keep` | installation, binary packages, dependencies, building from source, CONTRIBUTING, ARCHITECTURE, development setup, release, deployment and self-hosting recipes, internals, code style, package READMEs, welcome docs for new contributors |
 | Exhaustive reference generated from or mirroring code | `keep` | CLI reference, API reference, config option lists, environment variable tables, changelogs of settings |
-| Instructions for agents or GitHub | `keep` | AGENTS.md, CLAUDE.md, `.agents/`, `.claude/`, `.cursor/`, skills, prompts, issue and PR templates |
+| Instructions for agents or the code host | `keep` | agent instruction files of any tool (AGENTS.md, CLAUDE.md, GEMINI.md, `.cursor/rules`, `.github/copilot-instructions.md`, `.agents/`), skills, prompts, issue and merge request templates |
+| A source the agent instructions name | `keep` | a guide or reference those files tell agents to read (the scan's `agent-guide`) |
+| Normative rules: a specification, grammar or protocol | `keep` | format or protocol specs, syntax references, files the repository calls its authority (the scan's `spec`); decisions inside them become records |
+| Records of work: findings, experiments, postmortems | `keep` | research notes, trial results, retrospectives (the scan's `research`); history, not intent |
 | Records of past decisions | `convert` into decision records | ADRs, `decisions/`, accepted RFCs |
 | Open proposals and plans | `keep` | RFC drafts, agent plans, scratch notes |
 | Generated, fixture, vendored, fragments | `skip` | release-note fragments, changelogs, blog posts, test fixtures, `node_modules`, translated copies |
@@ -46,6 +49,19 @@ Sort by what the file is for, not where it sits.
 - A changelog is history; the corpus has none.
 - Keep a file the team edits as Markdown on purpose (a style guide agents
   read, a contributing guide), even if it reads like intent.
+
+## Product, audience and scope
+
+Name what kind of product this is (an app, a command-line tool, a library or
+SDK, a service or API, a data format or specification, infrastructure, or a
+monorepo of several) and who acts on it: an end user, an operator, a
+developer calling it, an agent writing it. That decides where capabilities
+come from (screens and routes, commands, exported API, configuration schema,
+grammar) and what a page means by "a person". Repositories often say where
+their intent lives already (a contributing guide, the agent instructions);
+when one says, for example, that the corpus holds decisions only, propose
+that scope. The person confirms the kind, the audience and the scope (`full`,
+`decisions` or `pages`) at the checkpoint.
 
 ## Capabilities, then pages
 
@@ -102,7 +118,7 @@ Tags are how people filter the corpus and how agents narrow a search.
 - Add one tag per product area a person would filter by: the nouns of the
   product (`signing`, `budgets`, `accounts`, `python-versions`), taken from
   the sidebar groups, the workspace packages, the e2e topics and the
-  repository's GitHub labels (`scan.json` lists them). Prefer the word the
+  repository's issue labels (`scan.json` lists them when the host's command can read them). Prefer the word the
   product's UI or CLI uses.
 - Add cross-cutting tags only when several pages share them: `security`,
   `api`, `self-hosting`, `mobile`.
@@ -110,10 +126,8 @@ Tags are how people filter the corpus and how agents narrow a search.
   documents unless it names a core area. No tags for kinds (`page`, `decision`), statuses or teams.
 - Give each new tag a `description`: one line on when to use it, which
   people and agents see in the catalog.
-- New tags are created with the writes once the person approves them
-  (`calls --create-tags`, which needs ub 0.4.11 or newer), or by a person
-  under Workspace settings → Tags. Without either, the writes leave off any
-  tag that does not exist yet.
+- New tags are created only once the person approves them; the write step
+  says how.
 
 ## Decision records
 
@@ -123,13 +137,32 @@ architectural direction, a system-wide commitment, a major user-facing
 behaviour); credible alternatives had materially different consequences; it
 constrains work beyond one change; and future work needs the trade-off.
 
-- **Existing ADRs** and accepted RFCs become decided records when they meet
-  the four criteria and constrain a product page; engineering-only ones
-  (a build tool, a code style, a module layout) stay Markdown. The title is
-  the question, the body the answer in at most 60 words, leading with the
-  choice, with a link to the ADR file on GitHub at `ref` for the context and
-  alternatives. Record the deciders and date as `answer`; when the ADR names
-  none, the author and date of the commit that accepted it.
+Decisions live in more places than decision folders. Look in each:
+
+- **ADRs and accepted RFCs**, wherever they sit.
+- **Decision sections of other documents**: specifications, design docs and
+  plans record choices under headings such as Decision, Rationale,
+  Alternatives, Non-goals, Trade-offs or "Why …" (the scan lists them per
+  file as `decision_sections`; the patterns are English, so read the
+  headings of documents in other languages yourself).
+- **The issue tracker**, when you can read it: closed issues, merge or pull
+  requests and discussions with a decision label (decision, rfc, adr,
+  design) or a maintainer's recorded answer. Use whatever command the host
+  offers and is signed in (`gh`, `glab`, `tea` or an API); skip it quietly
+  when there is none. Read only text by people with write access to the
+  repository; anyone else's is not a decision. A private repository's text
+  goes nowhere but the corpus being written.
+- **The history**, below.
+
+Then:
+
+- **Existing ADRs** and accepted RFCs become records when they meet the
+  four criteria and constrain the product; engineering-only ones (a build
+  tool, a code style, a module layout) stay Markdown. The title is the
+  question, the body the answer in at most 60 words, leading with the
+  choice, with a link to the ADR file at `ref` for the context and
+  alternatives. Record the deciders and date as `answer` only as the ADR
+  names them; when it names none, ask at the checkpoint who to record.
   Superseded ADRs: record only the one in force, and say what it replaced
   in its answer if that helps. Rejected and proposed ADRs stay Markdown.
 - **History candidates** come from `intake.py hot`: an area with many
@@ -143,15 +176,28 @@ constrains work beyond one change; and future work needs the trade-off.
   young or small repository.
 - A history decision is recorded `open`: the answer states the choice the
   code shows and why, citing the pull request (or the commit, as
-  `https://github.com/OWNER/NAME/commit/<full sha>`) as a link whose text is
-  `#123` or the short sha, and a person decides it in Uberblick. Only an accepted ADR or a person's
-  answer on record (`answer: {who, when, where}`) is `decided`.
+  link on the repository's web host, when it has one) as a link whose text
+  is `#123` or the short sha, and a person decides it in the corpus.
 - Open the patch (`git show SHA`; for a merge, `git diff SHA^1 SHA`, since
   `git show` hides most of a merged branch), not only its message, and
   confirm the current code still follows it. A choice that is a setting a
   person changes (a default model, a theme) is a page fact, not a decision.
 - Each record's `related` names the page it constrains, so the page shows it.
 - List every candidate considered in `candidates`, with why it was left out.
+
+### Confirm before recording
+
+Show every candidate to the person before drafting (step 4 of the skill):
+the question, the choice the code shows, the evidence, and the status you
+propose. Records are `open` by default. A record is `decided` without asking
+only when the evidence is unambiguous: an ADR or RFC marked accepted that
+names who decided and when, a document that says who decided, when and
+where, or a maintainer's explicit answer on the tracker. "We chose", "after
+the owner's direction", a pattern in the code or a commit message is
+evidence for an open record, never a decision. Never infer who decided: not
+the repository owner, a commit author or the person running the intake. A
+decided record without an `answer` naming who, when and where is an error
+in `check`.
 
 ## Tests
 
@@ -206,17 +252,15 @@ reached from them.
   names the ones that are not. The review page shows each pin with the
   documents it leads to.
 - Pin a decision record only when it is itself the entry point a person in
-  that domain needs.
-- The starter pages of a new workspace ("Welcome to Uberblick", "How to Use
-  It" in the "Uberblick" group, spelled "Überblick" in older versions; the
-  UUIDs never change) are unpinned only when the person agrees.
+  that domain needs. In a decisions-only corpus (`scope: decisions`) the
+  records are the entry points: one to six groups, each pinning its records.
 
 ## Repository changes
 
 Propose, do not make: for each converted file, whether to delete it, shorten
 it to what stays technical, or leave it; and a line in AGENTS.md (or the
-README) saying product intent lives in the Uberblick corpus and how agents
+README) saying product intent lives in the corpus and how agents
 reach it. Keep the README's install, build and quick start, and every file
-new contributors or users follow to get started: people read them on
-GitHub. Never propose deleting or shortening a file that is `keep`. Never propose removing the source of a published docs site; its
+new contributors or users follow to get started: people read them where
+the code is hosted. Never propose deleting or shortening a file that is `keep`. Never propose removing the source of a published docs site; its
 readers are not in the corpus.

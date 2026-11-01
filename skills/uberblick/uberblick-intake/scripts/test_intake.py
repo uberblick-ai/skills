@@ -117,6 +117,42 @@ class Scan(unittest.TestCase):
         self.assertEqual(intake.guess_class("upcoming-release-notes/123.md", plain)[0], "changelog")
         self.assertEqual(intake.guess_class("docs/guide.md", plain)[0], "product")
 
+    def test_guesses_by_role(self):
+        plain = {"headings": ["What is it?"], "fences": {}, "words": 500}
+        procedure = dict(plain, version_headings=0)
+        notes = dict(plain, version_headings=4)
+        self.assertEqual(intake.guess_class("docs/releases.md", procedure)[0], "technical")
+        self.assertEqual(intake.guess_class("RELEASES.md", notes)[0], "changelog")
+        self.assertEqual(intake.guess_class("spike/FINDINGS.md", plain)[0], "research")
+        self.assertEqual(intake.guess_class("research/2024-latency.md", plain)[0], "research")
+        self.assertEqual(intake.guess_class("docs/plan.md", dict(plain, spec_headings=2))[0], "spec")
+        self.assertEqual(intake.guess_class("docs/protocol.md", dict(plain, normative=6))[0], "spec")
+
+    def test_other_formats_and_decision_sections(self):
+        rst = intake.md_facts("docs/index.rst", "Guide\n=====\n\nIntro.\n\nRationale\n---------\n\nWhy.\n")
+        self.assertEqual(rst["title"], "Guide")
+        self.assertEqual(rst["decision_sections"], ["Rationale"])
+        adoc = intake.md_facts("docs/a.adoc", "= Manual\n\n== Non-goals\n\nNo GUI.\n\n== Usage\n")
+        self.assertEqual(adoc["headings"], ["Non-goals", "Usage"])
+        self.assertEqual(adoc["decision_sections"], ["Non-goals"])
+        org = intake.md_facts("notes.org", "* Alternatives considered\nA or B.\n")
+        self.assertEqual(org["decision_sections"], ["Alternatives considered"])
+        md = intake.md_facts("AGENTS.md", "Read `docs/plan.md` and [the guide](guide/PRIMER.md).\n")
+        self.assertEqual(md["names_docs"], ["docs/plan.md", "guide/PRIMER.md"])
+
+    def test_agent_instructions_name_their_guides(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / "docs").mkdir()
+            (root / "AGENTS.md").write_text("Agents read [the primer](docs/primer.md).\n")
+            (root / "docs" / "primer.md").write_text("# Primer\n\nHow to write a diagram.\n")
+            (root / "docs" / "tour.md").write_text("# Tour\n\nWhat a person can do.\n")
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+            docs = {d["path"]: d["guess"] for d in intake.scan_markdown(root, ["AGENTS.md", "docs/primer.md",
+                                                                              "docs/tour.md"])}
+        self.assertEqual(docs, {"AGENTS.md": "harness", "docs/primer.md": "agent-guide", "docs/tour.md": "product"})
+
     def test_test_kinds_and_topics(self):
         self.assertEqual(intake.test_kind("packages/app-tests/e2e/admin/search.spec.ts", ""), "e2e")
         self.assertEqual(intake.test_kind("tests/test_cli.py", "CliRunner()\nCliRunner()\n", 4), "cli")
@@ -236,6 +272,43 @@ class Plan(unittest.TestCase):
         self.plan["tags"][0]["name"] = "Core Tag"
         errors, _ = intake.validate(self.plan, self.path.parent)
         self.assertTrue(any("lowercase letters" in e for e in errors))
+
+    def test_decided_needs_a_person(self):
+        self.plan["documents"][2]["status"] = "decided"
+        errors, _ = intake.validate(self.plan, self.path.parent)
+        self.assertTrue(any("decided without a person's answer" in e for e in errors))
+        self.plan["documents"][2]["answer"] = {"who": "A maintainer", "when": "2026-01-02T03:04:05Z", "where": "#12"}
+        errors, _ = intake.validate(self.plan, self.path.parent)
+        self.assertFalse(any("decided without" in e for e in errors))
+
+    def test_checkpoint(self):
+        _, warnings = intake.validate(self.plan, self.path.parent)
+        self.assertTrue(any(w.startswith("checkpoint:") for w in warnings))
+        self.plan["checkpoint"] = {"status": "confirmed", "who": "A maintainer"}
+        errors, _ = intake.validate(self.plan, self.path.parent)
+        self.assertIn("checkpoint: a confirmed outline names who confirmed it, when and where", errors)
+        self.plan["checkpoint"] = {"status": "assumed", "assumptions": ["Pages for every area"]}
+        errors, warnings = intake.validate(self.plan, self.path.parent)
+        self.assertFalse(any(m.startswith("checkpoint:") for m in errors + warnings))
+        html = intake.checkpoint_html(self.plan["checkpoint"])
+        self.assertIn("Pages for every area", html)
+
+    def test_decisions_only_scope_and_existing_records(self):
+        self.plan.update(scope="decisions", capabilities=[])
+        self.plan["documents"] = [
+            {"slug": "d", "file": "docs/d.md", "kind": "decision", "sources": ["git:1"]},
+            {"slug": "e", "kind": "decision", "existing": "uuid-e", "title": "Which sync?"}]
+        self.plan["sidebar"]["groups"] = [{"name": "Storage", "docs": ["d", "e"]}]
+        self.plan["markdown"] = [{"path": "**", "action": "keep", "why": "y"}]
+        self.plan["tags"] = [{"name": "core", "status": "new", "core": True},
+                             {"name": "extra", "status": "new", "core": True}]
+        errors, warnings = intake.validate(self.plan, self.path.parent)
+        self.assertEqual(errors, [])
+        self.assertFalse(any(w.startswith(("sidebar:", "capabilities:")) or "no sources" in w for w in warnings),
+                         warnings)
+        self.plan["scope"] = "everything"
+        errors, _ = intake.validate(self.plan, self.path.parent)
+        self.assertIn("plan: scope is one of full, decisions, pages", errors)
 
     def test_decision_answer_limits(self):
         (self.path.parent / "docs" / "d.md").write_text(doc("Which store?", "word " * 61 + "\n"))

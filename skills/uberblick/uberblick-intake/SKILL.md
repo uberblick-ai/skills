@@ -19,8 +19,9 @@ compatibility: >-
   Requires python3 and git, and Node.js 22.18 or newer with npm to check and
   draw ablauf and wireframe blocks. Writing to the corpus needs the Uberblick
   MCP tools or the `ub` command in a checkout bound to a workspace; without
-  either it stops at the review page. Reads GitHub labels with an
-  authenticated gh when there is one.
+  either it stops at the review page. Reads issue labels and decisions on the
+  tracker with its signed-in command (such as gh or glab) when there is one;
+  works without one, on any host, open or private.
 metadata:
   author: uberblick-ai
   version: "0.1"
@@ -44,6 +45,12 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
 [references/analysis.md](references/analysis.md), drawings in
 [references/visuals.md](references/visuals.md).
 
+Steps 2 to 5 read and judge the repository and assume nothing about it: any
+language, structure or code host, open or private. Only steps 1 and 6 to 11
+know the corpus they write to. Two moments belong to the person: the outline
+and the decision candidates before anything is drafted (step 4), and the
+finished plan before anything is written (step 8).
+
 1. **Find the corpus.** The corpus is reachable when Uberblick MCP tools are
    in your tool list (whatever the server is called; load tools listed by
    name only), or through `ub` in a checkout bound to a workspace
@@ -62,7 +69,7 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    `list_docs` with `kind: decision` (decision records are listed only then),
    and save the `list_tags` answer as it stands (`{"tags": [{"id", "name"}],
    "complete": …}`; other keys are fine) as `DIR/corpus/tags.json`. When
-   both routes are there, write through `ub` (step 8): one command, with
+   both routes are there, write through `ub` (step 9): one command, with
    the checks and the wait for the hub. It opens the same workspace replica
    as the connected MCP server, so both can run at once. A fresh workspace
    holds two starter pages in an "Uberblick" group (older versions spell
@@ -92,7 +99,8 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    python3 scripts/intake.py tests DIR/scan.json > DIR/tests.txt
    ```
 
-   `scan` lists every tracked Markdown file with its headings, size, history
+   `scan` lists every tracked documentation file (Markdown,
+   reStructuredText, AsciiDoc, Org) with its headings, size, history
    and a first guess at its class (`guess`, with `why`; a file with the
    same text as an earlier one is `duplicate`), finds a docs site (mkdocs, Docusaurus,
    mdBook and others), walks up to 5,000 commits for the files and areas that
@@ -100,8 +108,12 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    changes on the main line over the whole history (a feature landing, a
    rewrite, a migration, merges included), and counts the tests
    per area and topic, by kind: `e2e` (a browser or device), `e2e-api`,
-   `cli` (the built command, end to end), `integration`, `unit`. `hot` and
-   `tests` print the same facts to read. Kinds, topics and direction changes
+   `cli` (the built command, end to end), `integration`, `unit`. Beyond
+   `product` and `technical` it guesses `spec` (normative rules or grammar),
+   `agent-guide` (a file the agent instructions name) and `research`
+   (findings, postmortems), and lists each file's `decision_sections`, the
+   headings where it records choices (Rationale, Non-goals, Alternatives…).
+   `hot` and `tests` print the same facts to read. Kinds, topics and direction changes
    are heuristics from names and messages: facts to check, not findings. It
    takes seconds to a few minutes, reads committed files and warns about
    uncommitted changes; the pages describe the commit in `ref`. Run git with
@@ -120,13 +132,38 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    change, open the patch (`git -c gc.auto=0 show SHA`) and the code it
    touched today before calling it a decision. A large docs site is too much
    to read whole: read its navigation, then the pages and code behind each
-   capability, deepest where the tests are. The user documentation is not
+   capability, deepest where the tests are. Read every `decision_sections`
+   heading, and the tracker's decisions when its command is there, as
+   [references/analysis.md](references/analysis.md#decision-records)
+   describes: closed issues and requests with a decision label or a
+   maintainer's answer, by people with write access only. The user documentation is not
    always Markdown: read a man page (`*.1`), a settings template
    (`.env.template`, a sample config) or the CLI's help text as the source
    it is.
 
-4. **Decide** each part as [references/analysis.md](references/analysis.md)
-   describes:
+4. **Confirm the outline.** Before drafting anything, show the person a
+   short outline and wait for the answer:
+
+   - the scope: a full corpus, decision records only, or pages only, and
+     how it sits beside a published docs site;
+   - the product's kind and audience;
+   - the groups in order, each with its entry page, and the pages with a
+     line each on what they cover; capabilities left without a page and why;
+   - the file fates in bulk, folder by folder, with only the borderline files
+     one by one;
+   - the tags;
+   - every decision candidate: the question, the choice the code shows, the
+     evidence and the proposed status, `open` unless a person's answer is on
+     record ([Confirm before recording](references/analysis.md#confirm-before-recording)).
+
+   The person renames, merges, drops or adds, and says which records to keep
+   and which, if any, they decide now. Record it as the plan's `checkpoint`:
+   who confirmed it, when and where. Run unattended with leave to go on,
+   record `"status": "assumed"` and every assumption instead; the review page
+   shows them first.
+
+5. **Decide** each part as [references/analysis.md](references/analysis.md)
+   describes, within the confirmed outline:
 
    - every Markdown file: `convert` into a named page, `keep` as Markdown, or
      `skip` (generated, fixture, release note fragment, duplicate), with one
@@ -153,15 +190,18 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
      each pins its entry points, pages that link on to the domain's
      other pages and records, so every document is reachable from a pin.
 
-5. **Write** `DIR/docs/<slug>.md`, one Uberblick Markdown file per document,
+6. **Write** `DIR/docs/<slug>.md`, one Uberblick Markdown file per document,
    and `DIR/intake.json`, as [references/plan.md](references/plan.md)
    describes. Link pages to each other with `[text](ref:slug)`; the writer
    turns these into document links. Never copy a source file: rewrite it as
    the page it should be.
 
-6. **Check** the drawings, the plan and the claims, installing the
+7. **Check** the drawings, the plan and the claims, installing the
    renderers once per scratch directory (skip both when no page has an
-   `ablauf` or `wireframe` block):
+   `ablauf` or `wireframe` block). Install the versions the corpus draws
+   with: its help names them (`get_help` with topic `ablauf` or
+   `wireframe`); the versions below are the ones it named when this was
+   written:
 
    ```sh
    npm install --prefix DIR/node @uberblick/ablauf@0.2.0 @uberblick/wireframe@0.3.2
@@ -185,14 +225,15 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    re-read the sources yourself. Fix what does not hold before the review:
    the person approves pages that are already true.
 
-7. **Review.** Build the page and open it (leave off `--open` when nobody
+8. **Review.** Build the page and open it (leave off `--open` when nobody
    is there to look):
 
    ```sh
    python3 scripts/intake.py review DIR/intake.json --scan DIR/scan.json --out DIR/review.html --open
    ```
 
-   It shows the sidebar beside every document as it will be written, with
+   It opens with what the person confirmed at step 4, or what you assumed,
+   then shows the sidebar beside every document as it will be written, with
    the drawings, the tags, every Markdown file's fate, the decision
    candidates with their commits, the test focus and the proposed
    repository changes. Tell the person in a few sentences what the corpus
@@ -205,7 +246,7 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    page anyway, follow what you were told about the starter pages and the
    tags, and name those choices in the report.
 
-8. **Write to the corpus.** Read the workspace again (step 1) so the writes
+9. **Write to the corpus.** Read the workspace again (step 1) so the writes
    use only tags that exist, then, with `ub`:
 
    ```sh
@@ -277,7 +318,7 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    `get_doc` shows a prose block's formatting as `inline` runs where the
    server returns them; otherwise `export_markdown` shows it.
 
-9. **Record the grounding.** When the `uberblick-corpus-sync` skill is
+10. **Record the grounding.** When the `uberblick-corpus-sync` skill is
    installed, run it in apply mode on the pages just written (their UUIDs
    from `applied.json`) and in report mode on the Markdown kept in the
    repository, at the same commit: it records on each page which commit it
@@ -285,7 +326,7 @@ checkout, `DIR` a scratch directory outside it. The plan's shape is in
    hand at `ref` and carry no recorded check. Intake never records
    `code_check` itself.
 
-10. **Report.** Tell the person what was created (pages, decision records,
+11. **Report.** Tell the person what was created (pages, decision records,
     pins, tags), what stays in the repository as Markdown, what was skipped,
     the decision candidates left out and why, and the repository changes
     from the plan: converted files to remove or shorten to a pointer, and a

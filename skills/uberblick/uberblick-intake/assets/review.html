@@ -25,7 +25,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .tag{display:inline-block;font-size:12px;border:1px solid var(--line);border-radius:999px;padding:0 8px;margin:0 4px 2px 0}
 .tag.new{border-color:var(--new);color:var(--new)}
 .act{font-size:12px;font-weight:600;text-transform:uppercase}.act.convert{color:var(--accent)}.act.keep{color:var(--muted)}.act.skip{color:var(--warn)}
-.issues li.err{color:var(--err)}.issues li.warn{color:var(--warn)}.ok{color:var(--new)}
+.issues li.err{color:var(--err)}.issues li.warn{color:var(--warn)}p.warn,div.warn{color:var(--warn)}.ok{color:var(--new)}
 .layout{display:grid;grid-template-columns:240px 1fr;gap:22px;align-items:start}
 .side{background:var(--side);border:1px solid var(--line);border-radius:10px;padding:10px 6px;position:sticky;top:12px;max-height:90vh;overflow:auto}
 .sg{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:12px 10px 4px}
@@ -50,6 +50,7 @@ blockquote{border-left:3px solid var(--line);margin:8px 0;padding:2px 12px;color
 <h1>Intake of {{REPO}}</h1>
 <div class="meta">At commit <code>{{REF}}</code> · {{DATE}} · Approve this plan before anything is written to the corpus.</div>
 <p>{{SUMMARY}}</p>
+{{CHECKPOINT}}
 <div class="stats">{{STATS}}</div>
 {{ISSUES}}
 

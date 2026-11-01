@@ -34,7 +34,7 @@ from pathlib import Path
 # --------------------------------------------------------------------------------------------------- scan helpers
 
 SCHEMA_VERSION = 2
-MD_EXT = (".md", ".mdx", ".markdown")
+MD_EXT = (".md", ".mdx", ".markdown", ".rst", ".adoc", ".asciidoc", ".org")
 NOISE_DIRS = re.compile(r"(^|/)(node_modules|vendor|third[_-]party|dist|build|out|\.venv|venv|target|"
                         r"__snapshots__|fixtures?|testdata|test-data|snapshots)(/|$)", re.I)
 VENDORED = re.compile(r"(^|/)(node_modules|vendor|third[_-]party)/", re.I)
@@ -60,10 +60,21 @@ HARNESS = re.compile(r"(^|/)(AGENTS|CLAUDE|GEMINI|COPILOT|CONVENTIONS)\.md$|(^|/
                      r"(^|/)\.github/(ISSUE_TEMPLATE|PULL_REQUEST_TEMPLATE|pull_request_template)", re.I)
 COMMUNITY = re.compile(r"(^|/)(CODE[_-]OF[_-]CONDUCT|SECURITY|SUPPORT|GOVERNANCE|MAINTAINERS|LICEN[CS]E|COPYING|"
                        r"CLA|FUNDING|AUTHORS|CONTRIBUTORS|NOTICE|TRADEMARKS?)[^/]*$", re.I)
-CHANGELOG = re.compile(r"(^|/)(CHANGELOG|HISTORY|NEWS|RELEASES?|UPGRADING|MIGRATING)[^/]*$|(^|/)(changelogs?|"
+# RELEASES, UPGRADING and MIGRATING may be a changelog or a procedure: their content decides (see guess_class).
+RELEASE_NAME = re.compile(r"(^|/)(RELEASES?|UPGRADING|MIGRATING)[^/]*$", re.I)
+CHANGELOG = re.compile(r"(^|/)(CHANGELOG|HISTORY|NEWS)[^/]*$|(^|/)(changelogs?|"
                        r"upcoming-release-notes|\.changeset|release-notes|releases|blog|posts|_posts)/", re.I)
 DECISION = re.compile(r"(^|/)(adrs?|decisions?|architecture[-_]decisions?|decision[-_]records?)(/|$)|"
                       r"(^|/)adr[-_]?\d+[^/]*$", re.I)
+RESEARCH = re.compile(r"(^|/)(FINDINGS|RESULTS|POSTMORTEMS?|RETROSPECTIVES?|EXPERIMENTS?|LAB[-_]?NOTES)[^/]*$|"
+                      r"(^|/)(research|experiments?|trials?|postmortems?|retrospectives?|findings)/", re.I)
+SPEC_NAME = re.compile(r"(^|/)(SPEC|SPECIFICATION|GRAMMAR|SYNTAX)[^/]*$", re.I)
+SPEC_HEADING = re.compile(r"^(grammar|syntax|specification|semantics|conformance|(\w+ )?rules|format)\b", re.I)
+NORMATIVE = re.compile(r"\b(MUST|MUST NOT|SHALL|SHALL NOT|REQUIRED)\b")
+VERSION_HEADING = re.compile(r"^\[?v?\d+\.\d+(\.\d+)?\b|\b(19|20)\d\d-\d\d-\d\d\b")
+# Headings under which projects record choices: decision candidates to read, whatever the file is.
+DECISION_HEADING = re.compile(r"^(decisions?|design decisions?|rationale|alternatives( considered)?|considered options|"
+                              r"non-?goals|trade-?offs|why\b|motivation)", re.I)
 RFC = re.compile(r"(^|/)(rfcs?|proposals?|design[-_]docs?|specs?|plans?)/", re.I)
 TECH_NAME = re.compile(r"(^|/)(CONTRIBUTING|DEVELOP(MENT|ING)?|HACKING|BUILD(ING)?|INSTALL(ATION|ING)?|ARCHITECTURE|INTERNALS|"
                        r"RELEASING|RELEASE|DEPLOY(MENT|ING)?|TESTING|STYLE|CODE[_-]STYLE|CODE[_-]REVIEW[^/]*|"
@@ -207,7 +218,16 @@ def md_facts(path, text):
     partly = "[[[cog" in body
     body = re.sub(r"<!--.*?-->", "", body, flags=re.S)  # cog blocks and comments hold no visible headings
     lines = body.splitlines()
+    ext = Path(path).suffix.lower()
     headings, fences, in_fence = [], Counter(), False
+    if ext == ".rst":  # a title is a line underlined (and maybe overlined) by one repeated punctuation mark
+        order = []
+        for i in range(1, len(lines)):
+            under, title = lines[i], lines[i - 1].strip()
+            if title and re.fullmatch(r"([=\-~^\"'`#*+:.])\1{2,}", under.strip()) and len(under.strip()) >= len(title):
+                mark = under.strip()[0]
+                order.append(mark) if mark not in order else None
+                headings.append((order.index(mark) + 1, title))
     for line in lines:
         m = re.match(r"^\s*(```+|~~~+)\s*([\w+-]*)", line)
         if m:
@@ -217,12 +237,23 @@ def md_facts(path, text):
             continue
         if in_fence:
             continue
-        h = re.match(r"^(#{1,3})\s+(.+?)\s*#*\s*$", line)
+        if ext in (".md", ".mdx", ".markdown"):
+            h = re.match(r"^(#{1,3})\s+(.+?)\s*#*\s*$", line)
+        elif ext in (".adoc", ".asciidoc"):
+            h = re.match(r"^(={1,4})\s+(.+?)\s*$", line)
+        elif ext == ".org":
+            h = re.match(r"^(\*{1,3})\s+(.+?)\s*$", line)
+        else:
+            h = None
         if h:
-            headings.append((len(h.group(1)), h.group(2)))
+            level = len(h.group(1)) - (1 if ext in (".adoc", ".asciidoc") and len(h.group(1)) > 1 else 0)
+            headings.append((level, h.group(2)))
     words = len(re.findall(r"\w+", re.sub(r"```.*?```", " ", body, flags=re.S)))
     title = meta.get("title") or next((t for lvl, t in headings if lvl == 1), None) or Path(path).stem
     links = re.findall(r"\]\(([^)#\s]+\.mdx?)(?:#[^)]*)?\)", body)
+    # every documentation file this one names, as a link or a path in code: agent instructions point at their sources
+    named = sorted(set(re.findall(r"\]\(([^)#\s]+\.(?:mdx?|markdown|rst|adoc|asciidoc|org))(?:#[^)]*)?\)", body))
+                   | set(re.findall(r"`([\w./-]+\.(?:mdx?|markdown|rst|adoc|asciidoc|org))`", body)))
     return {
         "title": title[:120],
         "words": words,
@@ -231,6 +262,11 @@ def md_facts(path, text):
         "fences": dict(fences),
         "images": len(re.findall(r"!\[[^\]]*\]\(", body)) + body.count("<img"),
         "links_md": len(links),
+        "names_docs": named[:60],
+        "decision_sections": [t[:80] for _lvl, t in headings if DECISION_HEADING.match(t)][:8],
+        "version_headings": sum(1 for _lvl, t in headings if VERSION_HEADING.search(t)),
+        "spec_headings": sum(1 for _lvl, t in headings if SPEC_HEADING.match(t)),
+        "normative": len(NORMATIVE.findall(body)),
         "frontmatter": sorted(meta)[:10],
         "generated": generated,
         "partly_generated": partly,
@@ -253,6 +289,14 @@ def guess_class(path, facts):
         return "decision", "ADR headings (Status, Context, Decision)"
     if CHANGELOG.search(p):
         return "changelog", "changelog, release notes or blog"
+    if RELEASE_NAME.search(p):
+        if facts.get("version_headings", 0) >= 3:
+            return "changelog", "release notes: several version or date headings"
+        return "technical", "release, upgrade or migration procedure"
+    if RESEARCH.search(p):
+        return "research", "findings, experiments or postmortems: a record of work, not intent"
+    if SPEC_NAME.search(p) or facts.get("spec_headings", 0) >= 2 or facts.get("normative", 0) >= 5:
+        return "spec", "normative rules, grammar or syntax: the repository's authority, kept next to the code"
     if RFC.search(p):
         return "rfc", "proposal, plan or spec directory"
     if TECH_NAME.search(p):
@@ -332,6 +376,18 @@ def scan_markdown(checkout, files):
         if setup and cls == "product":
             entry["keep_sections"] = setup
         docs.append(entry)
+    # files the agent instructions name as their sources: kept, whatever they read like
+    named = set()
+    for d in docs:
+        if d["guess"] == "harness":
+            base = Path(d["path"]).parent
+            for ref in d.get("names_docs", []):
+                for cand in (ref.lstrip("./"), str((base / ref)).replace("\\", "/")):
+                    named.add(os.path.normpath(cand).replace("\\", "/"))
+    for d in docs:
+        if d["path"] in named and d["guess"] in ("product", "technical", "rfc"):
+            d["guess"], d["why"] = "agent-guide", "named in the agent instructions as a source agents read"
+            d.pop("keep_sections", None)
     return docs
 
 
@@ -341,7 +397,7 @@ def md_history(checkout, paths, max_commits):
         return {}
     wanted = set(paths)
     out = git(checkout, "log", f"-n{max_commits}", "--no-merges", "--format=\x1e%an\x1f%aI", "--name-only",
-              "--", "*.md", "*.mdx", "*.markdown", check=False)
+              "--", *(f"*{e}" for e in MD_EXT), check=False)
     stats = defaultdict(lambda: {"commits": 0, "authors": set(), "last": None, "first": None})
     for chunk in out.split("\x1e")[1:]:
         head, _, names = chunk.partition("\n")
@@ -1032,6 +1088,9 @@ def plan_paths(plan, base):
     """The documents with their parsed files: (doc, meta, blocks, refs) or an error string."""
     out = []
     for d in plan.get("documents", []):
+        if d.get("existing") and not d.get("file"):  # already in the corpus: nothing to parse
+            out.append((d, {"title": d.get("title") or d.get("slug", ""), "tags": d.get("tags", [])}, [], set(), None))
+            continue
         path = (base / d.get("file", "")).resolve()
         try:
             meta, blocks, refs = parse_doc(path.read_text(encoding="utf-8"))
@@ -1075,6 +1134,21 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
             errors.append(f"plan: missing `{key}`")
     if errors:
         return errors, warnings
+    scope = plan.get("scope", "full")
+    if scope not in SCOPES:
+        errors.append(f"plan: scope is one of {', '.join(SCOPES)}")
+    cp = plan.get("checkpoint")
+    if not cp:
+        warnings.append("checkpoint: the outline and decision candidates were not confirmed with a person; confirm "
+                        "them before drafting, or record what you assumed")
+    elif cp.get("status") not in ("confirmed", "assumed"):
+        errors.append("checkpoint: status is confirmed or assumed")
+    elif cp["status"] == "confirmed" and not all(cp.get(k) for k in ("who", "when", "where")):
+        errors.append("checkpoint: a confirmed outline names who confirmed it, when and where")
+    elif cp["status"] == "assumed" and not cp.get("assumptions"):
+        errors.append("checkpoint: an assumed outline lists its assumptions")
+    if scope == "decisions" and any(d.get("kind", "page") == "page" for d in plan.get("documents", [])):
+        warnings.append("scope: decisions only, yet the plan has pages")
     tags = {t["name"].lower(): t for t in plan["tags"]}
     for t in plan["tags"]:
         if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", t["name"]) or len(t["name"]) > 30:
@@ -1096,6 +1170,9 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
         where = f"{d.get('slug')} ({d.get('file')})"
         if err:
             errors.append(err)
+            continue
+        if d.get("existing") and not d.get("file"):  # already in the corpus: pinned and linked, not rewritten
+            titles[meta["title"].strip().lower()] += 1
             continue
         kind = d.get("kind", "page")
         if kind not in ("page", "decision"):
@@ -1161,9 +1238,9 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
                 errors.append(f"{where}: answer needs who, when and where")
             if d.get("status") not in (None, "open", "decided"):
                 errors.append(f"{where}: status is open or decided")
-            if d.get("status") == "decided" and not ans:
-                warnings.append(f"{where}: decided without a person's answer on record; a record read from history "
-                                f"stays open until someone decides it")
+            if d.get("status") == "decided" and not ans and not d.get("existing"):
+                errors.append(f"{where}: decided without a person's answer on record (who, when, where); a choice "
+                              f"read from docs, code or history stays open until a person decides it")
         else:
             tldr = meta.get("tldr", "")
             if tldr and len(tldr) > MAX_TLDR:
@@ -1183,7 +1260,7 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
                 if m:
                     warnings.append(f"{where}: {m.group(0)!r} reads as history or plans; the corpus states the "
                                     f"product as it is: {text[:70]!r}")
-        if not d.get("sources") and not d.get("tests"):
+        if not d.get("sources") and not d.get("tests") and not d.get("existing"):
             warnings.append(f"{where}: no sources or tests; every page is grounded in the repository")
     for t, n in titles.items():
         if n > 1:
@@ -1255,11 +1332,12 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
             errors.append(f"capabilities: {c.get('name')!r} points to {c['doc']!r}, which is not a document")
         if not c.get("doc") and not c.get("why"):
             warnings.append(f"capabilities: {c.get('name')!r} has no page and no `why`")
-    if not plan.get("capabilities"):
+    if not plan.get("capabilities") and scope != "decisions":
         warnings.append("capabilities: none listed; map what a person can do with the product to the pages first")
     groups = plan["sidebar"].get("groups", [])
-    if not 3 <= len(groups) <= 6:
-        warnings.append(f"sidebar: {len(groups)} groups; 3 to 6 read best")
+    low = 1 if scope == "decisions" else 3
+    if not low <= len(groups) <= 6:
+        warnings.append(f"sidebar: {len(groups)} groups; {low} to 6 read best")
     pinned = Counter()
     kinds = {d.get("slug"): d.get("kind", "page") for d in plan["documents"]}
     for g in groups:
@@ -1273,7 +1351,7 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
             pinned[slug] += 1
             if slug not in slugs:
                 errors.append(f"sidebar: {g.get('name')!r} pins {slug!r}, which is not a document")
-            elif kinds.get(slug) == "decision":
+            elif kinds.get(slug) == "decision" and scope != "decisions":
                 warnings.append(f"sidebar: {slug} is a decision record; records are reached from their domain's "
                                 f"page, pinned only when one is the entry point a person needs")
     for slug in sorted(set(slugs) - set(reachable(plan, base, pinned))):
@@ -1287,6 +1365,7 @@ def validate(plan, base, scan=None, checkout=None, catalog=None):
     return errors, warnings
 
 
+SCOPES = ("full", "decisions", "pages")
 DOC_TYPE_GROUP = re.compile(r"(?i)(decisions?|decision records?|adrs?|rfcs?|reference|references|guides?|"
                             r"how-?tos?|docs|documentation|pages|misc|other|more|everything else)")
 MAX_ENTRY_POINTS = 3
@@ -1817,6 +1896,18 @@ def doc_html(blocks, svgs):
     return "\n".join(out)
 
 
+def checkpoint_html(cp):
+    """What the person confirmed before drafting, or what the agent assumed, shown before anything else."""
+    if not cp:
+        return ('<p class="warn">The outline and the decision candidates were not confirmed with a person '
+                'before drafting.</p>')
+    if cp.get("status") == "confirmed":
+        return (f'<p class="meta">Outline and decisions confirmed by {esc(cp.get("who"))}, {esc(cp.get("when"))}, '
+                f'{inline_html(cp.get("where", ""))}.</p>')
+    items = "".join(f"<li>{inline_html(a)}</li>" for a in cp.get("assumptions", []))
+    return f'<div class="warn"><p>Assumed without a person, to confirm now:</p><ul>{items}</ul></div>'
+
+
 def cmd_review(args):
     plan = load(args.plan)
     scan = load_scan(args.scan)
@@ -1947,6 +2038,7 @@ def cmd_review(args):
         "REF": esc(plan["ref"]),
         "DATE": esc(plan.get("date", "")),
         "SUMMARY": inline_html(plan["summary"]),
+        "CHECKPOINT": checkpoint_html(plan.get("checkpoint")),
         "STATS": "".join(f"<div class='stat'><b>{n}</b><span>{esc(label)}</span></div>" for n, label in stats),
         "ISSUES": f"<ul class='issues'>{issues}</ul>" if issues else "<p class='ok'>The plan passes every check.</p>",
         "SIDEBAR": "\n".join(side),

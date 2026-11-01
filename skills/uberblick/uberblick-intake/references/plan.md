@@ -11,6 +11,8 @@ into corpus writes.
   "ref": "8707e33c",
   "date": "2026-10-22",
   "summary": "At most 80 words: what the corpus holds, how it is grouped and what stays in the repository.",
+  "scope": "full",
+  "checkpoint": {"status": "confirmed", "who": "Ada Example", "when": "2026-10-22T09:30:00Z", "where": "chat, intake session"},
   "tags": [
     {"name": "signing", "status": "new", "description": "Signing a document: requests, signers and the signed PDF.", "why": "The signing flow, the product's core; 9 pages."},
     {"name": "workflow", "status": "existing", "why": "Already in the catalog; the document lifecycle."}
@@ -41,7 +43,7 @@ into corpus writes.
     }
   ],
   "markdown": [
-    {"path": "README.md", "action": "convert", "doc": ["overview"], "why": "Pitch and features; install and setup stay for GitHub readers.",
+    {"path": "README.md", "action": "convert", "doc": ["overview"], "why": "Pitch and features; install and setup stay for readers of the repository.",
      "sections": [{"heading": "Developer quickstart", "action": "keep"}, {"heading": "Self hosting", "action": "keep"}]},
     {"path": "apps/docs/content/docs/developers/**", "action": "keep", "why": "API reference, generated from the code."},
     {"path": ".agents/**", "action": "keep", "why": "Agent plans and skills."},
@@ -73,6 +75,14 @@ into corpus writes.
 
 - `ref` is the commit the scan read (`scan.json`'s `ref`; its full hash is
   `commit`, for links and code checks), `date` today.
+- `scope`: `full` (pages and decision records, the default), `decisions`
+  (records only: no capabilities needed, records pinned as entry points, one
+  to six groups) or `pages`, as the person chose at the checkpoint.
+- `checkpoint`: the outline and decision candidates as the person confirmed
+  them before drafting: `"status": "confirmed"` with `who`, `when` and
+  `where`, or, run unattended, `"status": "assumed"` with `assumptions`, a
+  list of what you took for granted. The review page shows it first; `check`
+  warns when it is missing.
 - `capabilities`: what a person can do with the product, each with its
   `evidence` (docs, code, tests) and the `doc` that covers it, or `null`
   and a `why`. The pages follow from this list.
@@ -94,11 +104,13 @@ into corpus writes.
   commit), `tests` the test folders or files its scenarios follow. A decision
   takes `related` (the slug of the page it belongs to), `status` (`open`
   or `decided`) and, only when a person's answer is on record, `answer:
-  {who, when, where}`: an ADR's deciders, its date and its URL at `ref`.
-  Without `status`, a record with `answer` is `decided` and one without is
-  `open`. A decided record is written with its answer in one call, so its
-  answer links only to pages or to records listed before it. A document already in the corpus takes `existing: UUID`: it
-  is not created again, but can be pinned and linked.
+  {who, when, where}`: an ADR's named deciders, its date and its URL at
+  `ref`, or the person's answer at the checkpoint. A `decided` record
+  without one is an error. Without `status`, a record with `answer` is
+  `decided` and one without is `open`. A decided record is written with its answer in one call, so its
+  answer links only to pages or to records listed before it. A document already in the corpus takes `existing: UUID`
+  and its `title`, with no `file`: it is not created again or checked, but
+  can be pinned and linked.
 - `markdown`: every Markdown file the scan found is covered by exactly one
   entry, an exact path or a glob (`dir/**`, `*.mdx`); an exact path wins over
   a glob. `action` is `convert` (with `doc`, one slug or a list), `keep` or
@@ -155,7 +167,7 @@ With *signing order* on, the second signer gets the email only after the first h
   the body, then optional `footer:` and `button: [Text](https://…)` lines.
 - Not allowed: a leading H1 (the title shows already), `mermaid` (Uberblick
   deletes it; draw ablauf), relative links into the repository (link the file
-  on GitHub at `ref`), images, HTML, nested block content.
+  on its web host at `ref`, when it has one), images, HTML, nested block content.
 - A decision's body is its answer: one to three blocks (paragraphs, code,
   tables, a list counts once), at most 60 words, leading with the choice.
 
