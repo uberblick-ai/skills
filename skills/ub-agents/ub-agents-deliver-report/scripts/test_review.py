@@ -202,6 +202,11 @@ class Tests(unittest.TestCase):
                        context | {"peak": 1}, context | {"first": "35000"}):
             self.assertIsNone(review.runs_of([lease, outcome | {"context": broken}])[0]["context"])
 
+    def test_capacity_leaves_out_what_no_run_names(self):
+        self.assertEqual(review.capacity([{"machine": "m1", "loop": "l1"}, {"machine": "m2", "loop": "l1"}]),
+                         {"machines": 2, "loops": 1})
+        self.assertEqual(review.capacity([{"machine": "m1", "loop": None}]), {"machines": 1})
+
     def test_outcomes_find_their_lease_by_comment_id(self):
         lease = {"kind": "lease", "id": 11, "run": "a", "agent": "reviewer", "runtime": "claude:m:high",
                  "created": "2026-11-01T04:00:00Z"}

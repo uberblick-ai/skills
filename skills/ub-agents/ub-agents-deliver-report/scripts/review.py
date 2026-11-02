@@ -297,6 +297,14 @@ def runs_of(records):
     return sorted(runs, key=lambda r: r["started"] or "")
 
 
+def capacity(window):
+    """Distinct hosts and loop checkouts that ran a role. Each is left out when no run names one, rather than
+    reported as zero: records before 2 October 2026 name no host, and coordination format v4 (ub-agents 0.3.6)
+    no longer records the log directory a run's loop checkout is read from."""
+    machines, loops = {r["machine"] for r in window if r["machine"]}, {r["loop"] for r in window if r["loop"]}
+    return ({"machines": len(machines)} if machines else {}) | ({"loops": len(loops)} if loops else {})
+
+
 CONTEXT_KEYS = ("window", "first", "call_10", "peak", "compactions")
 HEAVY_START = 20  # percent of the window at call 10; a reference line, not a gate
 
@@ -555,9 +563,7 @@ def collect(repo, day, zone, since, until):
             "issues_opened": sum(1 for r in rows if "pull_request" not in r and inside(r["created_at"])),
             "retrospectives": len(retrospectives),
             **open_queue, "peak_runs": peak(window),
-            # Records from before host tracking say nothing about machines: leave the gap rather than report zero.
-            **({"machines": len({r["machine"] for r in window if r["machine"]}),
-                "loops": len({r["loop"] for r in window if r["loop"]})} if any(r["machine"] for r in window) else {}),
+            **capacity(window),
             # Runs before ub-agents 0.5.0 carry no context: leave the fields out rather than report zero.
             **context_summary},
         "context": context,

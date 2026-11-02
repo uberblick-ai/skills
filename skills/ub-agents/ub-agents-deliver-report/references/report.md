@@ -79,7 +79,7 @@ Inflow and capacity, also context:
 | `waiting_to_start` | Open issues no role can take until a person starts them: no workflow label (drafts, sub-issues not yet started, agent-filed follow-ups awaiting approval) or parked at a stop label. Parents with sub-issues are left out; their work counts in the children. |
 | `open_issues` | All open issues at the end of the day, parents included. Issues opened above deliveries day after day shows as this rising. |
 | `machines` | Distinct hosts that ran a role that day; absent for days whose records name no host (before 2 October 2026) |
-| `loops` | Distinct loop checkouts that ran a role that day |
+| `loops` | Distinct loop checkouts that ran a role that day; absent for days whose records name no checkout (ub-agents 0.3.6 and later) |
 | `peak_runs` | The most runs that overlapped at any moment that day |
 
 The queue is reconstructed from today's labels with every later label and
