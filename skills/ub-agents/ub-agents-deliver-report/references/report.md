@@ -317,10 +317,15 @@ derivable fields, and storing a day deletes `items` records older than 14 days.
    lives, its cost, causes and evidence. Each has a "Discuss in Claude Code"
    button (`claude://code/new?q=PROMPT`, a `button:` line that Uberblick
    reads from the release after 0.4.3) whose prompt names the repository,
-   the document, the lesson's day, the change and its evidence, and asks for
-   a plan first. When that discussion settles on the lesson, the session
-   replaces the card with a struck-through one and sets the lesson to
-   `tracked` with `addressed_by` and `addressed_as`. Below the proposed
+   the document, the lesson's day, the change and its evidence. It first has
+   the session search the issues and pull requests for the same change, open
+   ones (drafts included) and ones merged or closed in the last 30 days, and
+   work from one that covers it instead of starting another; then it asks for
+   a plan. When that discussion settles on the lesson, or the search finds an
+   open pull request or issue already making it, the session replaces the
+   card with a struck-through one as soon as a pull request (a draft counts)
+   or issue exists, and sets the lesson to `tracked` with `addressed_by` and
+   `addressed_as`. Below the proposed
    cards, `tracked` lessons of the last 14 days stay struck through, with
    no button and a footer such as `Planned in
    [acme/app#212](https://github.com/acme/app/issues/212).`, until that

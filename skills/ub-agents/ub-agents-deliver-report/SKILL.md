@@ -17,7 +17,7 @@ compatibility: >-
   writes the page only.
 metadata:
   author: uberblick-ai
-  version: "1.11"
+  version: "1.12"
 ---
 
 # Deliver report
@@ -70,9 +70,14 @@ notes, page and records.
    change. Never add a role, label, gate, review round or checklist; prefer
    deleting text or moving a step into config or tooling. Reuse registry
    ids, and write `cost` with dates ("5 runs on 11 October"). For each lesson,
-   search issues and PRs for one that addresses it: `tracked` with
-   `addressed_by` while it is open, `applied` once it merged. Keep
-   `addressed_as` from the registry. `actions` ranks up to five
+   search the repositories' issues and PRs for one already making the change,
+   so nobody builds it twice: open ones, drafts included, and ones merged or
+   closed in the last 30 days (`gh pr list` and `gh issue list` with
+   `--state all --search "WORDS updated:>=DAY"`); only one that makes this
+   change counts. `tracked` with `addressed_by` while it is open, `applied`
+   once it merged. One closed unmerged keeps the lesson only if its reason
+   for closing does not rule the change out; name it and why in `change`.
+   Keep `addressed_as` from the registry. `actions` ranks up to five
    still-proposed lessons from the last 14 days, most runs saved first.
 
 5. **Render.** Write `DIR/DAY/notes.json` as report.md shows, then:
