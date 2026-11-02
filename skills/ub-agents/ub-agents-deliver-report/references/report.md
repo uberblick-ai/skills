@@ -4,10 +4,6 @@ One page per repository per day, and one record of it. It answers, in this
 order: how autonomous the day was, what to change, where the extra runs went,
 how each item fared, how much context the runs used, what the roles said about
 themselves.
-`scripts/review.py digest` prints the day from `data.json` for the agent to
-read; `scripts/review.py render` lays the page out from `data.json` and
-`notes.json`; `scripts/review.py records` turns the result into dataset
-records. This file says what each holds.
 
 ## Runs
 
@@ -26,9 +22,7 @@ G integrator.
   lease. It counts toward nothing until a later collection sees its outcome.
 
 A withdrawn lease, a claim that never started and a recovery lease that only
-re-posts another run's report are not runs. Every record version the loop has
-written (`ub-agent:v1`, `ub-agent:v2`, `ub-agents:v2`, `ub-agents:v3`) carries
-the same JSON record, and all are read.
+re-posts another run's report are not runs.
 
 A **loop delivery** is an item delivered on the day that an implementer worked
 on. Work that came from outside the loop, such as a PR written in an attended
@@ -91,9 +85,7 @@ Inflow and capacity, also context:
 The queue is reconstructed from today's labels with every later label and
 state change undone, so a past day reads the same whenever it is collected;
 parent links are today's. `review.py queue --repo REPO --day DAY` prints just
-these figures, from issue lists and events without run records.
-Hosts and checkouts are counted, never stored: the collector keys on short
-hashes.
+these figures.
 
 ## Causes
 
@@ -171,7 +163,7 @@ not add any.
 
 ## Notes
 
-The reviewing agent writes `notes.json`; `render` refuses notes with an
+`render` refuses notes with an
 unknown class, state or lever, a missing field, one cause in two findings, a
 retrospective in two groups or not posted that day, a tracked or applied
 lesson without `addressed_by`, or more than five actions.
@@ -209,9 +201,7 @@ whether it is a pull request that implements the lesson (`implemented`) or an
 issue that plans it (`planned`, the default). `actions` lists up to five
 lessons still `proposed` that this day or one of the 13 before it proposed,
 most runs saved first; an older lesson drops off until a day proposes it
-again. Write a lesson's `cost` with dates ("5 runs on 11 October"), never
-"today", since it may stay an action for 14 days. A change is
-anything that landed on this day to fix a cause or apply a lesson; `ref` is
+again. A change is anything that landed on this day to fix a cause or apply a lesson; `ref` is
 `owner/name#number` or a commit, with `url` for a commit. `records` gives every
 change a `url`, derived from `ref` when the notes give none.
 
@@ -258,10 +248,9 @@ and `ci`, the workflow runs on its PRs with their result, attempt and minutes.
 Empty lists are left out. `digest` prints every run of such an item with its
 summary, denials and evidence, and one line for every other item.
 
-`records` turns `report.json` into one `update_data` batch for the dataset
-document. A document keeps each collection's schema and checks every record
-against it, so the batch leaves schemas out; `records --schemas` adds them,
-for a new document, a missing collection or a record a stored schema refuses:
+`records` turns `report.json` into one `update_data` batch. The document
+keeps each collection's schema and checks every record against it, so the
+batch leaves schemas out unless `--schemas` is passed:
 
 | Collection | Key | One record per |
 | --- | --- | --- |
@@ -272,26 +261,18 @@ for a new document, a missing collection or a record a stored schema refuses:
 | `lessons` | `launcher-installs-dependencies` | lesson: lever, change, causes, state, `addressed_by` |
 | `changes` | `uberblick-ai/ub-agents#361` | change that landed: day, title, why, causes, lessons |
 
-Storing a day again overwrites its records; a finding that no longer applies
-stays until `deleteRecords` removes it. A person's verdict on a cause or
+Storing a day again overwrites its records. A person's verdict on a cause or
 lesson belongs in a separate `verdicts` collection keyed by the same id; the
 skill never writes it, so a refresh cannot overwrite it.
 
 Item detail is a recent snapshot: each item leaves out zero, empty and
 derivable fields, and storing a day deletes `items` records older than 14 days.
-`days`,
-`findings`, `causes`, `lessons` and `changes` stay, so trends cover 180 days
-and more. A document's data is limited to 4 MiB; a year of days and findings
-takes about 2 MB.
+`days`, `findings`, `causes`, `lessons` and `changes` stay, so trends cover
+180 days and more; a year takes about 2 MB of the document's 4 MiB.
 
 ## Document
 
-The dataset document is optional: the skill updates it when it exists,
-offers to create it when Uberblick is available but no document holds the
-collections above, and leaves the page as the whole result when Uberblick is
-not available. `scripts/review.py create` writes the `create_doc` arguments
-for a new one, from `report.json`, in the layout below. It reads top to
-bottom:
+`create` lays a new document out as below, top to bottom:
 
 1. **Intro.** What the loop is, what the report measures, and where the skill
    lives.
@@ -331,54 +312,30 @@ bottom:
    `document` returns the same block as `context_chart`, so a document
    created before it gets the chart once.
 
-   `limit` keeps the newest seven days in the table. `pageSize`, which older
-   documents carry, never affected the display.
-
-3. **Recommended Actions.** The day's `actions`: up to five proposed
-   lessons, each a card with the lever as its label, the title, the change as
-   its body, and a footer with where it lives, its cost, its causes and its
-   evidence. Below them, the `tracked` lessons of the last 14 days, struck
-   through: the title and change crossed out, no button, and a footer, not
-   struck through, that names the change, such as `Planned in
-   [acme/app#212](https://github.com/acme/app/issues/212).` A link whose text
-   is the `owner/name#number` reference and whose target is its GitHub address
-   shows as a GitHub pill. A lesson leaves the list once that change merges
-   or closes. Each proposed card has a "Discuss in Claude Code" button to
-   `claude://code/new?q=PROMPT`, which opens a new session in the Claude
-   desktop app with the prompt filled in, not sent. The prompt names the
-   repository, the document and the day the lesson was last proposed, the
-   change, where it lives and its evidence, and asks for a plan before any change; the link
-   cannot select a repository by name, only a local folder, so the prompt
-   names it. Card prose takes only http(s) links, so the link is a `button:`
-   line, which Uberblick reads from the release after 0.4.3; `--no-button`
-   leaves it out for older versions. When the discussion settles on applying
-   the lesson, the prompt asks that session to mark it once a pull request
-   implements it or an issue plans it: replace the card with the struck one,
-   then set the lesson's record in `lessons` to `tracked`, with
-   `addressed_by` and `addressed_as`, so later reports keep it struck
-   through.
-4. **Changelog.** A bullet list of the five latest `changes`, newest first:
-   the day, the change's title, its issue or PR in ub-agents or the project,
-   and why it was made, such as `20 Oct: Quarantine six flaky tests
+3. **Recommended Actions.** The day's `actions`, each a card: the lever as
+   its label, the title, the change as its body, and a footer with where it
+   lives, its cost, causes and evidence. Each has a "Discuss in Claude Code"
+   button (`claude://code/new?q=PROMPT`, a `button:` line that Uberblick
+   reads from the release after 0.4.3) whose prompt names the repository,
+   the document, the lesson's day, the change and its evidence, and asks for
+   a plan first. When that discussion settles on the lesson, the session
+   replaces the card with a struck-through one and sets the lesson to
+   `tracked` with `addressed_by` and `addressed_as`. Below the proposed
+   cards, `tracked` lessons of the last 14 days stay struck through, with
+   no button and a footer such as `Planned in
+   [acme/app#212](https://github.com/acme/app/issues/212).`, until that
+   change merges or closes.
+4. **Changelog.** The five latest `changes`, newest first, such as `20 Oct:
+   Quarantine six flaky tests
    ([uberblick-2#2004](https://github.com/uberblick-ai/uberblick-2/pull/2004)).
    Six tests turned main red;
    [#2003](https://github.com/uberblick-ai/uberblick-2/issues/2003) tracks
-   them.` The reference is the link, not the title, so Uberblick shows it as
-   a GitHub pill, which it draws only for a link whose text names the item.
-   Its address is the one GitHub gives, `/pull/` or `/issues/`, so the pill
-   shows the right kind. A change that is a commit keeps its title linked to
-   the commit. In `why`, each `#n` (the change's repository), `name#n` (the
-   same owner) or `owner/name#n` that GitHub knows is linked the same way;
-   any other text stays plain.
+   them.` Uberblick draws a GitHub pill only for a link whose text names the
+   item, so the reference is the link, with GitHub's own `/pull/` or
+   `/issues/` address, and `#n`, `name#n` and `owner/name#n` in `why` are
+   linked the same way. A commit keeps its title linked to the commit.
 
-After each stored day the skill brings the "Recommended Actions" and
-"Changelog" sections up to date from `document`'s output, one block at a time:
-it deletes a card whose lesson left the list, edits a card in place when the
-day changed its lesson, so comments on it stay (a struck-through card is
-replaced instead, since `edit_block` cannot change formatting), inserts a new one, and adds
-the day's changes to the changelog. `document` marks each card `changed` and
-counts the new changelog items in `changelog_new`; a card is otherwise the
-same from day to day. Everything else is written once, by `create` or by a
-person, and may be edited by hand; the charts and tables follow the
-data by themselves. A chart plots every stored day; the Recent days table
-lists the newest seven.
+`document` marks each card `changed` and counts new changelog items in
+`changelog_new`, so the skill updates these two sections one block at a time.
+Everything else is written once, by `create` or a person; the charts plot
+every stored day and the Recent days table the newest seven.
