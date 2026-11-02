@@ -20,12 +20,12 @@ import sys
 import webbrowser
 from pathlib import Path
 
-RENDER_VERSION = "0.2"
-CATALOG_VERSION = "0.2"
+RENDER_VERSION = "0.3"
+CATALOG_VERSION = "0.3"
 HERE = Path(__file__).resolve().parent
 TEMPLATE = HERE.parent / "assets" / "report.html"
 sys.path.insert(0, str(HERE))
-from probe import TOKEN_ESTIMATOR, estimate_tokens  # noqa: E402
+from probe import TOKEN_ESTIMATOR, estimate_tokens, inband_error  # noqa: E402
 
 CATEGORIES = [
     ("protocol", "Protocol", "Does it speak MCP correctly?"),
@@ -248,6 +248,7 @@ CRITICAL = {row[0] for row in CATALOG if row[9]}
 DATA_DEPENDENT = {"C13": "Judged on the reads that came back over 8k tokens on this workspace; a busier workspace may show more."}
 # Audits that are only shown, never scored.
 BIG_READ, HUGE_READ = 8000, 32_000  # tokens: a read worth bounding, and one that floods a context
+FLOOD_READ, CONTEXT_WINDOW = 64_000, 200_000  # a default read that takes a third of a common context window
 NARROW_WORDS = {"limit", "max", "page", "cursor", "offset", "after", "before", "top", "first", "last", "count", "size",
                 "field", "fields", "select", "column", "columns", "properties", "include", "exclude", "range", "since",
                 "until", "from", "to", "start", "end", "filter", "filters", "query", "where", "depth", "summary",
@@ -343,16 +344,15 @@ def schema_bytes(text: str) -> int:
     return total
 
 
-def looks_like_error(text: str) -> bool:
-    """A successful result whose body is really a failure."""
-    head = text.strip()
-    try:
-        obj = json.loads(head)
-    except ValueError:
-        obj = None
-    if isinstance(obj, dict) and set(obj) & {"error", "errors"} and not set(obj) & {"data", "result", "results", "items"}:
-        return bool(obj.get("error") or obj.get("errors"))
-    return bool(re.match(r"(?i)(error\b|http \d{3}\b(?<!http 200)|failed\b|exception\b|unauthorized|forbidden|not found)", head[:120]))
+# Words that add nothing to a tool's name in its description.
+ECHO_FILLER = {"a", "an", "the", "of", "to", "for", "in", "on", "from", "with", "by", "and", "or", "all", "any", "this",
+               "that", "these", "those", "is", "are", "it", "its", "your", "current", "given", "specified", "provided",
+               "detail", "information", "info", "new", "existing", "one", "single", "specific", "via", "using"}
+
+
+def stem(word: str) -> str:
+    """entities -> entity, users -> user: enough to match a description's words to a tool's name."""
+    return word[:-3] + "y" if word.endswith("ies") else word[:-1] if word.endswith("s") and not word.endswith("ss") else word
 
 
 def lognormal_score(value: float, good: float, poor: float) -> float:
@@ -599,7 +599,7 @@ def waste_index(probe: dict, findings: dict) -> tuple[dict, list]:
         wasted = sum(len(hay[a:b].encode("utf-8")) for a, b in merged)
         out[tid] = {"bytes": wasted, "chars": sum(b - a for a, b in merged), "total": len(text.encode("utf-8")),
                     "tokens": sum(estimate_tokens(hay[a:b]) for a, b in merged), "total_tokens": estimate_tokens(text),
-                    "waste": kept, "clarity": entry.get("clarity"), "note": entry.get("note", "")}
+                    "waste": kept, "note": entry.get("note", "")}
     return out, problems
 
 
@@ -612,6 +612,12 @@ def is_help(uri: str, probe: dict, findings: dict | None) -> bool:
         return True
     meta = next((x for x in probe.get("resources") or [] if x.get("uri") == uri), {})
     return bool(HELP_WORDS.search(" ".join(str(v) for v in (uri, meta.get("name"), meta.get("title"), meta.get("description")) if v)))
+
+
+def wraps_text(schema) -> bool:
+    """An output schema whose only field is one string, such as {"result": string}: a wrapper, not a description."""
+    props = (schema or {}).get("properties") or {} if isinstance(schema, dict) else {}
+    return len(props) == 1 and all(isinstance(v, dict) and v.get("type") == "string" for v in props.values())
 
 
 def narrowing_params(tool: dict) -> list[str]:
@@ -627,6 +633,32 @@ def narrowing_params(tool: dict) -> list[str]:
         if words & NARROW_WORDS or any(isinstance(a, dict) and a.get("type") == "array" for a in alts):
             out.append(name)
     return out
+
+
+def ignored_narrowing(calls: list[dict], by_name: dict) -> list[str]:
+    """Leads, not scores: calls to one tool that differ only in narrowing arguments and get the very same answer.
+    The data may simply be that small, so the reviewer checks it (G16 when the server ignores the argument)."""
+    leads = []
+    for name in dict.fromkeys(c["tool"] for c in calls):
+        narrow = set(narrowing_params(by_name.get(name) or {}))
+        groups: dict = {}
+        for c in calls:
+            if c["tool"] != name or c.get("isError") or c.get("inband_error") or (c.get("text_bytes") or 0) <= 2000:
+                continue
+            args = c.get("arguments") or {}
+            key = (json.dumps({k: v for k, v in args.items() if k not in narrow}, sort_keys=True), c["text_bytes"])
+            groups.setdefault(key, {})[json.dumps({k: v for k, v in args.items() if k in narrow}, sort_keys=True)] = c
+        for (_, nbytes), variants in groups.items():
+            if len(variants) < 2:
+                continue
+            labels = ["; ".join(f"{k}={json.dumps(v)}" for k, v in json.loads(v).items()) or "the defaults" for v in variants]
+            used = sorted({k for v in variants for k in json.loads(v)})
+            said = " and ".join([", ".join(labels[:-1]), labels[-1]]) if len(labels) > 1 else labels[0]
+            leads.append(f"{name}: {said} {'both' if len(labels) == 2 else 'all'} returned the same {fmt_bytes(nbytes)}. "
+                         f"If there is more data than "
+                         f"the narrowest call asks for, the server ignores {', '.join(used)}: check it, and judge it under G16.")
+            break
+    return leads
 
 
 def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
@@ -936,9 +968,17 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     else:
         res("G07", 0, na=True, note="no instructions")
     if tools:
+        info_ = init.get("serverInfo") or {}
+        # The product's own name says nothing about a tool: "Search for entities in Acme" restates search_entities.
+        brand = "".join(re.findall(r"[a-z]+", " ".join(str(v) for v in (info_.get("name"), info_.get("title"),
+                                                                          (probe.get("target") or {}).get("label")) if v).lower()))
+
+        def words_of(text):
+            return {stem(w) for w in re.findall(r"[a-z]+", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", text or "").lower())}
+
         def restates(t):
-            words = set(re.findall(r"[a-z]+", (t.get("description") or "").lower())) - {"a", "an", "the", "of", "to", "for"}
-            return words <= set(re.findall(r"[a-z]+", (t.get("name") or "").lower().replace("_", " ")))
+            words = {w for w in words_of(t.get("description")) - ECHO_FILLER if not (len(w) >= 3 and w in brand)}
+            return words <= words_of(t.get("name"))
         weak = [p for p, t in zip(per_tool, tools) if p["description_chars"] < 20 or restates(t)]
         res("G02", 1 - len(weak) / len(tools), f"{len(tools) - len(weak)} of {len(tools)}",
             items=[{"item": p["name"], "score": 0, "evidence": f"{p['description_chars']} characters" if p["description_chars"] < 20
@@ -961,9 +1001,12 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
         structured = {c["tool"] for c in answered if c.get("has_structured") or (c.get("text_head") or "").lstrip()[:1] in ("{", "[")}
         by_name = {t.get("name"): t for t in tools}
         if structured:
-            with_out = [n for n in structured if (by_name.get(n) or {}).get("outputSchema")]
+            declared = [n for n in structured if (by_name.get(n) or {}).get("outputSchema")]
+            with_out = [n for n in declared if not wraps_text(by_name[n]["outputSchema"])]
             res("G06", len(with_out) / len(structured), f"{len(with_out)} of {len(structured)} tools with structured results",
-                items=[{"item": n, "score": 0, "evidence": "returns JSON without an outputSchema"} for n in sorted(structured - set(with_out))])
+                items=[{"item": n, "score": 0, "evidence": "outputSchema is one string field, the SDK's wrapper for returned text: "
+                                                           "it says nothing about what comes back" if n in declared
+                        else "returns JSON without an outputSchema"} for n in sorted(structured - set(with_out))])
         else:
             res("G06", 0, na=True, untested=not answered, note="no read call returned structured data" if answered else "no read calls")
     else:
@@ -1005,7 +1048,9 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
         items=[{"item": "error", "score": 0, "evidence": t[:300]} for t in traces[:3]])
     answered = [c for c in probe.get("calls") or [] if "bytes" in c]
     if answered:
-        hidden = [c for c in answered if not c.get("isError") and looks_like_error(c.get("text_head") or "")]
+        # probe.py judges the whole text; older probes kept only its head.
+        hidden = [c for c in answered if not c.get("isError")
+                  and (c["inband_error"] if "inband_error" in c else inband_error(c.get("text_head") or "", c.get("tool") or ""))]
         res("E05", 1 - len(hidden) / len(answered), f"{len(hidden)} of {len(answered)} hidden" if hidden else "all flagged",
             items=[{"item": c["tool"], "score": 0, "evidence": (c.get("text_head") or "")[:200]} for c in hidden])
     else:
@@ -1102,8 +1147,12 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
                 score, why = 0.5, (f"{size_} by default, {fmt_tokens(alt['tokens_est'])} with {args_}: "
                                    "the default is the heavy read")
             elif narrow and c["tokens_est"] >= HUGE_READ:
-                score, why = 0.5, (f"{size_} even with {', '.join(used)}" if used else
-                                   f"{size_} by default; {', '.join(narrow)} can narrow it, but the default returns everything")
+                # Defaults are what an agent sends first: one that fills a third of a context weighs more than a large one.
+                flood = not used and c["tokens_est"] >= FLOOD_READ
+                score, why = (0.25 if flood else 0.5), (
+                    f"{size_} even with {', '.join(used)}" if used else
+                    f"{size_} by default" + (f", {c['tokens_est'] / CONTEXT_WINDOW:.0%} of a {CONTEXT_WINDOW // 1000}k context in one call"
+                                             if flood else "") + f"; {', '.join(narrow)} can narrow it, but the default returns everything")
             elif narrow:
                 score, why = 1, f"{size_}; can narrow with {', '.join(narrow)}"
             elif c["tokens_est"] < HUGE_READ:
@@ -1116,6 +1165,7 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
                 items=items, note=DATA_DEPENDENT["C13"])
         else:
             res("C13", 0, na=True, note=f"no read over {BIG_READ // 1000}k tokens on this workspace")
+    m["leads"] = ignored_narrowing(calls, {t.get("name"): t for t in tools})
     metric("C08", m.get("cold_start_ms"))
     if tools:
         metric("C09", m["duplication"]["value"])
@@ -1187,7 +1237,8 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             n, k = sum(c for _, c, _ in errs), sum(o for *_, o in errs)
             res("E13", k / n, f"{k} of {n} errors" + (f"; {accepted} accepted refusals not counted" if accepted else ""),
                 items=[{"item": t["id"], "score": o / c,
-                        "evidence": "; ".join((e.get("error") or "")[:160] for e in t["events"] if e.get("is_error"))[:400]}
+                        "evidence": "; ".join(("as a normal result: " if e.get("in_band") else "") + (e.get("error") or "")[:160]
+                                              for e in t["events"] if e.get("is_error"))[:400]}
                        for t, c, o in errs])
         else:
             res("E13", 0, na=True, note=(f"no errors to recover from: {accepted} refusal{'s' if accepted != 1 else ''} accepted, task still done"
@@ -1285,6 +1336,11 @@ def merge_judged(results: dict, findings: dict) -> list[str]:
         if not j:
             results[code] = {"score": None, "display": "not judged", "items": [], "note": "No finding recorded for this audit.",
                              "na": True, "untested": True, "judged": True, "unjudged": True}
+            continue
+        if j.get("untested"):
+            # Applies, but this run could not test it (no sandbox for write probes): counts against coverage, says why.
+            results[code] = {"score": None, "display": "not tested here", "items": [], "note": j.get("reason", ""),
+                             "na": True, "untested": True, "judged": True}
             continue
         if j.get("na"):
             results[code] = {"score": None, "display": "not applicable", "items": [], "note": j.get("reason", ""),
@@ -1463,6 +1519,9 @@ def recommendations(results: dict, findings: dict, cats: dict) -> list[dict]:
             continue
         targets = [f"{code}:{it.get('item')}" for it in failing] if res.get("items") and row[3] != "metric" else [code]
         action = re.split(r"(?<=[.;])\s", row[6])[0].rstrip(".;")
+        if any(t.startswith(f"{code}:") for t in covered):
+            # Other suggestions fix some items of this audit; this one covers what they leave.
+            action += f" ({len(failing)} not covered by another suggestion)"
         recs.append({"title": action, "category": row[1], "audits": [code], "targets_audits": targets,
                      "targets": list(dict.fromkeys(str(it.get("item")) for it in failing))[:8],
                      "why": row[5], "fix": row[6],
@@ -1796,7 +1855,7 @@ def render_html(report: dict) -> str:
         "SERVER_TITLE": esc(meta["server_title"]),
         "SERVER_META": esc(" · ".join(dict.fromkeys(x for x in (
             meta.get("server_name"), meta.get("server_version"), meta.get("protocol") and f"protocol {meta['protocol']}",
-            meta.get("target"), meta.get("commit") and f"commit {meta['commit']}",
+            meta.get("target"), meta.get("commit") and f"commit {meta['commit']}", meta.get("package") and f"package {meta['package']}",
             meta.get("via") and f"seen through {meta['via']}") if x))),
         "BADGES": "".join(f'<span class="badge">{esc(b)}</span>' for b in badges),
         "DATE": esc(pretty_date(meta["collected_at"])),
@@ -2032,7 +2091,13 @@ def trials_html(trials: dict | None, results: dict) -> str:
                     except ValueError:
                         pass
                 size_ = fmt_tokens(e["tokens"]) if "tokens" in e else fmt_bytes(e.get("bytes"))
-                steps.append(f'<li class="step {cls}" title="{esc(e["tool"])}: {esc(size_)}">'
+                tip = size_
+                if e.get("oversized"):
+                    size_ = f'{e["oversized"]["chars"] / 1000:.0f}k chars'
+                    tip = f'{e["oversized"]["chars"]:,} characters; Claude Code saved them to a file and showed the agent a notice'
+                elif e.get("in_band"):
+                    tip += "; an error returned as a normal result"
+                steps.append(f'<li class="step {cls}" title="{esc(e["tool"])}: {esc(tip)}">'
                              f'<span>{esc(label)}</span><small>{esc(size_.replace(" tokens", ""))}</small></li>')
             v = r.get("verdict") or {}
             if r.get("invalid"):
@@ -2149,6 +2214,27 @@ def backfill_call_text(probe: dict, transcript: Path) -> None:
         c["tokens"] = estimate_tokens(text)
 
 
+def baseline_changes(old: dict, info: dict, metrics: dict) -> list[str]:
+    """What else differs from the baseline, so a score change is not read as the server's alone."""
+    out, om = [], old.get("meta") or {}
+    if om.get("server_name") and info.get("name") and om["server_name"] != info.get("name"):
+        out.append(f"The baseline is another server ({om['server_name']}, this run {info.get('name')}): the changes compare two servers.")
+    elif om.get("server_version") and info.get("version") and om["server_version"] != info.get("version"):
+        out.append(f"The baseline ran version {om['server_version']}, this run {info.get('version')}.")
+    before = {p.get("name") for p in (old.get("metrics") or {}).get("tools") or []}
+    now = {p.get("name") for p in metrics.get("tools") or []}
+    if before and before != now:
+        added, gone = sorted(now - before), sorted(before - now)
+        out.append("The tool list changed since the baseline: "
+                   + "; ".join(x for x in (added and f"{len(added)} added ({', '.join(added[:5])}{', ...' if len(added) > 5 else ''})",
+                                           gone and f"{len(gone)} removed ({', '.join(gone[:5])}{', ...' if len(gone) > 5 else ''})") if x)
+                   + ". Part of any change comes from that.")
+    if om.get("catalog_version") and om["catalog_version"] != CATALOG_VERSION:
+        out.append(f"The baseline was scored with audit catalog {om['catalog_version']}, this run with {CATALOG_VERSION}: "
+                   "some changes come from the audits, not the server. Re-render the baseline with this version to compare.")
+    return out
+
+
 def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) -> dict:
     probe = json.loads((dir_ / "probe.json").read_text(encoding="utf-8"))
     backfill_call_text(probe, dir_ / "transcript-calls.jsonl")
@@ -2172,7 +2258,9 @@ def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) ->
     if baseline_path and baseline_path.exists():
         old = json.loads(baseline_path.read_text(encoding="utf-8"))
         baseline = {k: v.get("score") for k, v in (old.get("categories") or {}).items()}
+        warnings += baseline_changes(old, info, metrics)
     warnings += metrics.get("waste_problems") or []
+    warnings += [f"lead: {x}" for x in metrics.get("leads") or []]
     # A released version names the code; a placeholder such as 0.0.0 does not.
     unpinned = not re.match(r"\d+\.\d+", str(info.get("version") or "")) or re.search(r"^0\.0\.0|dev|local|snapshot", str(info.get("version")), re.I)
     if not probe.get("source") and target.get("transport") != "client" and unpinned:
@@ -2207,6 +2295,7 @@ def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) ->
             "via": target.get("via") if target.get("transport") == "client" else None,
             "commit": ((probe.get("source") or {}).get("commit") or "")[:12] + ("+dirty" if (probe.get("source") or {}).get("dirty") else "")
                       if (probe.get("source") or {}).get("commit") else None,
+            "package": (probe.get("source") or {}).get("package"),
             "target": target.get("label") or target.get("url") or "",
             "collected_at": probe.get("collected_at"), "probe_version": probe.get("probe_version"),
             "render_version": RENDER_VERSION, "catalog_version": CATALOG_VERSION,
@@ -2236,6 +2325,10 @@ def main(argv=None) -> int:
     d = Path(args.dir)
     if not (d / "probe.json").exists():
         print(f"error: {d / 'probe.json'} is missing; run probe.py collect first", file=sys.stderr)
+        return 1
+    if json.loads((d / "probe.json").read_text(encoding="utf-8")).get("list_only"):
+        print("error: probe.json holds a list only (collect --list-only); run collect again without it before rendering",
+              file=sys.stderr)
         return 1
     try:
         report = build(d, Path(args.findings) if args.findings else None, Path(args.baseline) if args.baseline else None)

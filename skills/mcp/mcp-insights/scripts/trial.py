@@ -22,6 +22,7 @@ import argparse
 import fnmatch
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -41,6 +42,9 @@ NOTE_BLOCKED = ("Tools that change data may be blocked in this session. If a cal
                 "workaround: finish with the exact call you would have made and why.")
 # Used only when the plan names no help tools. "docs" is left out: it matches list_docs and get_docs, which read data.
 DEFAULT_HELP_TOOLS = ["*help*", "*guide*", "*manual*", "*documentation*", "*instructions*"]
+# Claude Code's notice in place of a result over its output limit: the agent sees the notice, the full result goes to a
+# file under ~/.claude/projects/, unredacted.
+OVERSIZED = re.compile(r"result \(([\d,]+) characters\) exceeds maximum allowed tokens\. Output has been saved to (\S+?)\.?(?:\s|$)")
 
 
 def result_text(content) -> str:
@@ -93,6 +97,16 @@ def summarize(lines: list[dict], server: str, trial: dict, help_spec: dict) -> d
                     ev["bytes"] = len(body.encode("utf-8"))
                     ev["tokens"] = probe.estimate_tokens(body)
                     ev["is_error"] = bool(c.get("is_error")) and not ev["denied"]
+                    big = OVERSIZED.search(body[:600])
+                    if big:
+                        # What the server sent, not the notice the agent read instead.
+                        ev["oversized"] = {"chars": int(big.group(1).replace(",", "")), "saved_to": big.group(2)}
+                    elif not ev["is_error"] and not ev["denied"] and ev["kind"] in ("tool", "help"):
+                        said = probe.inband_error(body, ev["tool"])
+                        if said:
+                            # A failure reported as a normal result: the agent still has to notice and recover.
+                            ev["is_error"], ev["in_band"] = True, True
+                            body = said
                     if ev["is_error"]:
                         ev["error"] = body[:400]
     needs = set(trial.get("needs") or [])
@@ -145,7 +159,9 @@ def summarize(lines: list[dict], server: str, trial: dict, help_spec: dict) -> d
         "first_use": first_use,
         "help_before_use": None if first_use is None or not needs else any(e["i"] < first_use for e in help_events),
         "rules": rules,
-        "errors": len(errors), "recovered": recovered, "repeats": repeats,
+        "errors": len(errors), "in_band_errors": sum(1 for e in errors if e.get("in_band")),
+        "recovered": recovered, "repeats": repeats,
+        "oversized": [e["oversized"] for e in events if e.get("oversized")],
         "drafts": [e for e in events if e["denied"]],
         "tokens": sum(int(usage.get(k) or 0) for k in ("input_tokens", "output_tokens", "cache_read_input_tokens",
                                                          "cache_creation_input_tokens")),
@@ -279,9 +295,12 @@ def run(args) -> int:
         summary["wall_ms"] = int((time.monotonic() - t0) * 1000)
         summary["base_id"], summary["attempt"] = trial["base_id"], trial["attempt"]
         if trial.get("verify"):
-            # Graded by the server's own parser or reads, not judged from the transcript.
+            # Graded by the server's own parser or reads, not judged from the transcript. The check gets the trial's
+            # id and transcript, so one script can grade every attempt or read the agent's answer.
+            venv = dict(env, MCPI_TRIAL_ID=trial["id"], MCPI_ATTEMPT=str(trial["attempt"]), MCPI_RUN_DIR=str(out.resolve()),
+                        MCPI_TRANSCRIPT=str((tdir / f"{trial['id']}.jsonl").resolve()))
             try:
-                v = subprocess.run(trial["verify"], shell=True, capture_output=True, text=True, timeout=120)
+                v = subprocess.run(trial["verify"], shell=True, capture_output=True, text=True, timeout=120, env=venv)
                 summary["verify"] = {"command": trial["verify"], "ok": v.returncode == 0,
                                      "output": probe.scrub_text((v.stdout + v.stderr).strip())[-600:]}
             except subprocess.TimeoutExpired:
@@ -294,15 +313,35 @@ def run(args) -> int:
         record["trials"] = {"server": server, "writes": "allowed (sandbox)" if args.allow_writes else "blocked",
                             "runs": sorted(runs, key=lambda r: r["id"])}
         probe.write_record(out, record)
-        hb = "-" if summary["help_before_use"] is None else "yes" if summary["help_before_use"] else "NO"
+        hb = ("" if not trial.get("expects_help") or summary.get("help_before_use") is None else
+              f", help before use: {'yes' if summary['help_before_use'] else 'NO'}")
+        errs = summary.get("errors", 0)
+        inband = f" ({summary['in_band_errors']} as normal results)" if summary.get("in_band_errors") else ""
+        big = "".join(f", one result of {o['chars']:,} characters saved to a file by Claude Code" for o in summary.get("oversized") or [])
         print(f"{trial['id']}: {summary['calls']} calls, {summary['help_reads']} help reads "
-              f"({summary['help_tokens']:,} tokens), help before use: {hb}, errors {summary['errors']}, "
+              f"({summary.get('help_tokens', 0):,} tokens){hb}, errors {errs}{inband}, {summary.get('recovered', 0)} recovered{big}, "
               f"context {summary.get('context_start') or 0:,} -> {summary.get('context_peak') or 0:,} tokens, "
               f"${summary['cost_usd'] or 0:.3f}", file=sys.stderr)
     record["trials"] = {"server": server, "writes": "allowed (sandbox)" if args.allow_writes else "blocked",
                         "runs": sorted(runs, key=lambda r: r["id"])}
     probe.write_record(out, record)
+    shutil.rmtree(work, ignore_errors=True)
+    client_copies(runs)
     return 0
+
+
+def client_copies(runs: list[dict]) -> None:
+    """Claude Code keeps results over its output limit in full, outside the run directory and unredacted: say where."""
+    dirs = set()
+    for r in runs:
+        for o in r.get("oversized") or []:
+            p = Path(str(o.get("saved_to") or ""))
+            # .../projects/<cwd slug>/<session>/tool-results/<file>
+            if "tool-results" in p.parts[2:]:
+                dirs.add(str(Path(*p.parts[:p.parts.index("tool-results") - 1])))
+    if dirs:
+        print("note: Claude Code saved results over its output limit in full, unredacted, outside the run directory: "
+              + ", ".join(sorted(dirs)) + ". Delete them once the review is done.", file=sys.stderr)
 
 
 def main(argv=None) -> int:

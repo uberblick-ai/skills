@@ -31,7 +31,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-PROBE_VERSION = "0.3"
+PROBE_VERSION = "0.4"
 TOKEN_ESTIMATOR = "chars-2026-10-21"  # see estimate_tokens
 CLIENT_INFO = {"name": "mcp-insights", "version": PROBE_VERSION}
 REQUESTED_VERSION = "2025-11-25"
@@ -80,7 +80,21 @@ def likely_real(value: str) -> bool:
     return len(value) >= 12 and entropy(value) >= 3.0 and bool(re.search(r"[A-Za-z]", value)) and bool(re.search(r"\d", value))
 
 
-def scrub_text(text: str, found: list | None = None, where: str = "") -> str:
+# Personal data: email addresses in what the server returns are masked too, but not counted as secrets. Addresses
+# at reserved example domains stay, and so does the server's own text (descriptions, help), which is judged as written.
+EMAIL = re.compile(r"(?<![\w.%+-])[A-Za-z0-9._%+-]+@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})(?![\w-])")
+EXAMPLE_DOMAIN = re.compile(r"(?i)(^|\.)(example\.(com|org|net)|example|test|invalid|localhost)$")
+MODEL_FACING = {"tools", "prompts", "resources", "resourceTemplates", "initialize"}
+
+
+def mask_emails(text: str) -> str:
+    return EMAIL.sub(lambda mt: mt.group(0) if EXAMPLE_DOMAIN.search(mt.group(1)) else "[email]", text)
+
+
+def scrub_text(text: str, found: list | None = None, where: str = "", personal: bool = True) -> str:
+    if personal and "@" in text:
+        text = mask_emails(text)
+
     def note(name, kind, value):
         if found is not None:
             found.append({"where": where, "name": name, "kind": kind, "length": len(value), "likely_real": likely_real(value)})
@@ -108,7 +122,7 @@ OWN_KEYS = {"probe_version", "token_estimator", "collected_at", "source"}
 
 def scrub(obj, found: list | None = None, path: str = ""):
     if isinstance(obj, str):
-        return scrub_text(obj, found, path)
+        return scrub_text(obj, found, path, personal=re.split(r"[.\[]", path)[0] not in MODEL_FACING)
     if isinstance(obj, list):
         return [scrub(v, found, f"{path}[{i}]") for i, v in enumerate(obj)]
     if isinstance(obj, dict):
@@ -415,6 +429,44 @@ def content_text(result) -> str:
     return "\n".join(parts)
 
 
+ERROR_HEAD = re.compile(r"(?i)(error\b|http \d{3}\b(?<!http 200)|failed\b|exception\b|unauthorized|forbidden|not found)")
+# Tools whose data is about errors return "errors" lists as their answer, not as a failure.
+# So do checkers (validate, lint): their errors are the answer to the call.
+ERROR_DATA = {"error", "errors", "exception", "exceptions", "incident", "incidents", "issue", "issues", "alert", "alerts",
+              "log", "logs", "event", "events", "problem", "problems", "failure", "failures", "crash", "crashes",
+              "validate", "validation", "lint", "check", "verify", "diagnose", "diagnostics", "test"}
+
+
+def inband_error(text: str, tool: str = "") -> str | None:
+    """The failure a result reports in its body although isError is false, or None.
+
+    Catches {"error": ...}, a non-empty "errors" list (most REST APIs, and GraphQL next to "data"), the same inside
+    a {"result": "<json>"} wrapper that SDKs put around a returned string, and plain text that opens like an error.
+    An empty or null error field is not one. For a tool whose data is about errors, only plain text counts.
+    """
+    head = (text or "").strip()
+    try:
+        obj = json.loads(head)
+    except ValueError:
+        obj = None
+    if isinstance(obj, dict) and set(obj) == {"result"} and isinstance(obj["result"], str):
+        return inband_error(obj["result"], tool)
+    if obj is not None:
+        words = set(re.split(r"[_\W]+", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", tool).lower()))
+        if not isinstance(obj, dict) or words & ERROR_DATA:
+            return None
+        err, errs = obj.get("error"), obj.get("errors")
+        if err is True:
+            return str(obj.get("message") or "error: true")[:300]
+        if err and not isinstance(err, (int, float)):
+            return str(err.get("message") or json.dumps(err)[:300] if isinstance(err, dict) else err)[:300]
+        if isinstance(errs, list) and errs and ("data" not in obj or all(isinstance(e, dict) and e.get("message") for e in errs)):
+            first = errs[0]
+            return str(first.get("message") or json.dumps(first)[:300] if isinstance(first, dict) else first)[:300]
+        return None
+    return head.splitlines()[0][:300] if ERROR_HEAD.match(head[:120]) else None
+
+
 def list_all(conn, method: str, key: str):
     items, pages, cursors_seen, error = [], 0, set(), None
     cursor = None
@@ -492,8 +544,12 @@ def minimal_invalid_args(tool: dict):
     return None, None
 
 
-def source_revision(cwd: str | None, given: str | None) -> dict | None:
-    """The commit the server was built from, so a run can be reproduced: --commit, or the git checkout in --cwd."""
+def source_revision(cwd: str | None, given: str | None, package: str | None = None) -> dict | None:
+    """What code answered, so a run can be reproduced: --package for an installed release, --commit, or the git
+    checkout in --cwd. A cwd that is a git checkout is not always the server's code (a project that runs an installed
+    server from its own directory), so that pin is announced and can be replaced with --package."""
+    if package:
+        return {"package": package, "from": "--package"}
     if given:
         return {"commit": given, "from": "--commit"}
     if not cwd:
@@ -519,10 +575,13 @@ def collect(args) -> int:
         "target": {"transport": "http" if args.url else "stdio",
                    "command": args.command, "url": args.url, "cwd": args.cwd,
                    "label": args.label},
-        "source": source_revision(args.cwd, args.commit),
+        "source": source_revision(args.cwd, args.commit, args.package),
         "probes": {},
     }
     probes = record["probes"]
+    if (record["source"] or {}).get("from") == "git":
+        print(f"pinned the checkout in --cwd at {record['source']['commit'][:12]}; if the server is an installed package "
+              "rather than this checkout's code, pass --package NAME@VERSION instead", file=sys.stderr)
 
     # 2026-07-28 servers are stateless: no initialize, every request carries
     # its version in _meta, and server/discover MUST work. Ask that first on a
@@ -571,6 +630,20 @@ def collect(args) -> int:
         if not getattr(conn, "meta", None):
             conn.notify("notifications/initialized")
         caps = record["initialize"]["capabilities"]
+        if args.list_only:
+            # Look before anything runs: the lists only, so the reviewer can see what the resources and tools are.
+            record["list_only"] = True
+            for method, key in (("tools/list", "tools"), ("resources/list", "resources"),
+                                ("resources/templates/list", "resourceTemplates"), ("prompts/list", "prompts")):
+                got = list_all(conn, method, key)
+                record[key] = got["items"]
+            record["stdout_noise"] = conn.noise[:20]
+            record["stderr_tail"] = conn.stderr_lines[-40:]
+            write_record(out, record)
+            print(summary_line(record))
+            print("listed only: nothing was read or called. Check the tools and resources in probe.json, then run "
+                  "collect again without --list-only.", file=sys.stderr)
+            return 0
 
         msg, ms = conn.request("ping", {})
         probes["ping"] = {"ok": bool(msg and "result" in msg), "ms": ms, "error": error_of(msg) if not (msg and "result" in msg) else None}
@@ -823,6 +896,9 @@ def call(args) -> int:
                 entry["has_structured"] = "structuredContent" in res
                 text = content_text(res)
                 entry["text_head"] = text[:1500]
+                if not entry["isError"]:
+                    # Judged on the whole text: in a long answer the "errors" list can sit past the head.
+                    entry["inband_error"] = inband_error(text, name)
                 if c.get("help"):
                     # Help served by a tool counts toward help size and is judged like a help resource.
                     entry["help"] = True
@@ -918,9 +994,6 @@ def validate(value, schema, path="$"):
     return problems
 
 
-ERROR_HEAD = re.compile(r"(?i)(error\b|http \d{3}\b(?<!http 200)|failed\b|exception\b|unauthorized|forbidden|not found)")
-
-
 def load_lines(path: Path) -> list:
     """A JSON array, an object with "tools" or "calls", or one JSON object per line."""
     text = path.read_text(encoding="utf-8").strip()
@@ -997,6 +1070,10 @@ def main(argv=None) -> int:
         if name == "collect":
             p.add_argument("--label", help="a short name for the server in the report")
             p.add_argument("--commit", help="the commit the server was built from, when --cwd is not its git checkout")
+            p.add_argument("--package", help="the installed release that answers, e.g. NAME@1.2.0, when the server is a "
+                                             "package rather than code in --cwd (serverInfo.version alone may not say)")
+            p.add_argument("--list-only", action="store_true",
+                           help="initialize and list tools, resources and prompts, nothing more: look before reading or calling")
         else:
             p.add_argument("--calls", required=True, help="calls.json written by the agent")
             p.add_argument("--allow-writes", action="store_true",

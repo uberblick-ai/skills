@@ -2,13 +2,17 @@
 
 Score each item 1, 0.5 or 0, and give every item `evidence`, passes
 included: a quote from the server's text, a captured response, or what you
-checked. An item without evidence is not scored. An audit has one of four
+checked. An item without evidence is not scored. An audit has one of five
 states:
 
 - **pass or fail**: scored items with evidence.
 - **not applicable**: `{"na": true, "reason": "..."}`, when the server has
   nothing the audit looks at (no help topics for G15, no destructive tools
   for S10). Not applicable leaves the category's coverage alone.
+- **not tested here**: `{"untested": true, "reason": "..."}`, when the audit
+  applies but this run could not test it, such as E12 on a server with write
+  tools and no sandbox. It counts against coverage like an audit not checked,
+  and the report shows the reason instead of a warning.
 - **not checked**: no entry. The audit counts against coverage, and a
   category checked below 80% is marked provisional.
 - For the audits that list only failures (G16, E11), record
@@ -31,13 +35,13 @@ values would cause an unwanted change if copied as they are.
 | --- | --- | --- | --- | --- |
 | G10 descriptions | each tool | in plain sentences: what it does; what it returns (for a write, what the result confirms); when to use another tool, where another tool overlaps; and the main failure, where the tool takes input | one or two of those missing, or buried in syntax | one-liner, or mostly syntax grammar |
 | G11 instructions | the server | names the cross-tool workflow and lists the help topics by name, named after what users ask for (tables, charts), nothing else | useful but padded, or help named only by area ("markdown") | absent, generic, or a tool list repeated |
-| G12 single home | each format or syntax | explained in one place, others point to it | two or three copies that agree | four or more copies, or copies that disagree |
+| G12 single home | each format or syntax | explained in one place, others point to it | two or three copies that agree | four or more copies, copies that disagree, or a syntax a tool requires that no text explains |
 | G13 true examples | each example, in descriptions and help | valid against the input schema and the server's behaviour | valid but misleading (an unusual value the model will copy) | invalid, or rejected by the server |
 | G14 no internals | the server's texts | none | a few internal names or history notes | internals, old-client notes or plans throughout |
 | G15 help structure | each help topic | an example, the syntax or rules, how to use it for each job it covers, and its errors | some parts missing | one job only, or a pasted schema |
 | G16 no contradictions | each contradiction found | (list only contradictions, each scored 0) | | advice the server's behaviour or another text contradicts |
 | E10 recovery | each observed error | names the cause and the fix (valid values, the field, the tool or topic) | names the cause only | generic text, or a raw JSON-RPC code |
-| E11 real cause | each misleading error | (list only misleading ones) | | the stated cause is not the actual one |
+| E11 real cause | each misleading error | (list only misleading ones) | | the stated cause is contradicted by what the review saw: another call, a read-back or the server's own text |
 | E12 no silent bad writes | each write probe (sandbox only) | refused, or stored with a diagnostic, naming the offending part | refused or flagged, part not named | succeeded silently and stored something else |
 | S10 explicit target | each destructive tool | needs an id | accepts a filter but confirms the count | acts on a free-text query, or on everything with no target |
 | S11 risk stated | each destructive tool | says what is lost and whether it can be undone | one of the two | neither |
@@ -71,7 +75,7 @@ topics.
   "help_resources": ["myserver://help/*"],
   "data_resources": ["myserver://tasks/*"],
   "density": {"texts": [
-    {"text_id": "tool:create_item", "clarity": 0.5,
+    {"text_id": "tool:create_item",
      "waste": [{"quote": "exact text from the description", "why": "internals"}]}
   ]},
   "trials": {"t1-plain-read": {"outcome": "done", "success": 1, "evidence": "What the agent did and why it counts."},
@@ -120,7 +124,9 @@ filler; a long text that is all signal has no waste. A sentence that states
 a guarantee (nothing is rolled back, which side wins a concurrent change,
 what still works offline) is signal even when it uses internal names: quote
 only the internal name, and suggest the guarantee in plain words. Filler is reported over
-the texts you reviewed, and the report says how many that is.
+the texts you reviewed, and the report says how many that is. Context waste
+measures waste, not usefulness: a one-line description costs little and scores
+well here, and that it says too little is marked down under G02 and G10.
 
 `trials` records each trial's `outcome`:
 
@@ -168,7 +174,11 @@ whose audits all match the SDK's defaults ranks below the server's own fixes.
 counts tools named like help, guide or manual and every resource read, which
 misses a help tool with another name, and `trial.py` prints what it guessed.
 `confirmed_read_only` lists tools not marked `readOnlyHint` that you have
-checked change nothing; trials may call them while writes are blocked. `task` is what a user would type, with
+checked change nothing; trials may call them, with any arguments, while
+writes are blocked. Leave out a tool that is a read only with some arguments
+(a query tool that also takes mutations, a credentials tool whose status
+action reads), and any tool you are unsure of: its calls are then blocked and
+recorded as what the agent would have sent. `task` is what a user would type, with
 no hint about help. `needs` names the tools whose first call should come after
 a help read when `expects_help` is true. `rules` check a written rule: some
 call in `before` must come before the first call in `first`. Name the exact
@@ -178,9 +188,13 @@ appears in the arguments), for example `ReadMcpResourceTool:mise://tasks` or
 Use names and data that exist in the server's workspace or sandbox.
 `repeat` runs the trial that many times (ids become `t3-query#1` and so
 on), and `verify` is a shell command run after each attempt whose exit code
-grades it. With writes allowed, pair it with `--before-each` so every attempt
-starts from the same sandbox.
+grades it. It gets `MCPI_TRIAL_ID`, `MCPI_ATTEMPT`, `MCPI_TRANSCRIPT` (the
+attempt's transcript, whose last line holds the agent's answer) and
+`MCPI_RUN_DIR`, so one script can grade every attempt. With writes allowed,
+pair it with `--before-each` so every attempt starts from the same sandbox.
 
-An error counts as recovered when the agent's next call to the same tool,
-with at most two other server calls in between, has changed input and
-succeeds.
+An error is a call that failed (`isError`) or a result that reports a
+failure in its body: an `error` field, a non-empty `errors` list, a text that
+opens like an error. The second kind is marked "as a normal result". An error
+counts as recovered when the agent's next call to the same tool, with at most
+two other server calls in between, has changed input and succeeds.

@@ -47,6 +47,10 @@ the command is stored in `probe.json`. Ask whether a sandbox exists (a scratch
 workspace or test instance) before any write; without one the run stays
 read-only.
 
+Against a production server, look before anything runs: `collect --list-only`
+lists the tools, resources and prompts and reads or calls nothing. Check what
+the resources hold and which tools are reads, then collect in full.
+
 ## 2. Collect
 
 ```sh
@@ -59,13 +63,18 @@ page, reads every resource and argument-free prompt, sends safe error probes
 (unknown method, unknown tool, schema-invalid arguments to read-only tools,
 malformed JSON on stdio, an unknown protocol version) and times the cold
 start. It writes `DIR/probe.json` and transcripts. A failed start leaves the
-server's stderr in `probe.json` under `stderr_tail`. When `--cwd` is the
-server's git checkout, the record pins its commit and notes uncommitted
-changes; otherwise pass `--commit SHA`, or the report warns that the run does
-not say which code it reviewed. Secrets in anything the
-server returns are redacted before they reach disk; `probe.json` keeps only
-their names, places and lengths under `secrets`, and the report fails Safety
-when a likely real one turns up. Tell the user at once when that happens.
+server's stderr in `probe.json` under `stderr_tail`. The error probes go only
+to tools marked `readOnlyHint`; tools you confirm as reads in step 3 get them
+then. When `--cwd` is the server's git checkout, the record pins its commit
+and notes uncommitted changes; otherwise pass `--commit SHA`. When the server
+is an installed package that a project runs from its own directory, the
+project's commit says nothing about it: pass `--package NAME@VERSION`. Without
+either, the report warns that the run does not say which code it reviewed.
+Secrets in anything the server returns are redacted before they reach disk;
+`probe.json` keeps only their names, places and lengths under `secrets`, and
+the report fails Safety when a likely real one turns up. Tell the user at once
+when that happens. Email addresses in what the server returns are masked as
+`[email]`, outside its own descriptions and help.
 
 A server you can only reach through a client, such as a connector in
 Claude's app, cannot be collected. Save the tool definitions the client shows
@@ -111,7 +120,8 @@ are judged with them; a topic a help resource also serves is counted once.
 
 Chain them: list first, then use real ids. A tool not marked
 `readOnlyHint: true` runs only with `"confirmed_read_only": true`, which you
-set after reading its description and being sure it changes nothing. Then:
+set after reading its description and being sure that call, with those
+arguments, changes nothing. Then:
 
 ```sh
 python3 scripts/probe.py call --command "..." --out DIR --calls DIR/calls.json
@@ -132,6 +142,8 @@ wrong:
   writing, a version or etag to send, what an update keeps): one trial that
   depends on the rule, checked by reading the result back
 - help or syntax that must be read before a tool works
+- a syntax a tool requires that no text explains, such as a filter or query
+  field typed as a plain string
 - tools that change things with unclear or missing annotations
 - tool names that are easy to confuse
 
@@ -157,7 +169,9 @@ help topics listed in the instructions.
 
 Write `DIR/mcp.json` in Claude Code's MCP config format with only this
 server (take secrets from the user's secret manager, never from a file in
-the repo) and `DIR/trials.json` as described in
+the repo). The format has no working directory: for a server that must start
+in one, use `{"command": "sh", "args": ["-c", "cd /path/to/project && exec SERVER-COMMAND"]}`.
+Write `DIR/trials.json` as described in
 [references/rubric.md](references/rubric.md#trialsjson). Then:
 
 ```sh
@@ -169,7 +183,10 @@ the default Haiku; add a `"model": "sonnet"` copy of a trial to compare.
 What the trials measure is what an agent in Claude Code does; the report tags
 those audits, and the instructions cut-off (G07), with the client's name.
 Write tools are blocked, and the blocked call is recorded as what the agent
-would have sent. In a sandbox, add `--allow-writes` and `--before-each` with a
+would have sent. Claude Code saves a result over its output limit to a file
+under `~/.claude/projects/`, in full and unredacted, and shows the agent a
+notice instead; `trial.py` records the real size and prints where those files
+are. Tell the user, and delete them once the review is done. In a sandbox, add `--allow-writes` and `--before-each` with a
 command that restores the sandbox, so every trial starts from the same state.
 Then read what the agent wrote back through the server and check it with the
 server's own reads; that is how silent truncation, dropped fields and
@@ -207,7 +224,8 @@ a description, the rewritten text ready to paste, keeping every guarantee
 the old text gave (what refuses before writing, partial writes, recovery).
 For behaviour, say what the agent should see (refused with an error naming
 the row), not how to build it. Quote wasted spans under `density`, so context cost counts
-waste rather than length. For a server with many formats or a large help
+waste rather than length. An audit that applies but cannot be tested in this
+run, such as E12 without a sandbox, gets `{"untested": true, "reason": ...}`. For a server with many formats or a large help
 surface, judge one content family at a time (a syntax, a resource type, a
 workflow), one sub-agent per family when you can start them: each reads the
 help for its family and reports the copies that drift, editing that is not
@@ -233,8 +251,12 @@ It merges `probe.json` and `findings.json`, scores each category, ranks the
 suggestions by their effect (re-scoring the categories as if each one were
 done, those that lift a critical cap first), and writes `DIR/report.html`
 and `DIR/report.json`. Fix any warning it prints about suggestions without
-`targets` or `check`, or scores without evidence. Add `--baseline OLD_DIR/report.json` to show changes since
-an earlier run or against the baseline of a branch comparison.
+`targets` or `check`, or scores without evidence. Check each `lead:` it
+prints, such as a limit that returned the same answer as the default, and
+judge it before you reply. Add `--baseline OLD_DIR/report.json` to show
+changes since an earlier run or against the baseline of a branch comparison;
+the report says when the baseline differs in more than the code (another
+version, a changed tool list, an older audit catalog).
 
 ## 7. Reply
 
