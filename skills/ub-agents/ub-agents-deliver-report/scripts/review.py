@@ -5,7 +5,7 @@ standard library and `gh`.
     review.py missing days.json                                 # the days to report: the gap since the newest stored day
     review.py collect --repo OWNER/NAME [--day YYYY-MM-DD] > data.json
     review.py digest data.json                                  # the day in a few lines per item, to read first
-    review.py render data.json notes.json OUT_DIR [--no-open]   # writes report.html and report.json
+    review.py render data.json notes.json OUT_DIR [--days days.json] [--no-open]  # writes report.html and report.json
     review.py records report.json [--schemas] > operations.json # update_data operations for the day
     review.py document dataset.json report.json [--doc UUID] [--since DAY] [--no-button] > sections.json  # Actions, Changelog
     review.py create report.json [--no-button] > create.json    # create_doc arguments for a new dataset document
@@ -229,17 +229,8 @@ def events_since(repo, moment):
 
 def parents(repo):
     """Open issues with sub-issues: containers whose work is counted in their children."""
-    owner, name = repo.split("/")
-    found, cursor = set(), None
-    while True:
-        after = f', after: "{cursor}"' if cursor else ""
-        page = gh("graphql", "-f", f'query=query {{ repository(owner: "{owner}", name: "{name}") {{ issues(states: OPEN, '
-                  f'first: 100{after}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ number subIssues {{ totalCount }} }} }} }} }}'
-                  )["data"]["repository"]["issues"]
-        found |= {n["number"] for n in page["nodes"] if n["subIssues"]["totalCount"]}
-        if not page["pageInfo"]["hasNextPage"]:
-            return found
-        cursor = page["pageInfo"]["endCursor"]
+    return {r["number"] for r in pages(f"repos/{repo}/issues", state="open")
+            if "pull_request" not in r and (r.get("sub_issues_summary") or {}).get("total")}
 
 
 def queue(repo, until, rows, agents):
@@ -276,7 +267,10 @@ def queue(repo, until, rows, agents):
 
 def runs_of(records):
     leases = {r["run"]: r for r in records if r.get("kind") == "lease"}
-    outcomes = {r["run"]: r for r in records if r.get("kind") == "outcome"}
+    run_of = {r.get("id"): run for run, r in leases.items()}
+    # Outcomes name their lease by comment id; before ub-agents 0.3.8 they also carried its run.
+    outcomes = {r.get("run") or run_of.get(r.get("lease_id"), f'lease {r.get("lease_id")}'): r
+                for r in records if r.get("kind") == "outcome"}
     runs = []
     for run in leases.keys() | outcomes.keys():
         lease, out = leases.get(run, {}), outcomes.get(run, {})
@@ -292,6 +286,7 @@ def runs_of(records):
                      "accepted": bool(out.get("accepted")),
                      "denied": [public(f'{d.get("tool")}: {d.get("command")}', 160) for d in out.get("denials") or []],
                      "denials_recorded": "denials" in out,
+                     "context": context_of(out),
                      "summary": public(out.get("summary") or lease.get("summary"), 400),
                      "url": out.get("url") or lease.get("url"),
                      "machine": anonymous(lease.get("host") or out.get("host")),
@@ -300,6 +295,64 @@ def runs_of(records):
                      "pending": not out and lease.get("state") == "running" and bool(lease.get("expires"))
                      and when(lease["expires"]) > dt.datetime.now(dt.timezone.utc)})
     return sorted(runs, key=lambda r: r["started"] or "")
+
+
+CONTEXT_KEYS = ("window", "first", "call_10", "peak", "compactions")
+HEAVY_START = 20  # percent of the window at call 10; a reference line, not a gate
+
+
+def context_of(record):
+    """The run's main-session context as ub-agents records it on the outcome, or None when absent or malformed."""
+    value = record.get("context")
+    if not isinstance(value, dict) or not all(type(value.get(k)) is int and value[k] >= 0 for k in CONTEXT_KEYS) \
+            or not value["window"] or value["peak"] < max(value["first"], value["call_10"]):
+        return None
+    return {k: value[k] for k in CONTEXT_KEYS}
+
+
+def context_share(context, key):
+    return round(100 * context[key] / context["window"], 1)
+
+
+def context_group(runs):
+    """Day figures for runs that carry context: medians of start (call 10) and peak as a share of the window."""
+    measured = [r["context"] for r in runs if r.get("context")]
+    if not measured:
+        return {}
+    return {"runs": len(measured), "start_pct": median(context_share(c, "call_10") for c in measured),
+            "peak_pct": median(context_share(c, "peak") for c in measured),
+            "peak_pct_max": max(context_share(c, "peak") for c in measured),
+            "compacted": sum(c["compactions"] > 0 for c in measured)}
+
+
+def cli_of(run):
+    return (run.get("runtime") or "").split(":")[0] or "unknown"
+
+
+def context_report(issues, inside):
+    """The day's context usage: summary fields for the days record, one row per agent and runtime, and the three
+    runs that came closest to their window. Runs without context count as unmeasured, never as zero."""
+    window = [(d, r) for d in issues for r in d["runs"] if inside(r["started"]) and r["class"] != "pending"]
+    runs = [r for _, r in window]
+    overall = context_group(runs)
+    if not overall:
+        return {}, {"unmeasured": len(runs), "agents": [], "top": []}
+    by_cli = {}
+    for r in runs:
+        by_cli.setdefault(cli_of(r), []).append(r)
+    rows = {}
+    for r in runs:
+        rows.setdefault((r["agent"] or "?", cli_of(r)), []).append(r)
+    agents = [{"agent": agent, "runtime": cli} | group | {
+        "call_10_median": median(r["context"]["call_10"] for r in group_runs if r.get("context"))}
+              for (agent, cli), group_runs in sorted(rows.items()) if (group := context_group(group_runs))]
+    top = sorted(((d, r) for d, r in window if r.get("context")),
+                 key=lambda pair: context_share(pair[1]["context"], "peak"), reverse=True)[:3]
+    summary = {f"context_{k}": v for k, v in overall.items()} | {"context_by_runtime": {
+        cli: group for cli, group_runs in sorted(by_cli.items()) if (group := context_group(group_runs))}}
+    return summary, {"unmeasured": len(runs) - overall["runs"], "agents": agents, "top": [
+        {"item": d["number"], "agent": r["agent"], "runtime": cli_of(r), "url": r["url"],
+         "peak_pct": context_share(r["context"], "peak")} | r["context"] for d, r in top]}
 
 
 def board_posts(repo, agents):
@@ -397,7 +450,7 @@ def collect(repo, day, zone, since, until):
             if c["author_association"] not in TRUSTED:
                 continue
             if found := RECORD.search(c["body"] or ""):
-                records.append(json.loads(found.group(1)) | {"url": c["html_url"]})
+                records.append(json.loads(found.group(1)) | {"id": c["id"], "url": c["html_url"]})
                 loop_accounts.add((c.get("user") or {}).get("login"))
             if NOTICE.match(c["body"] or ""):
                 notices.append(c["created_at"])
@@ -476,6 +529,7 @@ def collect(repo, day, zone, since, until):
     wasted = sum(r["class"] == "waste" for r in window)
     autonomous = sum(d["autonomous"] for d in loop)
     retrospectives = [p | {"items": sorted(p["items"])} for p in posts if inside(p["created"])]
+    context_summary, context = context_report(issues, inside)
     return {
         "schema": SCHEMA, "repo": repo, "day": day.isoformat(), "timezone": since.strftime("%Z %z"),
         "since": stamp(since), "until": stamp(until),
@@ -503,7 +557,10 @@ def collect(repo, day, zone, since, until):
             **open_queue, "peak_runs": peak(window),
             # Records from before host tracking say nothing about machines: leave the gap rather than report zero.
             **({"machines": len({r["machine"] for r in window if r["machine"]}),
-                "loops": len({r["loop"] for r in window if r["loop"]})} if any(r["machine"] for r in window) else {})},
+                "loops": len({r["loop"] for r in window if r["loop"]})} if any(r["machine"] for r in window) else {}),
+            # Runs before ub-agents 0.5.0 carry no context: leave the fields out rather than report zero.
+            **context_summary},
+        "context": context,
         "retrospectives": {"errors": errors, "in_window": retrospectives},
         "issues": issues}
 
@@ -551,6 +608,12 @@ def digest(data):
            f'target {TARGETS["denial_pct"][1]}). '
            f'PRs merged {s["prs_merged"]} ({s["prs_merged_by_loop"]} by the loop). '
            f'Issues closed {s["issues_closed"]}, opened {s["issues_opened"]}. Retrospectives {s["retrospectives"]}.']
+    if s.get("context_runs"):
+        top = data["context"]["top"][0]
+        out.append(f'Context: {s["context_runs"]} runs measured, {data["context"]["unmeasured"]} not; median start '
+                   f'{num(s["context_start_pct"], "%")} of the window at call 10, median peak {num(s["context_peak_pct"], "%")}, '
+                   f'largest {num(s["context_peak_pct_max"], "%")} (#{top["item"]} {top["agent"]}, {top["runtime"]}); '
+                   f'{s["context_compacted"]} compacted.')
     explain = [d for d in data["issues"] if d["runs"] and needs_cause(d)]
     clean = [d for d in data["issues"] if d["runs"] and not needs_cause(d)]
     outside = [d for d in data["issues"] if not d["runs"]]
@@ -590,12 +653,14 @@ def digest(data):
 CSS = """<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600&family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono&display=swap">
 <style>
 :root { --bg: #f6f7f8; --panel: #fff; --fg: #1d2329; --muted: #5d6874; --line: #dde2e7; --accent: #2f6f8f;
-  --ok: #3f8a5a; --back: #b7791f; --fail: #c4473f; --head: "Bricolage Grotesque", system-ui, sans-serif;
+  --ok: #3f8a5a; --back: #b7791f; --fail: #c4473f; --series-1: #2a78d6; --series-2: #eb6834; --bar: #86b6ef; --head: "Bricolage Grotesque", system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, monospace; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #12161a; --panel: #1a2026; --fg: #e4e8ec;
-  --muted: #9aa5b1; --line: #2c343c; --accent: #6fb3d2; --ok: #8fc29f; --back: #e0b462; --fail: #e8776f; color-scheme: dark } }
+  --muted: #9aa5b1; --line: #2c343c; --accent: #6fb3d2; --ok: #8fc29f; --back: #e0b462; --fail: #e8776f;
+  --series-1: #5598e7; --series-2: #d95926; --bar: #1c5cab; color-scheme: dark } }
 :root[data-theme="dark"] { --bg: #12161a; --panel: #1a2026; --fg: #e4e8ec; --muted: #9aa5b1; --line: #2c343c;
-  --accent: #6fb3d2; --ok: #8fc29f; --back: #e0b462; --fail: #e8776f; color-scheme: dark }
+  --accent: #6fb3d2; --ok: #8fc29f; --back: #e0b462; --fail: #e8776f; --series-1: #5598e7; --series-2: #d95926;
+  --bar: #1c5cab; color-scheme: dark }
 body { background: var(--bg); color: var(--fg); font: 15px/1.55 "IBM Plex Sans", system-ui, sans-serif; }
 a { color: var(--accent); } h1, h2, h3 { font-family: var(--head); margin: 0; text-wrap: balance; }
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
@@ -611,6 +676,14 @@ section { display: grid; gap: 12px; min-width: 0; }
 .scroll { overflow-x: auto; } table { border-collapse: collapse; width: 100%; font-size: 14px; }
 th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 td.r { text-align: right; white-space: nowrap; }
+.chart-svg { display: block; width: 100%; height: auto; overflow: visible; font: 11px var(--mono); }
+.chart-svg text { fill: var(--muted); } .chart-svg .tag { stroke: var(--panel); stroke-width: 4px; paint-order: stroke; }
+.legend { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+.legend i { display: inline-block; width: 14px; height: 2px; margin-right: 6px; vertical-align: middle; border-radius: 1px; }
+.legend i.bar { width: 10px; height: 10px; border-radius: 2px; } .legend i.dash { background: repeating-linear-gradient(90deg, var(--muted) 0 4px, transparent 4px 7px); }
+.filters { display: flex; gap: 6px; flex-wrap: wrap; } .filters button { font: inherit; font-size: 13px; padding: 4px 12px;
+  border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
+.filters button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
 .discuss { display: inline-block; margin-top: 10px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px;
   color: var(--fg); text-decoration: none; font-weight: 600; } .discuss:hover { border-color: var(--accent); }
 """
@@ -662,9 +735,107 @@ def figures(t):
              None)]
 
 
-def report(data):
+TREND_DAYS = 30  # the page's context chart shows the newest month; the document's chart plots every stored day
+RUNTIMES = {"all": "All runtimes", "claude": "Claude Code", "codex": "Codex"}
+
+
+def trend(days, day, summary):
+    """Context per day for the chart, oldest first: the stored days plus this one, keyed by runtime."""
+    by_day = {v.get("day") or k: v for k, v in days.items()} | {day: summary}
+    series = {}
+    for day in sorted(by_day)[-TREND_DAYS:]:
+        value = by_day[day]
+        groups = {"all": {k.removeprefix("context_"): v for k, v in value.items() if k.startswith("context_")}}
+        groups |= value.get("context_by_runtime") or {}
+        for key, group in groups.items():
+            if group.get("runs"):
+                series.setdefault(key, []).append({"day": day} | group)
+    return series
+
+
+def trend_svg(points):
+    """Bars for the median start, lines for the median and the largest peak, a dashed 20% line; one axis, 0 to 100%."""
+    w, h, left, right, top, bottom = 820, 300, 44, 64, 14, 28
+    slot = (w - left - right) / len(points)
+    x = lambda i: left + slot * (i + .5)
+    y = lambda v: top + (h - top - bottom) * (1 - min(v or 0, 100) / 100)
+    out = [f'<svg class="chart-svg" viewBox="0 0 {w} {h}" role="img" aria-label="Context used per day">']
+    for v in range(0, 101, 20):
+        out.append(f'<line x1="{left}" x2="{w - right}" y1="{y(v):.1f}" y2="{y(v):.1f}" stroke="var(--line)"/>'
+                   f'<text x="{left - 8}" y="{y(v) + 4:.1f}" text-anchor="end">{v}%</text>')
+    step = max(1, round(len(points) / 10))
+    out += [f'<text x="{x(i):.1f}" y="{h - bottom + 18}" text-anchor="middle">{dt.date.fromisoformat(p["day"]):%-d %b}</text>'
+            for i, p in enumerate(points) if i % step == 0 or i == len(points) - 1]
+    out.append(f'<line x1="{left}" x2="{w - right}" y1="{y(HEAVY_START):.1f}" y2="{y(HEAVY_START):.1f}" stroke="var(--muted)" '
+               'stroke-width="1.5" stroke-dasharray="5 4"/>')
+    bar = min(34, slot * .5)
+    for i, p in enumerate(points):
+        top_ = y(p["start_pct"])
+        radius = min(4, y(0) - top_)
+        out.append(f'<path fill="var(--bar)" d="M{x(i) - bar / 2:.1f} {y(0):.1f} V{top_ + radius:.1f} '
+                   f'Q{x(i) - bar / 2:.1f} {top_:.1f} {x(i) - bar / 2 + radius:.1f} {top_:.1f} H{x(i) + bar / 2 - radius:.1f} '
+                   f'Q{x(i) + bar / 2:.1f} {top_:.1f} {x(i) + bar / 2:.1f} {top_ + radius:.1f} V{y(0):.1f} Z"/>')
+    for key, color in (("peak_pct_max", "var(--series-2)"), ("peak_pct", "var(--series-1)")):
+        path = " ".join(f'{"L" if i else "M"}{x(i):.1f} {y(p[key]):.1f}' for i, p in enumerate(points))
+        out.append(f'<path d="{path}" fill="none" stroke="{color}" stroke-width="2" stroke-linejoin="round"/>')
+        out += [f'<circle cx="{x(i):.1f}" cy="{y(p[key]):.1f}" r="4" fill="{color}" stroke="var(--panel)" stroke-width="2"/>'
+                for i, p in enumerate(points)]
+    last = points[-1]
+    high, low = y(last["peak_pct_max"]), y(last["peak_pct"])
+    out.append(f'<text x="{x(len(points) - 1) + 10:.1f}" y="{min(high, low - 14) + 4:.1f}" class="tag">Largest</text>'
+               f'<text x="{x(len(points) - 1) + 10:.1f}" y="{max(low, high + 14) + 4:.1f}" class="tag">Median</text>')
+    out += [f'<text x="{x(i):.1f}" y="{y(p["peak_pct_max"]) - 11:.1f}" text-anchor="middle" class="tag">↻{p["compacted"]}</text>'
+            for i, p in enumerate(points) if p.get("compacted")]
+    out += [f'<rect x="{left + slot * i:.1f}" y="{top}" width="{slot:.1f}" height="{h - top - bottom}" fill="transparent">'
+            f'<title>{p["day"]} · {p["runs"]} runs · start {pct(p["start_pct"])} · median peak {pct(p["peak_pct"])} · '
+            f'largest {pct(p["peak_pct_max"])}' + (f' · {p["compacted"]} compacted' if p.get("compacted") else "")
+            + '</title></rect>' for i, p in enumerate(points)]
+    return "".join(out + ["</svg>"])
+
+
+def context_section(data, days):
+    """Context used: the trend chart over the stored days, one row per agent and runtime, and the closest runs."""
+    context, series = data.get("context") or {}, trend(days, data["day"], data["summary"])
+    out = ['<section><h2>Context used</h2><div class="label">Share of each run\'s own context window. Start: after the '
+           'first ten model calls. Peak: the largest point. ↻ marks runs that compacted their context.</div>']
+    if not series:
+        return "\n".join(out + ["<p>No run on this day recorded its context; ub-agents records it from 0.5.0.</p></section>"])
+    keys = [k for k in RUNTIMES if k in series] + sorted(series.keys() - RUNTIMES.keys())
+    out.append('<div class="box">')
+    if len(keys) > 2:
+        out.append('<div class="filters" role="group" aria-label="Runtime">' + "".join(
+            f'<button type="button" data-runtime="{esc(k)}" aria-pressed="{str(k == "all").lower()}">'
+            f'{esc(RUNTIMES.get(k, k))}</button>' for k in keys) + '</div>')
+    out.append('<div class="legend"><span><i class="bar" style="background:var(--bar)"></i>Median start</span>'
+               '<span><i style="background:var(--series-1)"></i>Median peak</span>'
+               '<span><i style="background:var(--series-2)"></i>Largest peak</span>'
+               f'<span><i class="dash"></i>{HEAVY_START}% heavy start</span></div>')
+    out += [f'<div data-chart="{esc(k)}"{"" if k == "all" else " hidden"}>{trend_svg(series[k])}</div>' for k in keys]
+    out.append("</div>")
+    if len(keys) > 2:
+        out.append("<script>document.querySelectorAll('[data-runtime]').forEach(b => b.onclick = () => {"
+                   "document.querySelectorAll('[data-runtime]').forEach(o => o.setAttribute('aria-pressed', o === b));"
+                   "document.querySelectorAll('[data-chart]').forEach(c => c.hidden = c.dataset.chart !== b.dataset.runtime);"
+                   "});</script>")
+    if context.get("agents"):
+        out.append('<div class="scroll box"><table><tr><th>Agent</th><th>Runtime</th><th>Runs</th><th>Start</th>'
+                   '<th>Call 10</th><th>Peak, median</th><th>Peak, largest</th><th>Compacted</th></tr>')
+        out += [f'<tr><td>{esc(a["agent"])}</td><td>{esc(RUNTIMES.get(a["runtime"], a["runtime"]))}</td>'
+                f'<td class="r">{a["runs"]}</td><td class="r">{pct(a["start_pct"])}</td>'
+                f'<td class="r">{round(a["call_10_median"] / 1000)}k</td><td class="r">{pct(a["peak_pct"])}</td>'
+                f'<td class="r">{pct(a["peak_pct_max"])}</td><td class="r">{a["compacted"] or "–"}</td></tr>'
+                for a in context["agents"]]
+        out.append("</table></div>")
+        out.append('<p class="muted">Closest to the window: ' + " · ".join(
+            f'<a href="{esc(t["url"] or "")}">#{t["item"]} {esc(t["agent"])}</a> {pct(t["peak_pct"])} of '
+            f'{round(t["window"] / 1000)}k' + (f' ↻{t["compactions"]}' if t["compactions"] else "") for t in context["top"])
+            + (f' · {context["unmeasured"]} runs without context' if context.get("unmeasured") else "") + "</p>")
+    return "\n".join(out + ["</section>"])
+
+
+def report(data, days=None):
     """The page follows references/report.md: header, figures, what to change, where extra runs went,
-    each delivery, retrospectives."""
+    each delivery, context used, retrospectives. `days` are the stored days the context chart adds."""
     repo, summary = data["repo"], data["summary"]
     out = ['<!doctype html><html lang="en"><meta charset="utf-8">',
            '<meta name="viewport" content="width=device-width, initial-scale=1">',
@@ -702,7 +873,9 @@ def report(data):
                    f'<td class="r">{d["human_stops"] or "–"}</td><td class="r">{d["lines"]:,}</td>'
                    f'<td class="r">{spanh(d["lead_h"])}</td><td class="r" title="with human wait: {spanh(d["cycle_h"])}">'
                    f'{spanh(d["loop_cycle_h"])}</td><td class="r">{spanh(d["run_h"])}</td><td>{esc(d.get("note", ""))}</td></tr>')
-    out.append("</table></div></section><section><h2>Retrospectives</h2>")
+    out.append("</table></div></section>")
+    out.append(context_section(data, days or {}))
+    out.append("<section><h2>Retrospectives</h2>")
     retro, posts = data["retrospectives"], {r["url"]: r for r in data["retrospectives"]["in_window"]}
     groups = list(data["retrospective_groups"])
     rest = [u for u in posts if not any(u in g["posts"] for g in groups)]
@@ -791,7 +964,12 @@ SCHEMAS = {
                          "deletions", "files", "issues_closed", "issues_opened", "retrospectives", "backlog",
                          "backlog_unprepared", "backlog_prepared", "open_issues", "waiting_to_start", "machines",
                          "loops", "peak_runs"], COUNT),
-        **dict.fromkeys(["autonomous_pct", "wasted_pct", "denial_pct"], PERCENT),
+        **dict.fromkeys(["autonomous_pct", "wasted_pct", "denial_pct", "context_start_pct", "context_peak_pct",
+                         "context_peak_pct_max"], PERCENT),
+        **dict.fromkeys(["context_runs", "context_compacted"], COUNT),
+        context_by_runtime={"type": "object", "additionalProperties": {"type": "object", "properties": {
+            **dict.fromkeys(["runs", "compacted"], COUNT),
+            **dict.fromkeys(["start_pct", "peak_pct", "peak_pct_max"], PERCENT)}}},
         **dict.fromkeys(["run_h", "human_wait_h", "human_stops_per_delivery", "review_rounds_per_delivery",
                          "lead_h_median", "cycle_h_median", "loop_cycle_h_median", "run_h_median"], HOURS)),
     "items": collection(["day", "items"], day=DAY, items={"type": "array", "items": {
@@ -1034,6 +1212,7 @@ def document(dataset, data, doc=None, button=True, first=None):
     changes = values(dataset.get("changes")) | {c["ref"]: c for c in data.get("changes", [])}
     latest = sorted(changes, key=lambda ref: (changes[ref]["day"], ref), reverse=True)[:5]
     return {"actions": actions, "changelog": changelog(changes),
+            "context_chart": {"title": CONTEXT_CHART_TITLE, "block": context_chart()},
             "cards": [{"lesson": key, "title": inline(lessons[key]["title"]), "changed": key in today}
                       for key in current]
                      + [{"lesson": key, "title": f"~~{inline(lessons[key]['title'])}~~", "changed": key in today,
@@ -1049,6 +1228,21 @@ def chart(mapping):
 
 def column(field, label, fmt="number", **extra):
     return {"field": field, "label": label, "format": fmt} | extra
+
+
+CONTEXT_CHART_TITLE = "Context used, as a share of the window"
+
+
+def context_chart():
+    """Bars for the median start and lines for the median and largest peak, all percent of the window, with the
+    heavy-start level as a reference line on the start series. Chart blocks have no point annotations, so
+    compactions stay a table column."""
+    return chart({"version": 1, "type": "line", "collection": "days", "title": CONTEXT_CHART_TITLE,
+                  "x": {"field": "day", "type": "date", "label": "Day"},
+                  "y": [{"field": "context_start_pct", "label": "Median start (call 10)", "unit": "%", "type": "bar",
+                         "range": [0, 100], "reference": HEAVY_START},
+                        {"field": "context_peak_pct", "label": "Median peak", "unit": "%", "range": [0, 100]},
+                        {"field": "context_peak_pct_max", "label": "Largest peak", "unit": "%", "range": [0, 100]}]})
 
 
 def create_document(data, button=True):
@@ -1092,13 +1286,16 @@ def create_document(data, button=True):
                "x": {"field": "day", "type": "date", "label": "Day"},
                "y": [{"field": "machines", "label": "Machines"}, {"field": "loops", "label": "Loops"},
                      {"field": "peak_runs", "label": "Peak parallel runs"}]}),
+        context_chart(),
         chart({"version": 1, "type": "table", "collection": "days", "title": "Recent days",
                "columns": [column("day", "Day", "date"), column("deliveries", "Deliveries"),
                            column("autonomous", "Autonomous"), column("wasted_pct", "Wasted runs", **percent),
                            column("human_stops", "Human stops"), column("loop_cycle_h_median", "Cycle", **hours),
                            column("run_h_median", "Run time", **hours), column("denial_pct", "Denials", **percent),
                            column("backlog", "Actionable queue"), column("waiting_to_start", "Waiting to start"),
-                           column("open_issues", "Open issues"), column("machines", "Machines")],
+                           column("open_issues", "Open issues"), column("machines", "Machines"),
+                           column("context_peak_pct_max", "Largest context", **percent),
+                           column("context_compacted", "Compacted")],
                "sort": {"field": "day", "direction": "desc"}, "limit": RECENT_DAYS}),
         {"type": "heading", "level": 2, "text": "Recommended Actions"},
         *sections["actions"],
@@ -1109,6 +1306,20 @@ def create_document(data, button=True):
             "description": f"Daily KPIs, causes and actions of the ub-agents loop in {repo}, stored by the "
                            "ub-agents-deliver-report skill.",
             "blocks": blocks}
+
+
+def stored_days(paths):
+    """Days for the context chart from get_data output or earlier report.json files; a missing file adds none."""
+    days = {}
+    for path in map(Path, paths):
+        if not path.exists():
+            continue
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError as e:
+            sys.exit(f"{path}: {e}")
+        days |= {loaded["day"]: loaded["summary"]} if isinstance(loaded, dict) and "summary" in loaded else values(loaded)
+    return days
 
 
 def main():
@@ -1122,6 +1333,9 @@ def main():
     r = commands.add_parser("render")
     r.add_argument("data"), r.add_argument("notes"), r.add_argument("out")
     r.add_argument("--no-open", action="store_true", help="do not open the report in the default browser")
+    r.add_argument("--days", action="append", default=[],
+                   help="stored days for the context chart: the days collection as get_data returned it, or an "
+                        "earlier day's report.json; repeat for several")
     q = commands.add_parser("queue", help="only the open-queue figures for a day: issue lists and events, no run records")
     q.add_argument("--repo", required=True)
     q.add_argument("--day", help="calendar day, YYYY-MM-DD, UTC (default yesterday)")
@@ -1172,7 +1386,7 @@ def main():
         out = Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
         page = out / "report.html"
-        page.write_text(report(data), encoding="utf-8")
+        page.write_text(report(data, stored_days(args.days)), encoding="utf-8")
         (out / "report.json").write_text(json.dumps(data, indent=1), encoding="utf-8")
         print(page.resolve())
         if not args.no_open:
