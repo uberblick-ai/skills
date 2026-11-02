@@ -20,7 +20,7 @@ compatibility: >-
   the `ub` command; without either the skill prints a table.
 metadata:
   author: uberblick-ai
-  version: "1.10"
+  version: "1.11"
 ---
 
 # CI health
@@ -78,7 +78,9 @@ decide.
    `DOC`, or for a document created in step 9, leave `--after` out: the
    default is yesterday alone. `--day` picks one day instead when the
    maintainer names it, and `--since` (with `--until`) a longer history only
-   when they ask for one. A long span takes minutes. When the command fails,
+   when they ask for one. Reads that never change (a finished run's jobs, its
+   attempts, job logs) are kept across reports in `~/.cache/ci-health`, so a
+   first collection takes a couple of minutes and later ones seconds. When the command fails,
    run it again: the cache resumes the reads that succeeded. Use the same
    cache for this report's `collect`, `logs` and `tests`, and a fresh scratch
    directory for a new report.
