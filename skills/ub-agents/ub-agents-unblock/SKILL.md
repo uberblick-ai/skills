@@ -16,7 +16,7 @@ compatibility: >-
   otherwise with gh alone. Its own GitHub calls use the REST API only.
 metadata:
   author: uberblick-ai
-  version: "0.6"
+  version: "0.7"
 ---
 
 # Unblock the loop
@@ -115,6 +115,10 @@ How the launcher works; the project decides the labels, roles and policy.
      gh api -X DELETE repos/REPO/issues/N/labels/STOP
      gh api repos/REPO/issues/N/labels -f "labels[]=TRIGGER"
      ```
+     Before adding a trigger to a PR, check that it is not a draft
+     (`gh api repos/REPO/pulls/N --jq .draft`): reviewing and integrating
+     roles refuse drafts and block on them. Leave a draft's trigger until
+     whoever owns it marks it ready, and say so.
    - **Merge:** only at the notice's SHA, with the method the policy names.
      Merging finishes the item.
      `gh api -X PUT repos/REPO/pulls/N/merge -f merge_method=squash -f sha=SHA`
@@ -131,11 +135,24 @@ How the launcher works; the project decides the labels, roles and policy.
    When the answer needs other work first (a separate fix, a CI rerun), do it
    or file it, and resume the item only once the notice's condition holds.
 
-7. End with one line per item: what changed and which role picks it up next.
-   For example:
+7. Check that every item you resumed is eligible again, with ub-agents in
+   the checkout:
+
+   ```sh
+   ub-agents status N --json | jq '.assignments[] | select(.number == N) | {agent, state, reason}'
+   ```
+
+   `ready`, `owned` or `backoff` means the loop has it. Any other state
+   means it is still stuck: read its `reason`, fix what you can (a `blocked`
+   row whose cause is gone takes `ub-agents retry`) and report the rest.
+   Without ub-agents, say the check was skipped.
+
+8. End with one line per item: what changed, which role picks it up next and
+   what `status` reported. For example:
 
    ```text
-   #2201 answered "Split the migration", needs-human removed, needs-preparation added: the preparer picks it up.
+   #2201 answered "Split the migration", needs-human removed, needs-preparation added: the preparer picks it up (ready).
    #2210 merged at 3f2a9c1: done.
    #2215 skipped: nothing changed, still waiting on you.
+   #2220 answered, ready-to-merge added, but still parked: "Assignment approval history is unreadable".
    ```

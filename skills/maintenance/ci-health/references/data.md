@@ -29,6 +29,11 @@ attempt's jobs, skipping jobs that were skipped.
 | `loc_tool`, `loc_paths` | | the line counter and the pathspecs it counted, joined by ` \|\| ` |
 | `coverage_pct`, `measured_sha` | | the same commit, by `mise run codecov`; the last day only |
 
+- `collect` reads 21 days before the first day, for the 7-day median and
+  the steps, eight runs at a time. A finished run's jobs, keyed by its
+  attempt and update time, its attempts' conclusions and job logs are kept
+  in `$CI_HEALTH_CACHE` (default `~/.cache/ci-health`, empty to turn it
+  off) for every report, pruned after 118 days; the runs list is read anew.
 - A day is a UTC calendar day; a commit belongs to the day its first run was
   created. A commit with a run still going is left for a later collection.
 - Green means every workflow of the commit concluded `success`, `skipped` or

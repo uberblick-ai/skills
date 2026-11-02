@@ -2,11 +2,8 @@
 
 One page per repository per day, and one record of it. It answers, in this
 order: how autonomous the day was, what to change, where the extra runs went,
-how each item fared, what the roles said about themselves.
-`scripts/review.py digest` prints the day from `data.json` for the agent to
-read; `scripts/review.py render` lays the page out from `data.json` and
-`notes.json`; `scripts/review.py records` turns the result into dataset
-records. This file says what each holds.
+how each item fared, how much context the runs used, what the roles said about
+themselves.
 
 ## Runs
 
@@ -25,9 +22,7 @@ G integrator.
   lease. It counts toward nothing until a later collection sees its outcome.
 
 A withdrawn lease, a claim that never started and a recovery lease that only
-re-posts another run's report are not runs. Every record version the loop has
-written (`ub-agent:v1`, `ub-agent:v2`, `ub-agents:v2`, `ub-agents:v3`) carries
-the same JSON record, and all are read.
+re-posts another run's report are not runs.
 
 A **loop delivery** is an item delivered on the day that an implementer worked
 on. Work that came from outside the loop, such as a PR written in an attended
@@ -59,6 +54,21 @@ of the day. Overnight launcher pauses still count toward cycle; ub-agents does
 not record them yet. Collect a day a few hours after midnight, so runs still
 going at midnight have reported.
 
+Context used, for reading, not a target. ub-agents 0.5.0 and later records
+each run's main-session `context` on its outcome: the window, the prompt
+tokens of the first call, of call 10 and of the largest call, and how often the
+runtime compacted. The day's figures are shares of each run's own window over
+the runs started that day that carry it; runs without it are left out, never
+counted as zero, and a day where none carries it has none of these fields.
+
+| Field | What it is |
+| --- | --- |
+| `context_runs` | Runs with recorded context |
+| `context_start_pct` | Median context after the first ten calls: how heavy runs start. 20% is the heavy-start level the chart marks |
+| `context_peak_pct`, `context_peak_pct_max` | Median and largest peak |
+| `context_compacted` | Runs that compacted their context |
+| `context_by_runtime` | The same five, as `runs`, `start_pct`, `peak_pct`, `peak_pct_max` and `compacted`, per runtime (`claude`, `codex`) |
+
 Inflow and capacity, also context:
 
 | Field | What it counts |
@@ -69,15 +79,13 @@ Inflow and capacity, also context:
 | `waiting_to_start` | Open issues no role can take until a person starts them: no workflow label (drafts, sub-issues not yet started, agent-filed follow-ups awaiting approval) or parked at a stop label. Parents with sub-issues are left out; their work counts in the children. |
 | `open_issues` | All open issues at the end of the day, parents included. Issues opened above deliveries day after day shows as this rising. |
 | `machines` | Distinct hosts that ran a role that day; absent for days whose records name no host (before 2 October 2026) |
-| `loops` | Distinct loop checkouts that ran a role that day |
+| `loops` | Distinct loop checkouts that ran a role that day; absent for days whose records name no checkout (ub-agents 0.3.6 and later) |
 | `peak_runs` | The most runs that overlapped at any moment that day |
 
 The queue is reconstructed from today's labels with every later label and
 state change undone, so a past day reads the same whenever it is collected;
 parent links are today's. `review.py queue --repo REPO --day DAY` prints just
-these figures, from issue lists and events without run records.
-Hosts and checkouts are counted, never stored: the collector keys on short
-hashes.
+these figures.
 
 ## Causes
 
@@ -135,7 +143,16 @@ same gap recurring is worth fixing.
    retrospectives, one chip per run in order (green forward, amber back, red
    stop or waste, grey pending), autonomous, wasted runs, review rounds, human
    stops, lines changed, lead, cycle without the wait, run time, and the note.
-6. **Retrospectives.** The day's board posts grouped by cause: one card per
+6. **Context used.** One chart over the stored days (the newest 30) and this
+   one, on one 0 to 100% axis: bars for the median start, a line each for
+   the median and the largest peak, `↻N` above a day where N runs compacted,
+   and a dashed line at 20%. Buttons switch between all runtimes and each
+   runtime; hovering a day shows its figures. Below it, one row per agent and
+   runtime (runs, start, call 10 in tokens, median and largest peak,
+   compacted), and the three runs that came closest to their window, with
+   links. `render --days` supplies the stored days; without them the chart
+   shows this day alone.
+7. **Retrospectives.** The day's board posts grouped by cause: one card per
    group with the number of posts, the cause, a one-sentence summary and links
    to the posts by role. Posts the notes did not group share one last card. A
    line says when none was posted or which board could not be read.
@@ -146,7 +163,7 @@ not add any.
 
 ## Notes
 
-The reviewing agent writes `notes.json`; `render` refuses notes with an
+`render` refuses notes with an
 unknown class, state or lever, a missing field, one cause in two findings, a
 retrospective in two groups or not posted that day, a tracked or applied
 lesson without `addressed_by`, or more than five actions.
@@ -184,9 +201,7 @@ whether it is a pull request that implements the lesson (`implemented`) or an
 issue that plans it (`planned`, the default). `actions` lists up to five
 lessons still `proposed` that this day or one of the 13 before it proposed,
 most runs saved first; an older lesson drops off until a day proposes it
-again. Write a lesson's `cost` with dates ("5 runs on 11 October"), never
-"today", since it may stay an action for 14 days. A change is
-anything that landed on this day to fix a cause or apply a lesson; `ref` is
+again. A change is anything that landed on this day to fix a cause or apply a lesson; `ref` is
 `owner/name#number` or a commit, with `url` for a commit. `records` gives every
 change a `url`, derived from `ref` when the notes give none.
 
@@ -233,10 +248,9 @@ and `ci`, the workflow runs on its PRs with their result, attempt and minutes.
 Empty lists are left out. `digest` prints every run of such an item with its
 summary, denials and evidence, and one line for every other item.
 
-`records` turns `report.json` into one `update_data` batch for the dataset
-document. A document keeps each collection's schema and checks every record
-against it, so the batch leaves schemas out; `records --schemas` adds them,
-for a new document, a missing collection or a record a stored schema refuses:
+`records` turns `report.json` into one `update_data` batch. The document
+keeps each collection's schema and checks every record against it, so the
+batch leaves schemas out unless `--schemas` is passed:
 
 | Collection | Key | One record per |
 | --- | --- | --- |
@@ -247,26 +261,18 @@ for a new document, a missing collection or a record a stored schema refuses:
 | `lessons` | `launcher-installs-dependencies` | lesson: lever, change, causes, state, `addressed_by` |
 | `changes` | `uberblick-ai/ub-agents#361` | change that landed: day, title, why, causes, lessons |
 
-Storing a day again overwrites its records; a finding that no longer applies
-stays until `deleteRecords` removes it. A person's verdict on a cause or
+Storing a day again overwrites its records. A person's verdict on a cause or
 lesson belongs in a separate `verdicts` collection keyed by the same id; the
 skill never writes it, so a refresh cannot overwrite it.
 
 Item detail is a recent snapshot: each item leaves out zero, empty and
 derivable fields, and storing a day deletes `items` records older than 14 days.
-`days`,
-`findings`, `causes`, `lessons` and `changes` stay, so trends cover 180 days
-and more. A document's data is limited to 4 MiB; a year of days and findings
-takes about 2 MB.
+`days`, `findings`, `causes`, `lessons` and `changes` stay, so trends cover
+180 days and more; a year takes about 2 MB of the document's 4 MiB.
 
 ## Document
 
-The dataset document is optional: the skill updates it when it exists,
-offers to create it when Uberblick is available but no document holds the
-collections above, and leaves the page as the whole result when Uberblick is
-not available. `scripts/review.py create` writes the `create_doc` arguments
-for a new one, from `report.json`, in the layout below. It reads top to
-bottom:
+`create` lays a new document out as below, top to bottom:
 
 1. **Intro.** What the loop is, what the report measures, and where the skill
    lives.
@@ -289,59 +295,52 @@ bottom:
     "sort": {"field": "day", "direction": "desc"}, "limit": 7}
    ```
 
-   `limit` keeps the newest seven days in the table. `pageSize`, which older
-   documents carry, never affected the display.
+   The context chart mixes bars and lines on one axis and draws the
+   heavy-start level as a reference line. Chart blocks have no point
+   annotations, so compactions are a column of the Recent days table, not a
+   mark on the chart:
 
-3. **Recommended Actions.** The day's `actions`: up to five proposed
-   lessons, each a card with the lever as its label, the title, the change as
-   its body, and a footer with where it lives, its cost, its causes and its
-   evidence. Below them, the `tracked` lessons of the last 14 days, struck
-   through: the title and change crossed out, no button, and a footer, not
-   struck through, that names the change, such as `Planned in
-   [acme/app#212](https://github.com/acme/app/issues/212).` A link whose text
-   is the `owner/name#number` reference and whose target is its GitHub address
-   shows as a GitHub pill. A lesson leaves the list once that change merges
-   or closes. Each proposed card has a "Discuss in Claude Code" button to
-   `claude://code/new?q=PROMPT`, which opens a new session in the Claude
-   desktop app with the prompt filled in, not sent. The prompt names the
-   repository, the document and the day the lesson was last proposed, the
-   change, where it lives and its evidence. It first has the session search
-   the issues and pull requests for the same change, open ones (drafts
-   included) and ones merged or closed in the last 30 days, and work from one
-   that covers it instead of starting another; then it asks for a plan before any change; the link
-   cannot select a repository by name, only a local folder, so the prompt
-   names it. Card prose takes only http(s) links, so the link is a `button:`
-   line, which Uberblick reads from the release after 0.4.3; `--no-button`
-   leaves it out for older versions. When the discussion settles on applying
-   the lesson, or the search finds an open pull request or issue already making
-   it, the prompt asks that session to mark it as soon as a pull request
-   implements it (a draft counts) or an issue plans it, so a second reader
-   sees it taken: replace the card with the struck one,
-   then set the lesson's record in `lessons` to `tracked`, with
-   `addressed_by` and `addressed_as`, so later reports keep it struck
-   through.
-4. **Changelog.** A bullet list of the five latest `changes`, newest first:
-   the day, the change's title, its issue or PR in ub-agents or the project,
-   and why it was made, such as `20 Oct: Quarantine six flaky tests
+   ```json
+   {"version": 1, "type": "line", "collection": "days", "title": "Context used, as a share of the window",
+    "x": {"field": "day", "type": "date", "label": "Day"},
+    "y": [{"field": "context_start_pct", "label": "Median start (call 10)", "unit": "%", "type": "bar",
+           "range": [0, 100], "reference": 20},
+          {"field": "context_peak_pct", "label": "Median peak", "unit": "%", "range": [0, 100]},
+          {"field": "context_peak_pct_max", "label": "Largest peak", "unit": "%", "range": [0, 100]}]}
+   ```
+
+   `document` returns the same block as `context_chart`, so a document
+   created before it gets the chart once.
+
+3. **Recommended Actions.** The day's `actions`, each a card: the lever as
+   its label, the title, the change as its body, and a footer with where it
+   lives, its cost, causes and evidence. Each has a "Discuss in Claude Code"
+   button (`claude://code/new?q=PROMPT`, a `button:` line that Uberblick
+   reads from the release after 0.4.3) whose prompt names the repository,
+   the document, the lesson's day, the change and its evidence. It first has
+   the session search the issues and pull requests for the same change, open
+   ones (drafts included) and ones merged or closed in the last 30 days, and
+   work from one that covers it instead of starting another; then it asks for
+   a plan. When that discussion settles on the lesson, or the search finds an
+   open pull request or issue already making it, the session replaces the
+   card with a struck-through one as soon as a pull request (a draft counts)
+   or issue exists, and sets the lesson to `tracked` with `addressed_by` and
+   `addressed_as`. Below the proposed
+   cards, `tracked` lessons of the last 14 days stay struck through, with
+   no button and a footer such as `Planned in
+   [acme/app#212](https://github.com/acme/app/issues/212).`, until that
+   change merges or closes.
+4. **Changelog.** The five latest `changes`, newest first, such as `20 Oct:
+   Quarantine six flaky tests
    ([uberblick-2#2004](https://github.com/uberblick-ai/uberblick-2/pull/2004)).
    Six tests turned main red;
    [#2003](https://github.com/uberblick-ai/uberblick-2/issues/2003) tracks
-   them.` The reference is the link, not the title, so Uberblick shows it as
-   a GitHub pill, which it draws only for a link whose text names the item.
-   Its address is the one GitHub gives, `/pull/` or `/issues/`, so the pill
-   shows the right kind. A change that is a commit keeps its title linked to
-   the commit. In `why`, each `#n` (the change's repository), `name#n` (the
-   same owner) or `owner/name#n` that GitHub knows is linked the same way;
-   any other text stays plain.
+   them.` Uberblick draws a GitHub pill only for a link whose text names the
+   item, so the reference is the link, with GitHub's own `/pull/` or
+   `/issues/` address, and `#n`, `name#n` and `owner/name#n` in `why` are
+   linked the same way. A commit keeps its title linked to the commit.
 
-After each stored day the skill brings the "Recommended Actions" and
-"Changelog" sections up to date from `document`'s output, one block at a time:
-it deletes a card whose lesson left the list, edits a card in place when the
-day changed its lesson, so comments on it stay (a struck-through card is
-replaced instead, since `edit_block` cannot change formatting), inserts a new one, and adds
-the day's changes to the changelog. `document` marks each card `changed` and
-counts the new changelog items in `changelog_new`; a card is otherwise the
-same from day to day. Everything else is written once, by `create` or by a
-person, and may be edited by hand; the charts and tables follow the
-data by themselves. A chart plots every stored day; the Recent days table
-lists the newest seven.
+`document` marks each card `changed` and counts new changelog items in
+`changelog_new`, so the skill updates these two sections one block at a time.
+Everything else is written once, by `create` or a person; the charts plot
+every stored day and the Recent days table the newest seven.

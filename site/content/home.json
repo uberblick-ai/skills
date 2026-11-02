@@ -18,6 +18,10 @@
     {"label": "Contribute", "question": "How do I write a skill for this repository?", "links": [["Guide", "AGENTS.md", "https://github.com/uberblick-ai/skills/blob/main/AGENTS.md"], ["Spec", "Agent Skills specification", "https://agentskills.io/specification"]]}
   ],
   "changes": [
+    ["2026-11-02", "Skill", "Added mcp-insights 0.1 in the new MCP group: reviews an MCP server from the outside, like PageSpeed reviews a page, with five scores, context vitals, agent trials and ranked fixes."],
+    ["2026-11-02", "Skill", "ub-agents-deliver-report 1.13: the Capacity chart shows a gap instead of 0 loops on days whose run records no longer name a loop checkout."],
+    ["2026-11-02", "Skill", "ub-agents-deliver-report 1.12: a Context used chart per day, start and peak as a share of the window, with compactions and a 20% heavy-start line."],
+    ["2026-11-02", "Skill", "ci-health 1.11: collecting CI runs takes seconds after the first report, since finished runs are read once and kept, and a first report reads them eight at a time."],
     ["2026-11-02", "Skill", "ub-agents-deliver-report 1.11: the discussion an action card opens looks for issues and pull requests already on the change, drafts included, before planning one."],
     ["2026-11-02", "Skill", "ci-health 1.10: before an action is built, the skill and its discussion prompt look for issues and pull requests already on it, drafts included, and mark the card as taken."],
     ["2026-11-01", "Skill", "backlog-grooming 1.5: when most issues have a milestone, the report groups them by milestone, and recommends one, or none, for each issue without. A Discuss with Claude link opens the findings in Claude Code."],
