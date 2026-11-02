@@ -41,7 +41,7 @@
     ],
     [
       "Actions",
-      "up to three changes that would cut the wait, kept until done or outranked, each with its evidence and a button to discuss it in Claude Code"
+      "up to three changes that would cut the wait, kept until done or outranked, each with its evidence and a button to discuss it in Claude Code; one an open issue or pull request already covers, drafts included, is struck through with it"
     ],
     [
       "Incidents",
