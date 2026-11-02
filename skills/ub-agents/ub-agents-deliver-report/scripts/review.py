@@ -229,17 +229,8 @@ def events_since(repo, moment):
 
 def parents(repo):
     """Open issues with sub-issues: containers whose work is counted in their children."""
-    owner, name = repo.split("/")
-    found, cursor = set(), None
-    while True:
-        after = f', after: "{cursor}"' if cursor else ""
-        page = gh("graphql", "-f", f'query=query {{ repository(owner: "{owner}", name: "{name}") {{ issues(states: OPEN, '
-                  f'first: 100{after}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ number subIssues {{ totalCount }} }} }} }} }}'
-                  )["data"]["repository"]["issues"]
-        found |= {n["number"] for n in page["nodes"] if n["subIssues"]["totalCount"]}
-        if not page["pageInfo"]["hasNextPage"]:
-            return found
-        cursor = page["pageInfo"]["endCursor"]
+    return {r["number"] for r in pages(f"repos/{repo}/issues", state="open")
+            if "pull_request" not in r and (r.get("sub_issues_summary") or {}).get("total")}
 
 
 def queue(repo, until, rows, agents):
@@ -276,7 +267,10 @@ def queue(repo, until, rows, agents):
 
 def runs_of(records):
     leases = {r["run"]: r for r in records if r.get("kind") == "lease"}
-    outcomes = {r["run"]: r for r in records if r.get("kind") == "outcome"}
+    run_of = {r.get("id"): run for run, r in leases.items()}
+    # Outcomes name their lease by comment id; before ub-agents 0.3.8 they also carried its run.
+    outcomes = {r.get("run") or run_of.get(r.get("lease_id"), f'lease {r.get("lease_id")}'): r
+                for r in records if r.get("kind") == "outcome"}
     runs = []
     for run in leases.keys() | outcomes.keys():
         lease, out = leases.get(run, {}), outcomes.get(run, {})
@@ -456,7 +450,7 @@ def collect(repo, day, zone, since, until):
             if c["author_association"] not in TRUSTED:
                 continue
             if found := RECORD.search(c["body"] or ""):
-                records.append(json.loads(found.group(1)) | {"url": c["html_url"]})
+                records.append(json.loads(found.group(1)) | {"id": c["id"], "url": c["html_url"]})
                 loop_accounts.add((c.get("user") or {}).get("login"))
             if NOTICE.match(c["body"] or ""):
                 notices.append(c["created_at"])

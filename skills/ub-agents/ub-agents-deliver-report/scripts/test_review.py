@@ -199,6 +199,16 @@ class Tests(unittest.TestCase):
                        context | {"peak": 1}, context | {"first": "35000"}):
             self.assertIsNone(review.runs_of([lease, outcome | {"context": broken}])[0]["context"])
 
+    def test_outcomes_find_their_lease_by_comment_id(self):
+        lease = {"kind": "lease", "id": 11, "run": "a", "agent": "reviewer", "runtime": "claude:m:high",
+                 "created": "2026-11-01T04:00:00Z"}
+        outcome = {"kind": "outcome", "lease_id": 11, "agent": "reviewer", "status": "success",
+                   "outcome": "approved", "accepted": True, "created": "2026-11-01T04:10:00Z"}
+        orphan = outcome | {"lease_id": 12, "created": "2026-11-01T05:00:00Z"}
+        runs = review.runs_of([lease, outcome, orphan])
+        self.assertEqual([(r["runtime"], r["minutes"], r["result"]) for r in runs],
+                         [("claude:m:high", 10.0, "approved"), (None, None, "approved")])
+
     def test_context_report_groups_by_agent_and_runtime(self):
         def measured(agent, runtime, window, call_10, peak, compactions=0, cls="forward"):
             return run(agent, "2026-10-14T04:00:00Z", 10, cls) | {"runtime": runtime, "url": "u", "context": {
