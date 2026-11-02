@@ -196,7 +196,7 @@ CATALOG = [
      "Keep field descriptions to meaning, format and one example.", ["tools"], "", False),
     ("C05", "context", 3, "metric", "Largest help topic fits the budget",
      "A topic is read in full when the agent asks; oversized topics push the task out of context.",
-     "Split large topics by job and drop pasted schemas.", ["resources", "prompts"], "", False),
+     "Split large topics by job, so an agent reads only the part its task needs.", ["resources", "prompts"], "", False),
     ("C06", "context", 1, "metric", "All help together fits the budget",
      "Total help size is a proxy for duplication and drift.",
      "Remove duplicated syntax and history from help.", ["resources", "prompts"], "", False),
@@ -1576,7 +1576,7 @@ def render_html(report: dict) -> str:
 
     cat_names = {k: n for k, n, _ in CATEGORIES}
     fixes = []
-    for i, rec in enumerate(report["recommendations"][:5], 1):
+    for i, rec in enumerate(report["recommendations"], 1):
         effects = [f'<span class="pill cat-{esc(k)}">+{v:g} {esc(cat_names.get(k, k))}</span>'
                    for k, v in sorted((rec.get("effects") or {}).items(), key=lambda kv: -kv[1])]
         if rec.get("lifts_cap_with"):
@@ -1599,6 +1599,9 @@ def render_html(report: dict) -> str:
             f'<div class="fix-actions"><button type="button" data-copy="{esc(rec.get("fix", ""))}">Copy suggestion</button>'
             f'<button type="button" data-copy="{esc("# " + rec["issue"]["title"] + chr(10) + chr(10) + rec["issue"]["body"])}">Copy as issue</button></div>'
             f'</div></article>')
+    # The five largest effects lead; the rest stay one click away, since a fix with no effect under a cap still matters.
+    if len(fixes) > 5:
+        fixes[5:] = [f'<details class="trials-more"><summary>{len(fixes) - 5} more suggestions</summary>{"".join(fixes[5:])}</details>']
 
     sections = []
     for key, name, question in CATEGORIES:
@@ -1689,7 +1692,8 @@ def render_html(report: dict) -> str:
         "VITALS": "".join(vitals),
         "TRIALS": trials_html(report.get("trials"), results),
         "FIXES": "".join(fixes) or '<p class="empty">Nothing to suggest above the noise.</p>',
-        "FIXES_LEAD": esc("The five changes with the largest expected effect on the scores; those that lift a cap come first. "
+        "FIXES_LEAD": esc("Ranked by expected effect on the scores, those that lift a cap first; the rest fold below the first five. "
+                          "A fix in a category capped by another audit shows no gain until that cap is lifted. "
                           "Each gain is the category re-scored as if the audits the suggestion names passed, or, for a size fix "
                           "with a stated saving, as if the text were that much smaller: what a complete fix would earn, not a forecast. "
                           "They describe what an agent saw and what it should see instead, judged from the outside; "
