@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Facts and the dataset records for the ci-health skill. Reads GitHub Actions only; standard library and `gh`.
 
-    ci.py collect --repo OWNER/NAME [--day D | --since D [--until D] | --after days.json] [--workflow W] [--start D] > data.json
+    ci.py collect --repo OWNER/NAME [--day D | --since D [--until D] | --after days.json] [--workflow W] [--start D] [--cache DIR] > data.json
     ci.py shifts data.json [--limit 5]                 # candidate incidents: steps in wall time, and hangs
-    ci.py logs data.json --out DIR [--day DAY]         # a day's job logs, cleaned, to find the test summary line
-    ci.py tests data.json --pattern REGEX...           # each day's test count from that line, added in place
+    ci.py logs data.json --out DIR [--day DAY] [--cache DIR]  # a day's job logs, cleaned, to find the test summary line
+    ci.py tests data.json --pattern REGEX... [--cache DIR]    # each day's test count from that line, added in place
     ci.py measure data.json --checkout PATH [--path SPEC]... [--every-day]  # optional: test ratio and coverage, added in place
     ci.py summary data.json                            # the days as a Markdown table, for a reply
     ci.py signals data.json [--days 7] > signals.json  # what the last days show, to choose the top actions
@@ -22,7 +22,9 @@ references/data.md.
 """
 
 import argparse
+from dataclasses import dataclass
 import datetime as dt
+import hashlib
 import io
 import json
 import math
@@ -44,13 +46,78 @@ LOOKBACK = 21  # days of commits read before the first day: the rolling median a
 LOG_DAYS = 90  # GitHub keeps job logs this long, so a backfill reaches no further back
 LOG = re.compile(r"^﻿?\d{4}-\d\d-\d\dT[\d:.]+Z ?")
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+GH_ATTEMPTS = 3
+GH_TIMEOUT = 60
+
+
+class ReadCache:
+    """Successful reads for one report, optionally shared by its CLI commands."""
+
+    def __init__(self, directory=None):
+        self.directory = Path(directory) if directory is not None else None
+        self.entries = {}
+
+    def get(self, key):
+        digest = hashlib.sha256(json.dumps(key).encode()).hexdigest()
+        if digest not in self.entries and self.directory is not None:
+            try:
+                self.entries[digest] = (self.directory / digest).read_bytes()
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise RuntimeError(f"Cannot read cache {self.directory}: {exc}") from exc
+        return self.entries.get(digest)
+
+    def put(self, key, value):
+        digest = hashlib.sha256(json.dumps(key).encode()).hexdigest()
+        if self.directory is not None:
+            temporary = None
+            try:
+                self.directory.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(dir=self.directory, delete=False) as stream:
+                    temporary = Path(stream.name)
+                    stream.write(value)
+                temporary.replace(self.directory / digest)
+            except OSError as exc:
+                raise RuntimeError(f"Cannot write cache {self.directory}: {exc}") from exc
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
+        self.entries[digest] = value
+
+
+CACHE = ReadCache()
 
 
 def gh(path, raw=False, *flags):
-    done = subprocess.run(["gh", "api", *flags, path], capture_output=True)
-    if done.returncode:
-        raise RuntimeError(f"gh api {path}: {done.stderr.decode(errors='replace').strip()}")
-    return done.stdout if raw else json.loads(done.stdout)
+    key = ("api", path, *flags)
+    if not raw and (cached := CACHE.get(key)) is not None:
+        return json.loads(cached)
+    for attempt in range(GH_ATTEMPTS):
+        try:
+            done = subprocess.run(["gh", "api", *flags, path], capture_output=True, timeout=GH_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            message, retry = f"request timed out after {GH_TIMEOUT}s", True
+        except OSError as exc:
+            raise RuntimeError(f"gh api {path}: {exc}") from exc
+        else:
+            if not done.returncode:
+                if raw:
+                    return done.stdout
+                try:
+                    result = json.loads(done.stdout)
+                except (ValueError, UnicodeDecodeError) as exc:
+                    raise RuntimeError(f"gh api {path}: invalid JSON response") from exc
+                CACHE.put(key, done.stdout)
+                return result
+            message = done.stderr.decode(errors="replace").strip()
+            retry = bool(re.search(r"timed? out|timeout|connection (?:reset|refused)|unexpected eof|"
+                                   r"tls handshake|could not resolve|temporary failure|http (?:500|502|503|504)\b",
+                                   message, re.I))
+        if not retry or attempt == GH_ATTEMPTS - 1:
+            raise RuntimeError(f"gh api {path}: {message}")
+        print(f"gh api: transient read failure, retry {attempt + 2}/{GH_ATTEMPTS}: {path}", file=sys.stderr)
+        time.sleep(2 ** attempt)
 
 
 def pages(path, key, **params):
@@ -121,6 +188,9 @@ def tests_in(text, patterns):
 
 
 def job_log(repo, job_id):
+    key = ("job-log", repo, job_id)
+    if (cached := CACHE.get(key)) is not None:
+        return cached.decode()
     path = f"repos/{repo}/actions/jobs/{job_id}/logs"
     try:
         data = gh(path, True)
@@ -131,8 +201,11 @@ def job_log(repo, job_id):
         data = gh(path, True, "--allow-escape-sequences")
     if data[:2] == b"PK":  # some hosts hand back the zipped log
         with zipfile.ZipFile(io.BytesIO(data)) as z:
-            return "\n".join(z.read(n).decode(errors="replace") for n in z.namelist())
-    return data.decode(errors="replace")
+            text = "\n".join(z.read(n).decode(errors="replace") for n in z.namelist())
+    else:
+        text = data.decode(errors="replace")
+    CACHE.put(key, text.encode())
+    return text
 
 
 def stored_days(collection):
@@ -211,8 +284,9 @@ def collect(repo, first, last, required=(), floor=None):
         if run["status"] != "completed":
             pending.add(run["head_sha"])
             continue
-        jobs = [j for j in pages(f"repos/{repo}/actions/runs/{run['id']}/jobs", "jobs", filter="latest")
-                if j.get("started_at") and j.get("completed_at") and j["conclusion"] not in ("skipped", None)]
+        jobs = [] if run["conclusion"] == "skipped" else [
+            j for j in pages(f"repos/{repo}/actions/runs/{run['id']}/jobs", "jobs", filter="latest")
+            if j.get("started_at") and j.get("completed_at") and j["conclusion"] not in ("skipped", None)]
         c = commits.setdefault(run["head_sha"], {
             "sha": run["head_sha"], "created": run["created_at"],
             "title": (run.get("head_commit") or {}).get("message", "").split("\n")[0][:200],
@@ -393,13 +467,32 @@ def mise_json(root, task, timeout):
     return {}
 
 
-def line_counter():
-    """The first line counter on the PATH, as `name version`, or None."""
-    for tool in COUNTERS:
-        if shutil.which(tool):
-            version = re.search(r"\d+(?:\.\d+)+", subprocess.run([tool, "--version"], capture_output=True,
-                                                                  text=True).stdout)
-            return f"{tool} {version.group(0)}" if version else tool
+@dataclass(frozen=True)
+class LineCounter:
+    tool: str
+    executable: str
+    label: str
+
+
+def line_counter(tools=COUNTERS):
+    """The first working counter, retaining its executable across worktrees; None if none is installed."""
+    errors = []
+    for tool in tools:
+        if executable := shutil.which(tool):
+            executable = os.path.abspath(executable)
+            try:
+                done = subprocess.run([executable, "--version"], capture_output=True, text=True)
+            except OSError as exc:
+                errors.append(f"{executable}: {exc}")
+                continue
+            if done.returncode or not done.stdout.strip():
+                errors.append(f"{executable} --version (exit {done.returncode}): "
+                              f"{done.stderr.strip() or 'no version output'}")
+                continue
+            version = re.search(r"\d+(?:\.\d+)+", done.stdout)
+            return LineCounter(tool, executable, f"{tool} {version.group(0)}" if version else tool)
+    if errors:
+        raise RuntimeError("measure: no working line counter: " + "; ".join(errors))
     return None
 
 
@@ -411,20 +504,40 @@ def install_hint():
 
 def file_lines(counter, root, files):
     """(path, language, lines of code) for each of `files` the counter knows; blank and comment lines are not code."""
-    if counter.startswith("scc"):
-        rows = []
-        for i in range(0, len(files), 1000):  # in batches, under the argument length limit
-            out = subprocess.run(["scc", "--by-file", "--format", "json", *files[i:i + 1000]], cwd=root,
-                                 capture_output=True, text=True).stdout
-            rows += [(f["Location"], lang["Name"], f["Code"]) for lang in json.loads(out or "[]") for f in lang["Files"]]
-        return rows
-    with tempfile.NamedTemporaryFile("w", suffix=".txt") as listing:
-        listing.write("\n".join(files))
-        listing.flush()
-        out = subprocess.run(["cloc", "--by-file", "--json", "--quiet", f"--list-file={listing.name}"], cwd=root,
-                             capture_output=True, text=True).stdout
-    return [(name, f["language"], f["code"]) for name, f in json.loads(out or "{}").items()
-            if name not in ("header", "SUM")]
+    def read(*args):
+        try:
+            done = subprocess.run([counter.executable, *args], cwd=root, capture_output=True, text=True)
+        except OSError as exc:
+            raise RuntimeError(f"measure: {counter.executable}: {exc}") from exc
+        if done.returncode:
+            raise RuntimeError(f"measure: {counter.executable} failed (exit {done.returncode}): {done.stderr.strip()}")
+        try:
+            return json.loads(done.stdout)
+        except ValueError as exc:
+            raise RuntimeError(f"measure: {counter.executable} returned invalid or empty JSON") from exc
+
+    if not files:
+        return []
+    try:
+        if counter.tool == "scc":
+            rows = []
+            for i in range(0, len(files), 1000):  # in batches, under the argument length limit
+                languages = read("--by-file", "--format", "json", *files[i:i + 1000])
+                if not isinstance(languages, list):
+                    raise ValueError("expected a list of languages")
+                rows += [(f["Location"], lang["Name"], f["Code"]) for lang in languages for f in lang["Files"]]
+        else:
+            with tempfile.NamedTemporaryFile("w", suffix=".txt") as listing:
+                listing.write("\n".join(files))
+                listing.flush()
+                counts = read("--by-file", "--json", "--quiet", f"--list-file={listing.name}")
+            rows = [(name, f["language"], f["code"]) for name, f in counts.items() if name not in ("header", "SUM")]
+        if any(not isinstance(name, str) or not isinstance(language, str) or type(n) is not int or n < 0
+               for name, language, n in rows):
+            raise ValueError("expected file paths, languages and nonnegative code counts")
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise RuntimeError(f"measure: {counter.executable} returned invalid counter JSON: {exc}") from exc
+    return rows
 
 
 def count_lines(root, counter, paths=()):
@@ -450,7 +563,7 @@ def measure(data, checkout, timeout=1800, every_day=False, paths=()):
     over `paths`, with the first line counter installed. Adds the figures to the last day, or with `every_day` the
     lines to every day and coverage to the last, since coverage runs the suite."""
     days = data["days"] if every_day else data["days"][-1:]
-    counter, told = line_counter(), False
+    counter, checked, told = None, False, False
     git = lambda *a, **k: subprocess.run(["git", "-C", checkout, *a], capture_output=True, text=True, **k)
     for day in days:
         commit = last_green(data, day["day"])
@@ -473,13 +586,16 @@ def measure(data, checkout, timeout=1800, every_day=False, paths=()):
                 found |= {k: v for k, v in mise_json(root, "loc", timeout).items() if k in ("code_lines", "test_lines")}
             if "code_lines" in found and "test_lines" in found:
                 found["loc_tool"] = "mise run loc"
-            elif counter:
-                found |= count_lines(root, counter, paths) | {"loc_tool": counter, "loc_paths": " || ".join(paths)}
-            elif not told:
-                told = True
-                print(f"measure: no line counter: neither scc nor cloc is installed and the checkout defines no loc "
-                      f"task, so lines and the test ratio are left out; to count them, {install_hint()}",
-                      file=sys.stderr)
+            else:
+                if not checked:
+                    counter, checked = line_counter(), True
+                if counter:
+                    found |= count_lines(root, counter, paths) | {"loc_tool": counter.label, "loc_paths": " || ".join(paths)}
+                elif not told:
+                    told = True
+                    print(f"measure: no line counter: neither scc nor cloc is installed and the checkout defines no loc "
+                          f"task, so lines and the test ratio are left out; to count them, {install_hint()}",
+                          file=sys.stderr)
         finally:
             git("worktree", "remove", "--force", str(root))
         if found.get("code_lines"):
@@ -640,9 +756,11 @@ INCIDENTS = {"version": 1, "schema": {"type": "object", "required": ["day", "rep
 ACTIONS = {"version": 1, "schema": {"type": "object", "required": ["repo", "rank", "area", "title", "why", "since",
                                                                   "updated"],
            "properties": {"repo": TEXT, "rank": {"type": "integer", "minimum": 1, "maximum": 3}, "area": TEXT,
-                          "title": TEXT, "why": TEXT, "check": TEXT, "impact_min_per_day": NUM, "since": DAY,
-                          "updated": DAY}}}
-TOP = 3  # actions on the document at a time
+                          "title": TEXT, "why": TEXT, "where": TEXT, "cost": TEXT,
+                          "evidence": {"type": "array", "items": TEXT}, "check": TEXT, "impact_min_per_day": NUM,
+                          "since": DAY, "updated": DAY}}}
+TOP = 3  # actions on the document at most; the Recommended Actions intro says "Up to three"
+REF = re.compile(r"(?:[\w.-]+/[\w.-]+)?#\d+")  # an issue or PR: #12 in the repository, or owner/name#12
 # Applying an action is a person's decision, so it lives apart from `actions`, which every run replaces: one record
 # per action id, written by the session that discussed it.
 APPLIED = {"version": 1, "schema": {"type": "object", "required": ["status", "ref", "url"],
@@ -701,8 +819,12 @@ def action_rows(data, actions):
             sys.exit(f"action {rank}: missing {', '.join(missing)}")
         if a.get("repo") not in (None, data["repo"]):
             sys.exit(f"actions: every action must be for {data['repo']}, the repository of this document")
+        evidence = [f"#{e}" if isinstance(e, int) else e for e in a.get("evidence") or []]
+        if any(not isinstance(e, str) or not REF.fullmatch(e) for e in evidence):
+            sys.exit(f"action {rank}: evidence takes issues and PRs, as 12, \"#12\" or \"owner/name#12\"")
         value = {"repo": data["repo"], "rank": rank, "since": a.get("since") or data["last"], "updated": data["last"],
-                 **{k: a[k] for k in ("area", "title", "why", "check", "impact_min_per_day") if a.get(k) is not None}}
+                 **{k: a[k] for k in ("area", "title", "why", "where", "cost", "check", "impact_min_per_day")
+                    if a.get(k) is not None}, **({"evidence": evidence} if evidence else {})}
         rows.append({"id": a.get("id") or slug(a["title"]).replace("_", "-"), "value": value})
     ids = [r["id"] for r in rows]
     if len(ids) != len(set(ids)):
@@ -791,6 +913,28 @@ def card_label(a):
     return f"{one_line(a['area'])} · since {dt.date.fromisoformat(a['since']).strftime('%-d %b %Y')}"
 
 
+def qualified(repo, ref):
+    """owner/name#12 for an issue or PR, from #12 in the repository or owner/name#12."""
+    return repo + ref if ref.startswith("#") else ref
+
+
+def cost(a):
+    """What the action costs in a few words: the agent's `cost`, else the minutes of waiting a day it accounts for."""
+    if a.get("cost"):
+        return one_line(a["cost"])
+    if a.get("impact_min_per_day", 0) >= 1:
+        return f"about {a['impact_min_per_day']:.0f} min of waiting a day"
+    return ""
+
+
+def card_footer(data, a):
+    """The evidence: where the action applies, what it costs and the issues and PRs behind it, linked as written
+    so they show as GitHub pills. Empty without any."""
+    refs = " ".join(f"[{r}](https://github.com/{qualified(data['repo'], r).replace('#', '/issues/')})"
+                    for r in a.get("evidence", []))
+    return " · ".join(x for x in (one_line(a.get("where") or ""), cost(a), refs) if x)
+
+
 def applied_card(a, status, ref, url):
     """An action being applied: the title and why struck through, the button gone, and a footer, not struck, naming
     the pull request or issue. A link whose text is the reference and whose target its GitHub URL shows as a pill."""
@@ -805,10 +949,13 @@ def discuss_link(data, action, doc=None):
     source = f"the CI Health Report for {data['repo']}" + (f" (Uberblick document {doc})" if doc else "")
     where = f"Uberblick document {doc}" if doc else f'the "CI Health Report" document for {data["repo"]} in Uberblick'
     card = applied_card(action, "STATUS", "REF", "URL")
+    details = "".join(f"{k}: {v}\n" for k, v in (
+        ("Where", one_line(action.get("where") or "")), ("Cost", cost(action)),
+        ("Issues and PRs", ", ".join(qualified(data["repo"], r) for r in action.get("evidence", [])))) if v)
     record = {"id": action.get("id") or slug(action["title"]).replace("_", "-"),
               "value": {"status": "implemented or planned", "ref": "REF", "url": "URL", "day": "YYYY-MM-DD"}}
     prompt = (f"From {source}, data as of {action.get('updated') or data['last']}:\n\n"
-              f"Recommendation: {action['title'].rstrip('.')}.\nEvidence: {action['why']}\n\n"
+              f"Recommendation: {action['title'].rstrip('.')}.\nEvidence: {action['why']}\n{details}\n"
               f"Let's discuss this before changing anything. {action.get('check') or CHECK} "
               "Then propose a plan and wait for my go-ahead.\n\n"
               "If we decide to apply it, mark the card once a pull request implements it or an issue plans it, so the "
@@ -829,9 +976,10 @@ def applied_marks(applied):
 
 
 def cards(data, actions, doc=None, button=True, applied=()):
-    """The actions as cards in rank order: the area and since when, the action, why with its numbers, and a button
-    to discuss it in Claude Code. An action being applied is struck through, with its pull request or issue below.
-    Takes the agent's actions or the stored records."""
+    """The actions as cards in rank order: the area and since when, the action, a footer with the evidence (where
+    it applies, what it costs, the issues and PRs behind it), why with its numbers, and a button to discuss it in
+    Claude Code. An action being applied is struck through, with its pull request or issue below instead. Takes the
+    agent's actions or the stored records."""
     rows = actions.get("records", actions) if isinstance(actions, dict) else actions
     stored = {r["id"]: r["value"] for r in rows if "value" in r}
     pairs = (sorted(stored.items(), key=lambda kv: kv[1]["rank"]) if stored
@@ -843,8 +991,10 @@ def cards(data, actions, doc=None, button=True, applied=()):
             m = marks[key]
             blocks.append({"type": "card", "text": applied_card(a, m["status"].capitalize(), m["ref"], m["url"])})
             continue
+        footer = card_footer(data, a)
         blocks.append({"type": "card", "text": f"label: {card_label(a)}\n"
                                                f"title: {one_line(a['title'])}\n"
+                                               + (f"footer: {footer}\n" if footer else "")
                                                + (f"button: [Discuss in Claude Code]({discuss_link(data, a | {'id': key}, doc)})\n"
                                                   if button else "")
                                                + f"\n{a['why']}"})
@@ -870,7 +1020,7 @@ def create_document(data, incidents=(), actions=(), button=True):
             {"text": ".", "marks": {}}]},
         *charts(data),
         {"type": "heading", "level": 2, "text": "Recommended Actions"},
-        {"type": "paragraph", "text": f"The {TOP} changes that would most cut the time pushes wait for a green "
+        {"type": "paragraph", "text": "Up to three changes that would most cut the time pushes wait for a green "
          f"{data['branch']}, from the last days of CI, kept until done or outranked."},
         *cards(data, list(actions), button=button),
         {"type": "heading", "level": 2, "text": "Incidents"},
@@ -984,6 +1134,8 @@ def main():
     t.add_argument("data")
     t.add_argument("--pattern", action="append", required=True,
                    help="regex for a line reporting tests, the count in a group (repeatable)")
+    for command in (c, lg, t):
+        command.add_argument("--cache", help="successful reads shared by this report's commands; use a fresh DIR for a new report")
     m = commands.add_parser("measure", help="add the test ratio and coverage to the last day, in place")
     m.add_argument("data")
     m.add_argument("--checkout", required=True, help="a local clone of the repository")
@@ -1017,6 +1169,8 @@ def main():
     u.add_argument("--calls", help='a JSON file listing calls, [{"tool": ..., "arguments": {...}}], run in order')
     u.add_argument("--checkout", default=".", help="a checkout bound to the workspace (default here)")
     args = parser.parse_args()
+    global CACHE
+    CACHE = ReadCache(getattr(args, "cache", None))
     if args.command == "collect":
         if sum(map(bool, (args.day, args.since or args.until, args.after))) > 1:
             sys.exit("--day, --since/--until and --after do not combine")
@@ -1036,10 +1190,18 @@ def main():
         except RuntimeError as e:
             sys.exit(str(e))
     elif args.command == "tests":
-        Path(args.data).write_text(json.dumps(add_tests(load(args.data), args.pattern), indent=1))
+        try:
+            out = add_tests(load(args.data), args.pattern)
+        except RuntimeError as e:
+            sys.exit(str(e))
+        Path(args.data).write_text(json.dumps(out, indent=1))
         return
     elif args.command == "measure":
-        Path(args.data).write_text(json.dumps(measure(load(args.data), args.checkout, args.timeout, args.every_day, args.path), indent=1))
+        try:
+            out = measure(load(args.data), args.checkout, args.timeout, args.every_day, args.path)
+        except RuntimeError as e:
+            sys.exit(str(e))
+        Path(args.data).write_text(json.dumps(out, indent=1))
         return
     elif args.command == "signals":
         out = signals(load(args.data), args.days)

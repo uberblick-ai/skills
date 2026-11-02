@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "uberblick": {
+      "type": "stdio",
+      "command": "mise",
+      "args": [
+        "exec",
+        "--",
+        "ub",
+        "mcp",
+        "serve"
+      ]
+    }
+  }
+}

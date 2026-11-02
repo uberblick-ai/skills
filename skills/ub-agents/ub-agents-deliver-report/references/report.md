@@ -119,12 +119,14 @@ same gap recurring is worth fixing.
    denials, PRs merged with lines and files, issues closed and opened, the open
    queue split into to-prepare and prepared, and machines with loops and peak
    parallel runs.
-3. **What to change.** At most four cards, each one lesson: the lever
-   (clearer authority, better wording, fewer instructions, more autonomy), a
-   title, the change in one or two sentences quoting any line it would
-   change, where it lives, what it cost, the causes it targets and the items
-   that are its evidence. Never a new role, label, gate, review round or
-   checklist.
+3. **What to change.** At most four cards, each one lesson the day
+   proposed: the lever (clearer authority, better wording, fewer
+   instructions, more autonomy), a title, the change in one or two
+   sentences quoting any line it would change, where it lives, what it
+   cost, the causes it targets, the items that are its evidence, and, for a
+   lesson still `proposed`, a link to discuss it in Claude Code. Never a new
+   role, label, gate, review round or checklist. The document's Recommended
+   Actions rank lessons across 14 days instead.
 4. **Where extra runs went.** One card per finding, costliest first: the cost
    and class as the label, the concrete example, the cause id with its
    mechanism and state, and the items.
@@ -170,13 +172,20 @@ lesson without `addressed_by`, or more than five actions.
                      "posts": ["https://github.com/owner/name/discussions/1014#discussioncomment-1"]}]}
 ```
 
+Three words keep one meaning each. A **lesson** is a change someone could
+make, kept in the `lessons` registry; the **actions** are the lessons the
+document recommends now, up to five; a **change** is something that
+landed, kept in `changes` and listed in the Changelog.
+
 A lesson is `proposed` until an issue or PR addresses it: `tracked` while that
 is open, `applied` once it merged, `rejected` when a person declines it.
 `addressed_by` names it as `owner/name#number`, and `addressed_as` says
 whether it is a pull request that implements the lesson (`implemented`) or an
-issue that plans it (`planned`, the default). `actions` ranks up to five
-proposed lessons proposed or re-proposed in the last 14 days, most runs saved
-first; an older lesson drops off until a day proposes it again. A change is
+issue that plans it (`planned`, the default). `actions` lists up to five
+lessons still `proposed` that this day or one of the 13 before it proposed,
+most runs saved first; an older lesson drops off until a day proposes it
+again. Write a lesson's `cost` with dates ("5 runs on 11 October"), never
+"today", since it may stay an action for 14 days. A change is
 anything that landed on this day to fix a cause or apply a lesson; `ref` is
 `owner/name#number` or a commit, with `url` for a commit. `records` gives every
 change a `url`, derived from `ref` when the notes give none.
@@ -192,8 +201,8 @@ rather than runs has `runs: 0` and says so in `cost`.
 
 ```json
 {"schema": "ub-agents-deliver-report/1",
- "repo": "owner/name", "day": "2026-10-07", "timezone": "CEST +0200",
- "since": "2026-10-06T22:00:00Z", "until": "2026-10-07T22:00:00Z",
+ "repo": "owner/name", "day": "2026-10-07", "timezone": "UTC +0000",
+ "since": "2026-10-07T00:00:00Z", "until": "2026-10-08T00:00:00Z",
  "summary": {"repo": "owner/name", "day": "2026-10-07", "headline": "...",
              "deliveries": 5, "autonomous": 2, "autonomous_pct": 40,
              "runs": 54, "wasted_runs": 12, "wasted_pct": 22.2, "run_h": 8.51,
@@ -261,9 +270,7 @@ bottom:
 
 1. **Intro.** What the loop is, what the report measures, and where the skill
    lives.
-2. **KPIs.** The table above in short: each KPI, its goal and one line of
-   definition.
-3. **Data.** Line charts bound to `days`, then a "Recent days" table, newest
+2. **Data.** Line charts bound to `days`, then a "Recent days" table, newest
    first. Both are `chart` blocks holding a version-1 mapping, for example:
 
    ```json
@@ -285,7 +292,7 @@ bottom:
    `limit` keeps the newest seven days in the table. `pageSize`, which older
    documents carry, never affected the display.
 
-4. **Recommended Actions.** The day's `actions`: up to five proposed
+3. **Recommended Actions.** The day's `actions`: up to five proposed
    lessons, each a card with the lever as its label, the title, the change as
    its body, and a footer with where it lives, its cost, its causes and its
    evidence. Below them, the `tracked` lessons of the last 14 days, struck
@@ -308,9 +315,19 @@ bottom:
    then set the lesson's record in `lessons` to `tracked`, with
    `addressed_by` and `addressed_as`, so later reports keep it struck
    through.
-5. **Changelog.** A bullet list of the five latest `changes`, newest first:
-   the day, the change linked to its issue, PR or commit in ub-agents or the
-   project, and why it was made.
+4. **Changelog.** A bullet list of the five latest `changes`, newest first:
+   the day, the change's title, its issue or PR in ub-agents or the project,
+   and why it was made, such as `20 Oct: Quarantine six flaky tests
+   ([uberblick-2#2004](https://github.com/uberblick-ai/uberblick-2/pull/2004)).
+   Six tests turned main red;
+   [#2003](https://github.com/uberblick-ai/uberblick-2/issues/2003) tracks
+   them.` The reference is the link, not the title, so Uberblick shows it as
+   a GitHub pill, which it draws only for a link whose text names the item.
+   Its address is the one GitHub gives, `/pull/` or `/issues/`, so the pill
+   shows the right kind. A change that is a commit keeps its title linked to
+   the commit. In `why`, each `#n` (the change's repository), `name#n` (the
+   same owner) or `owner/name#n` that GitHub knows is linked the same way;
+   any other text stays plain.
 
 After each stored day the skill brings the "Recommended Actions" and
 "Changelog" sections up to date from `document`'s output, one block at a time:

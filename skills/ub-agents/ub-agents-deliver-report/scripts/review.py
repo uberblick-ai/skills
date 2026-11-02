@@ -11,7 +11,7 @@ standard library and `gh`.
     review.py create report.json [--no-button] > create.json    # create_doc arguments for a new dataset document
     review.py queue --repo OWNER/NAME [--day YYYY-MM-DD]         # only the open-queue figures for a day
 
-The day runs from local midnight to local midnight; the default is yesterday. Only runs that started
+The day runs from midnight to midnight UTC; the default is yesterday. Only runs that started
 before the day ended count, so a day reads the same whenever it is collected.
 Works on any repository that runs ub-agents (https://agents.uberblick.ai): roles, triggers and outcomes
 come from the repository's ub-agents.yaml, and ROLES maps the common role names to a letter.
@@ -20,6 +20,7 @@ come from the repository's ub-agents.yaml, and ROLES maps the common role names 
 import argparse
 import base64
 import datetime as dt
+import functools
 import hashlib
 import html
 import json
@@ -124,8 +125,8 @@ def waited(stops, runs, end):
 
 
 def day_window(text):
-    """Local midnight to local midnight for the given day; yesterday when none is given."""
-    zone = dt.datetime.now().astimezone().tzinfo
+    """Midnight to midnight UTC for the given day, whatever the local zone; yesterday when none is given."""
+    zone = dt.timezone.utc
     day = dt.date.fromisoformat(text) if text else dt.datetime.now(zone).date() - dt.timedelta(days=1)
     since = dt.datetime.combine(day, dt.time.min, zone)
     return day, zone, since, since + dt.timedelta(days=1)
@@ -542,7 +543,7 @@ def digest(data):
                  f'run {num(d["run_h"], " h")}' if d["runs"] else "", prs(d)]
         return f'#{d["number"]} {d["title"]}: ' + "; ".join(p for p in parts if p)
 
-    out = [f'{data["repo"]}, {day} ({data["timezone"]}). Times are local; times on other days carry their date.',
+    out = [f'{data["repo"]}, {day} ({data["timezone"]}). Times are in that zone; times on other days carry their date.',
            f'Loop deliveries {s["deliveries"]}, autonomous {s["autonomous"]} ({num(s["autonomous_pct"], "%")}, target '
            f'{TARGETS["autonomous_pct"][1]}). Runs {s["runs"]}, wasted {s["wasted_runs"]} ({num(s["wasted_pct"], "%")}, '
            f'target {TARGETS["wasted_pct"][1]}). Human stops {s["human_stops"]}, {num(s["human_wait_h"], " h")} waited. '
@@ -610,6 +611,8 @@ section { display: grid; gap: 12px; min-width: 0; }
 .scroll { overflow-x: auto; } table { border-collapse: collapse; width: 100%; font-size: 14px; }
 th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 td.r { text-align: right; white-space: nowrap; }
+.discuss { display: inline-block; margin-top: 10px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px;
+  color: var(--fg); text-decoration: none; font-weight: 600; } .discuss:hover { border-color: var(--accent); }
 """
 TONE = {"forward": "ok", "back": "back", "stop": "fail", "waste": "fail", "pending": "wait"}
 
@@ -674,7 +677,9 @@ def report(data):
     out.append("</section><section><h2>What to change</h2>")
     out += [f'<div class="box"><div class="label">{esc(LEVERS[l["lever"]])}</div><h3>{esc(l["title"])}</h3>'
             f'<p>{esc(l["change"])}</p><div class="label">{esc(l.get("where", ""))} · {esc(l.get("cost", ""))} · '
-            f'{esc(", ".join(l.get("causes", [])))} · {refs(repo, l.get("evidence", []))}</div></div>' for l in data["lessons"]]
+            f'{esc(", ".join(l.get("causes", [])))} · {refs(repo, l.get("evidence", []))}</div>'
+            + (f'<a class="discuss" href="{esc(discuss_link(data, l))}">Discuss in Claude Code</a>'
+               if l.get("state", "proposed") == "proposed" else "") + '</div>' for l in data["lessons"]]
     out.append('</section><section><h2>Where extra runs went</h2>')
     out += [f'<div class="box"><div class="label">{esc(f["cost"])} · {esc(f["class"])}</div><p>{esc(f["example"])}</p>'
             f'<p class="muted">{esc(f["cause"])}: {esc(f["mechanism"])} {esc(f["state"].capitalize())}'
@@ -861,16 +866,64 @@ def values(collection):
     return {r["id"]: r["value"] for r in rows}
 
 
+# #n, repo#n or owner/repo#n in prose, not inside a word, a path or an address's fragment.
+REFERENCE = re.compile(r"(?<![\w./#-])(?:(?:([\w-]+)/)?([\w.-]+))?#(\d+)\b")
+
+
+@functools.cache
+def item_url(repo, number):
+    """An issue's or pull request's GitHub address, /issues/ or /pull/, so its pill shows the right kind; None when
+    GitHub cannot say."""
+    try:
+        return gh(f"repos/{repo}/issues/{number}").get("html_url")
+    except (RuntimeError, OSError, ValueError):
+        return None
+
+
+def references(text, repo):
+    """Prose as inline runs, each reference GitHub knows linked with its text kept, so it shows as a GitHub pill. A
+    bare #n is in `repo` and repo#n in `repo`'s owner."""
+    runs, at = [], 0
+    for found in REFERENCE.finditer(text):
+        owner, name, number = found.groups()
+        target = (f"{owner}/{name}" if owner else f"{repo.split('/')[0]}/{name}" if name and repo else
+                  None if name else repo)
+        url = target and item_url(target, number)
+        if url:
+            runs += [{"text": text[at:found.start()], "marks": {}}, {"text": found.group(0), "marks": {"link": url}}]
+            at = found.end()
+    runs.append({"text": text[at:], "marks": {}})
+    merged = []
+    for run in (r for r in runs if r["text"]):
+        if merged and not merged[-1]["marks"] and not run["marks"]:
+            merged[-1] = {"text": merged[-1]["text"] + run["text"], "marks": {}}
+        else:
+            merged.append(run)
+    return merged
+
+
 def changelog(changes, limit=5):
-    """The latest changes as list items: the day, the change linked, and why it was made."""
+    """The latest changes as list items: the day, the title, the issue or PR as a GitHub pill (or the title linked to
+    its commit), and why it was made, its references as pills too. A pill needs a link whose text is the reference."""
     blocks = []
     for ref, c in sorted(changes.items(), key=lambda kv: (kv[1]["day"], kv[0]), reverse=True)[:limit]:
-        url = c.get("url") or link(ref)
-        name = ref.split("/", 1)[1] if "/" in ref else ref
         day = dt.date.fromisoformat(c["day"]).strftime("%-d %b")
-        title = {"text": c["title"], "marks": {"link": url} if url else {}}
-        blocks.append({"type": "list-item", "inline": [{"text": f"{day}: ", "marks": {}}, title,
-                                                       {"text": f" ({name}). {c['why']}", "marks": {}}]})
+        found = re.fullmatch(r"([\w.-]+/[\w.-]+)#(\d+)", ref)
+        if found:
+            repo = found.group(1)
+            url = item_url(repo, found.group(2)) or c.get("url") or link(ref)
+            inline = [{"text": f"{day}: {c['title']} (", "marks": {}},
+                      {"text": ref.split("/", 1)[1], "marks": {"link": url}}, {"text": "). ", "marks": {}}]
+        else:
+            url = c.get("url")
+            commit = re.match(r"https://github\.com/([\w.-]+/[\w.-]+)/", url or "")
+            repo = commit.group(1) if commit else None
+            inline = [{"text": f"{day}: ", "marks": {}}, {"text": c["title"], "marks": {"link": url} if url else {}},
+                      {"text": f" ({ref}). ", "marks": {}}]
+        why = references(c["why"], repo)
+        if why and not why[0]["marks"]:
+            inline[-1] = {"text": inline[-1]["text"] + why.pop(0)["text"], "marks": {}}
+        blocks.append({"type": "list-item", "inline": inline + why})
     return blocks
 
 
@@ -982,16 +1035,6 @@ def document(dataset, data, doc=None, button=True, first=None):
                                  or bool(first and changes[ref]["day"] >= first) for ref in latest)}
 
 
-KPIS = [("Autonomous deliveries", "up", "autonomous_pct", "Loop deliveries the integrator merged with no wasted run, "
-         "no stop and no action-needed notice; a reviewer send-back still counts."),
-        ("Wasted runs", "down", "wasted_pct", "Runs started on the day that ended without an accepted outcome."),
-        ("Human stops", "down", None, "Action-needed notices on loop deliveries, and the hours from each to the next run on "
-         "the item."),
-        ("Cycle", "down", None, "First run to delivery, without the human wait."),
-        ("Run time", "down", None, "Run minutes summed per delivery, the touch time."),
-        ("Runs with denials", "down", "denial_pct", "Claude runs on the day with a permission denial.")]
-
-
 def chart(mapping):
     """A chart block: a version-1 line or table mapping bound to a collection of the document's data."""
     return {"type": "chart", "text": json.dumps(mapping, indent=1)}
@@ -1002,7 +1045,7 @@ def column(field, label, fmt="number", **extra):
 
 
 def create_document(data, button=True):
-    """create_doc arguments for a new dataset document, laid out as references/report.md describes: intro, KPIs,
+    """create_doc arguments for a new dataset document, laid out as references/report.md describes: intro,
     charts and a Recent days table bound to `days`, this day's Recommended Actions, and the Changelog."""
     repo, sections = data["repo"], document({}, data, button=button)
     percent = {"unit": "%", "decimals": 0}
@@ -1015,10 +1058,6 @@ def create_document(data, button=True):
         {"type": "paragraph", "text": "The ub-agents-deliver-report skill (npx skills@latest add uberblick-ai/skills) "
          "stores one record per day in this document's data. The charts and tables below follow that data; the "
          "Recommended Actions are rewritten after each stored day."},
-        {"type": "heading", "level": 2, "text": "KPIs"},
-        {"type": "table", "text": "| KPI | Goal | Target | Definition |\n| --- | --- | --- | --- |\n" + "\n".join(
-            f"| {kpi} | {goal} | {TARGETS[field][1] if field else ''} | {definition} |"
-            for kpi, goal, field, definition in KPIS)},
         {"type": "heading", "level": 2, "text": "Data"},
         chart({"version": 1, "type": "line", "collection": "days", "title": "Autonomy and waste",
                "x": {"field": "day", "type": "date", "label": "Day"},
@@ -1072,13 +1111,13 @@ def main():
     m.add_argument("days", help="the document's days collection as get_data returned it; a missing file means none")
     c = commands.add_parser("collect")
     c.add_argument("--repo", required=True)
-    c.add_argument("--day", help="calendar day, YYYY-MM-DD, local time (default yesterday)")
+    c.add_argument("--day", help="calendar day, YYYY-MM-DD, UTC (default yesterday)")
     r = commands.add_parser("render")
     r.add_argument("data"), r.add_argument("notes"), r.add_argument("out")
     r.add_argument("--no-open", action="store_true", help="do not open the report in the default browser")
     q = commands.add_parser("queue", help="only the open-queue figures for a day: issue lists and events, no run records")
     q.add_argument("--repo", required=True)
-    q.add_argument("--day", help="calendar day, YYYY-MM-DD, local time (default yesterday)")
+    q.add_argument("--day", help="calendar day, YYYY-MM-DD, UTC (default yesterday)")
     g = commands.add_parser("digest", help="the day in a few lines per item, to read before data.json")
     g.add_argument("data", help="data.json written by collect, or report.json")
     s = commands.add_parser("records")

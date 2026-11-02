@@ -12,8 +12,8 @@ Follow every page, and filter authors as required by local instructions before
 content enters context. Useful read shapes:
 
 ```sh
-gh api 'repos/OWNER/REPO/milestones?state=all&per_page=100' --paginate
-gh api 'repos/OWNER/REPO/issues?state=open&per_page=100' --paginate
+gh api 'repos/OWNER/REPO/milestones?state=all&per_page=100' --paginate > DIR/milestones.json
+gh api 'repos/OWNER/REPO/issues?state=open&per_page=100' --paginate > DIR/issues.json
 # Milestone scope adds &milestone=NUMBER to the issues request.
 gh api 'repos/OWNER/REPO/issues/NUMBER/dependencies/blocked_by' --paginate
 ```
@@ -62,6 +62,65 @@ priority labels, read their actual `color` metadata. Display non-default priorit
 below the issue with that color; omit only the established default (often medium).
 Do not assume a shared default across repositories. Do not guess colors or infer
 priority from effort. Without readable label metadata, show plain priority text.
+
+## Milestone usage
+
+Milestones carry intent that their titles only hint at. Read them all, open
+and closed, before recommending one: titles, descriptions, due dates, how many
+issues each held and how closed ones ended. `scripts/milestones.py` summarizes
+the GitHub milestone list (other trackers can map theirs to the same fields)
+and, with `--issues`, the share of open issues that have one. It reports:
+
+- title kinds (version, period, other), and how many have a description or a
+  due date;
+- for closed milestones: size, days between due dates, days closed after the
+  due date, and those closed with issues still open;
+- for open ones, by due date, then creation: due date, size, overdue and empty;
+- `blind_spots`: what the counts cannot see, such as pull requests counted in
+  sizes and issues moved out without a trace.
+
+Decide the intent from that and the text, not from the counts alone. Common
+patterns: releases on a cadence (version titles, regular due dates, closed
+near them), time boxes (period titles), themes (no due dates, long lived), a
+parking lot ("Backlog", "Someday", one huge open milestone) or milestones that
+are not really used (few, old, empty). Open milestones say where work is going;
+closed ones show what kind of work has gone into milestones and what stayed
+out. Write the conclusion as `milestone_usage` with its basis.
+
+When 40% or more of the open items in scope have a milestone, the report
+groups by milestone and every open issue without one needs a recommendation.
+Propose the open milestone whose goal and timing fit, within its cap; propose
+a new one in chat when none fits and several issues share a goal; or keep the
+issue without one when the history shows that kind of work stays out, such as
+ideas, chores or tracking parents. A parking-lot milestone is not a plan:
+recommend it only if the repository uses it that way on purpose. Below 40%,
+milestones are a minor tool here; recommend placements only where the goal
+needs them, and say so in `milestone_usage`.
+
+## Milestone load
+
+A milestone's weight is the sum of its issues' estimates: delivered, still
+open and proposed. Take the weights and cap from the repository's instructions
+when they define them (another scale, such as story points, maps one to one);
+otherwise use XS 0, S 1, M 2, L 3, XL 5, a cap of 25 and a ceiling of twice
+the cap. Record them in `capacity` with their source. Defaults are a starting
+point, not a finding: when the maintainer asks, measure recent milestones and
+show the range before suggesting another cap.
+
+Delivered issues seldom carry a current estimate. Use a recorded estimate
+where one exists. Otherwise size the work the issue actually delivered, for
+example from the lines its merged PRs changed, mapped to the scale so the
+spread resembles the repository's own estimates, and say so in the milestone's
+`basis`. Issues closed as not planned or duplicate weigh nothing. If neither
+is available, give only the open weight and disclose it.
+
+Weigh what a milestone holds, not what the review touched: open issues outside
+the reviewed items go into `other_open_weight`. Over the cap, recommend moving
+issues into a new or later milestone with its own goal, smallest coherent cut
+first, rather than adding more. A bounded exception needs a reason anyone can
+check: one outcome, such as a refactor or migration, that delivers nothing
+half done. Size alone, or several unrelated themes, is not one. Creating a
+milestone and moving issues are mutations; ask in chat first.
 
 ## Optional ub-agents integration
 

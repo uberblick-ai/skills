@@ -31,11 +31,10 @@ class ReportTests(unittest.TestCase):
         closed['highlight_reason'] = 'Closure conflicts with an undelivered guarantee.'
         self.assertIn(closed['highlight_reason'], render.render(self.data))
 
-    def test_priority_sort_color_and_default_suppression(self):
+    def test_priority_color_and_default_suppression(self):
         self.data['items'].reverse()
         self.data['items'][0]['priority'] = {'name':'priority:medium','rank':2,'color':'FBCA04','is_default':True}
         page = render.render(self.data)
-        self.assertLess(page.index('Install at the project root'), page.index('Improve the sync summary'))
         self.assertIn('background:#D93F0B', page)
         self.assertNotIn('priority:medium', page)
 
@@ -103,5 +102,202 @@ class ReportTests(unittest.TestCase):
             page=(Path(tmp)/'report.html').read_text(encoding='utf-8')
         self.assertIn('Prüfung — schneller…', page)
         self.assertLess(page.index('<meta charset="utf-8">'), page.index('<title>'))
+
+    def test_milestone_load_counts_delivered_open_and_proposed(self):
+        load = render.milestone_load(self.data)[0][0]
+        self.assertEqual((load['before'], load['after'], load['added'], load['status']), (24, 25, 1, 'Within cap'))
+        page = render.render(self.data)
+        self.assertIn('24 → 25', page)
+        self.assertNotIn('over the cap', page)
+
+    def test_milestone_over_cap_is_overloaded_unless_bounded(self):
+        self.data['items'][2]['effort']['estimate'] = 'XL'
+        load = render.milestone_load(self.data)[0][0]
+        self.assertEqual((load['after'], load['status']), (29, 'Overloaded'))
+        self.assertIn('1 milestone over the cap', render.render(self.data))
+        self.data['milestones'][0]['bounded'] = 'One storage refactor; not useful half done.'
+        self.assertEqual(render.milestone_load(self.data)[0][0]['status'], 'Bounded exception')
+        self.data['milestones'][0]['delivered_weight'] = 60
+        self.assertEqual(render.milestone_load(self.data)[0][0]['status'], 'Overloaded')
+
+    def test_capacity_is_configurable_and_closing_issues_leave(self):
+        self.data['capacity'] = {'weights': {'1': 1, '3': 3, '8': 8}, 'cap': 10}
+        for item in self.data['items']: item['effort']['estimate'] = '3'
+        self.data['milestones'][0]['delivered_weight'] = 0
+        load = render.milestone_load(self.data)[0][0]
+        self.assertEqual((load['before'], load['after']), (5, 8))
+        self.data['items'][0]['treatment'] = 'close unnecessary'
+        self.assertEqual(render.milestone_load(self.data)[0][0]['after'], 5)
+        self.data['items'][0]['effort']['estimate'] = 'huge'
+        self.data['items'][0]['treatment'] = 'keep'
+        load = render.milestone_load(self.data)[0][0]
+        self.assertEqual((load['after'], load['unknown']), (5, 1))
+
+    def test_milestone_load_is_optional_and_references_are_checked(self):
+        del self.data['milestones']
+        for item in self.data['items']: item.pop('placement', None)
+        self.assertNotIn('Milestone load', render.render(self.data))
+        self.data['items'][0]['placement'] = {'proposed': 'missing'}
+        with self.assertRaises(ValueError): render.render(self.data)
+        self.data['items'][0].pop('placement')
+        self.data['capacity'] = {'cap': 10, 'ceiling': 5}
+        with self.assertRaises(ValueError): render.render(self.data)
+
+    def flat(self):
+        for item in self.data['items']: item.pop('placement', None)
+
+    def test_oldest_issue_first_whatever_the_priority(self):
+        self.flat()
+        page = render.render(self.data)
+        self.assertLess(page.index('Improve the sync summary'), page.index('Install at the project root'))
+        self.data['items'][2]['created_at'] = '2026-10-01T00:00:00Z'
+        page = render.render(self.data)
+        self.assertLess(page.index('Install at the project root'), page.index('Improve the sync summary'))
+        for item in self.data['items']: item.pop('created_at')
+        page = render.render(self.data)
+        self.assertLess(page.index('Install at the project root'), page.index('Improve the sync summary'))
+        self.data['items'][0]['created_at'] = '2026-09-14'
+        with self.assertRaises(ValueError): render.render(self.data)
+
+    def test_no_change_items_leave_the_table_for_the_list(self):
+        item = self.data['items'][0]
+        item['no_change'] = True
+        table = render.render(self.data).split('</table>', 1)[0]
+        self.assertIn(item['title'], table)
+        item['workflow_labels'] = ['ready']
+        page = render.render(self.data)
+        table, rest = page.split('</table>', 1)
+        self.assertNotIn(item['title'], table)
+        self.assertIn('No change required', rest)
+        self.assertLess(rest.index(item['title']), rest.index('Grounding'))
+        self.assertIn('1.4: Reliable sync', rest.split('No change required')[1])
+        self.assertIn('4 items in the decision table · 1 with no change required', page)
+        self.assertEqual(render.milestone_load(self.data)[0][0]['after'], 25)
+
+    def test_no_change_only_for_items_kept_in_place(self):
+        item = self.data['items'][0]
+        item['no_change'] = True
+        item['placement'] = {'current': '14', 'proposed': None}
+        with self.assertRaises(ValueError): render.render(self.data)
+        item['placement'] = {'current': '14'}
+        item['treatment'] = 'narrow'
+        with self.assertRaises(ValueError): render.render(self.data)
+
+    def group_headers(self, page):
+        return [h.split('</th>')[0] for h in page.split('<tr class="group">')[1:]]
+
+    def test_groups_by_milestone_from_forty_percent(self):
+        page = render.render(self.data)
+        headers = self.group_headers(page)
+        self.assertEqual(len(headers), 3)
+        self.assertIn('1.4: Reliable sync', headers[0])
+        self.assertIn('1.5: Shared projects', headers[1])
+        self.assertIn('No milestone', headers[2])
+        self.assertIn('grouped by milestone: 2 of 4 open items in a milestone (50%)', page)
+        six = self.data['items'][4]
+        six['placement'] = {'current': None, 'proposed': None, 'reason': 'Not planned yet.'}
+        page = render.render(self.data)
+        self.assertEqual(self.group_headers(page), [])
+        self.assertIn('1 of 4 open items in a milestone (25%), under 40%, so not grouped', page)
+        six['placement'] = {'current': '15'}
+        self.data['items'].append({**copy.deepcopy(self.data['items'][3]), 'id': 'board:draft-1', 'state': 'draft', 'placement': {}})
+        self.assertIn('2 of 5 open items in a milestone (40%)', render.render(self.data))
+        self.assertEqual(len(self.group_headers(render.render(self.data))), 3)
+
+    def test_no_milestones_in_use_says_nothing(self):
+        self.flat()
+        page = render.render(self.data)
+        self.assertNotIn('open items in a milestone', page)
+        self.assertEqual(self.group_headers(page), [])
+
+    def test_one_group_stays_flat(self):
+        for item in self.data['items']:
+            item['placement'] = {'current': '14'}
+        page = render.render(self.data)
+        self.assertEqual(self.group_headers(page), [])
+        self.assertIn('all in one, so not grouped', page)
+
+    def test_grouped_report_recommends_a_milestone_or_none(self):
+        three = self.data['items'][2]
+        del three['placement']['reason']
+        with self.assertRaises(ValueError): render.render(self.data)
+        three['placement'] = {'current': None, 'reason': 'Fits 1.4.'}
+        with self.assertRaises(ValueError): render.render(self.data)
+        three['treatment'] = 'close unnecessary'
+        render.render(self.data)
+        self.flat()
+        render.render(self.data)
+
+    def test_rows_show_the_milestone_recommendation(self):
+        page = render.render(self.data)
+        self.assertIn('<small>Add to 1.4: Reliable sync</small>', page)
+        self.assertIn('<small>Keep without milestone</small>', page)
+        self.assertIn('<strong>Milestone:</strong> Keep without one', page)
+        self.assertIn('1 to add to a milestone · 1 to keep without one', page)
+        six = self.data['items'][4]
+        six['placement'] = {'current': '15', 'proposed': '14', 'reason': 'Sharing waits for sync.'}
+        self.assertIn('<small>Move to 1.4: Reliable sync</small>', render.render(self.data))
+        six['placement'] = {'current': '15', 'proposed': None, 'reason': 'Not part of the release.'}
+        self.assertIn('<small>Take out of its milestone</small>', render.render(self.data))
+
+    def test_group_header_shows_due_date_goal_and_load(self):
+        headers = self.group_headers(render.render(self.data))
+        self.assertIn('Due 31 Oct 2026 · 1 issue · weight 24 → 25, within cap', headers[0])
+        self.assertIn('Sync never loses local changes', headers[0])
+        self.data['reviewed_at'] = '2026-11-02T09:00:00+01:00'
+        self.assertIn('Overdue, due 31 Oct 2026', self.group_headers(render.render(self.data))[0])
+        self.data['milestones'][1].pop('due_on')
+        self.assertIn('No due date · 1 issue', self.group_headers(render.render(self.data))[1])
+        self.data['milestones'][0].pop('due_on')
+        self.assertNotIn('due date', ' '.join(self.group_headers(render.render(self.data))))
+        self.data['milestones'][0]['due_on'] = 'soon'
+        with self.assertRaises(ValueError): render.render(self.data)
+
+    def test_groups_follow_milestone_order_rows_oldest_first(self):
+        self.data['milestones'].reverse()
+        headers = self.group_headers(render.render(self.data))
+        self.assertIn('1.5: Shared projects', headers[0])
+        self.assertIn('No milestone', headers[-1])
+        rest = render.render(self.data).split('No milestone</strong>', 1)[1]
+        self.assertLess(rest.index('Improve the sync summary'), rest.index('Dark theme'))
+
+    def test_milestone_usage_section_is_escaped(self):
+        self.data['milestone_usage'] = {'summary': '<b>Releases</b> every six weeks', 'basis': 'milestones.py'}
+        page = render.render(self.data)
+        self.assertIn('<h2>Milestone usage</h2><p>&lt;b&gt;Releases&lt;/b&gt;', page)
+        self.assertLess(page.index('Milestone usage'), page.index('Milestone load'))
+        self.data['milestone_usage'] = {'summary': ' '}
+        with self.assertRaises(ValueError): render.render(self.data)
+
+    def discuss_prompt(self, page):
+        import html, re
+        from urllib.parse import unquote
+        href = html.unescape(re.search(r'<a class="discuss" href="([^"]*)"', page).group(1))
+        self.assertTrue(href.startswith('claude://code/new?q='), 'a new Claude Code session')
+        return unquote(href[len('claude://code/new?q='):])
+
+    def test_discuss_link_numbers_findings_as_the_table_does(self):
+        page = render.render(self.data, '/tmp/run/report.json')
+        prompt = self.discuss_prompt(page)
+        self.assertIn('in /tmp/run/report.json', prompt)
+        self.assertIn('1. example/app#1 Install at the project root: keep, S.', prompt)
+        self.assertIn('3. example/app#3 Improve the sync summary: narrow, S.', prompt)
+        self.assertIn('Milestone: Add to 1.4: Reliable sync (Fits 1.4', prompt)
+        self.assertIn('Change no issues, labels or milestones until I say so.', prompt)
+        self.assertIn('<span class="n">3</span><a href="https://github.com/example/app/issues/3"', page)
+        self.assertNotIn('<script', prompt)
+
+    def test_discuss_link_stays_bounded(self):
+        base = self.data['items'][3]
+        for n in range(200):
+            extra = copy.deepcopy(base); extra['id'] = f'example/app#{100+n}'; extra['summary'] = 'x' * 400
+            self.data['items'].append(extra)
+        prompt = self.discuss_prompt(render.render(self.data))
+        self.assertLessEqual(len(prompt), render.PROMPT_LIMIT + 200)
+        self.assertRegex(prompt, r'…and \d+ more in the report\.')
+
+    def test_discuss_link_hidden_without_rows(self):
+        self.data['items'] = []
+        self.assertIn('class="discuss" href=""', render.render(self.data))
 
 if __name__ == '__main__': unittest.main()
