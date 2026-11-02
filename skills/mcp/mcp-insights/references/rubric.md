@@ -66,7 +66,7 @@ topics.
      "targets": ["get_item", "list_items"],
      "why": "One or two sentences.", "fix": "Paste-ready text or concrete steps.",
      "check": "How the maintainer confirms it worked.",
-     "saves": "about 2.5k tokens per turn", "evidence": "optional quote"}
+     "saves": "could save about 2.5k tokens per turn", "evidence": "optional quote"}
   ],
   "help_resources": ["myserver://help/*"],
   "data_resources": ["myserver://tasks/*"],

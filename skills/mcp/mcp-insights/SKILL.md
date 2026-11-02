@@ -4,11 +4,13 @@ description: >-
   Review an MCP server the way PageSpeed Insights reviews a web page: five
   scores from 0 to 100 (protocol, agent guidance, error recovery, context
   cost, safety), context vitals such as tool list size, agent trials that show
-  whether a fresh agent finds the help it needs, and ranked suggestions,
-  in one self-contained HTML report. Use when someone asks how good
-  an MCP server is, why agents struggle with it, how much context its tools
-  cost, or what to fix first. Works on any stdio or Streamable HTTP server.
-  Not a load test or a security pentest.
+  whether a fresh agent finds the help it needs, and ranked suggestions, in
+  one self-contained HTML report. Use for "how good is our MCP server?",
+  "why do agents struggle with this MCP?", "how much context do these tools
+  cost?" or "what should we fix first in our MCP server?". Works on any stdio
+  or Streamable HTTP server. Writes only to a scratch directory and calls only
+  read tools, unless you point it at a sandbox for write probes. Not for load
+  testing, a security pentest or debugging why a tool fails.
 license: MIT
 compatibility: >-
   Requires python3 (standard library only) and a way to start or reach the
@@ -236,9 +238,20 @@ an earlier run or against the baseline of a branch comparison.
 
 ## 7. Reply
 
-Give the five scores, the top three suggestions and the path to
-`report.html`. Say whether every audit was judged, some were, or the run was
-automatic checks only; name any provisional category and any audit judged on
-a sample; and say whether trials ran, how many times each, and what graded
-them (a check script or your reading of the transcript).
+Reply in this shape, with your own numbers (these are an example for a
+made-up server). Number the suggestions so the maintainer can say "do 2",
+and leave out a line that has nothing in it:
+
+```text
+acme-tasks at 4f2c1e0: protocol 96, agent guidance 71, error recovery 49 (capped: a write stored something else silently), context cost 64, safety 92.
+Every audit judged; agent guidance and context cost rest on samples (8 of 30 help topics, 20 of 140 texts).
+Trials: 4 tasks, 3 runs each on Haiku and Sonnet, 22 of 24 done (12 graded by a check script).
+Suggestions: 1. Refuse a due date in the past instead of storing today (lifts the cap). 2. Name the missing field and where its value comes from in validation errors. 3. Drop the 300-character id pattern from 18 fields, could save about 2k tokens per turn.
+Report: DIR/report.html
+```
+
+With `--baseline`, add a line with what moved and why, and say which
+suggestion's effect the baseline-versus-branch run measured. When a re-run
+finds nothing new, one line is enough:
+`acme-tasks at 9b1d2a7: no score moved since 4f2c1e0, same three suggestions.`
 Scores are for the team's own use: do not publish them.
