@@ -188,6 +188,91 @@ class Tests(unittest.TestCase):
         self.assertEqual(review.changelog(changes)[0]["inline"][1],
                          {"text": "r#7", "marks": {"link": "https://github.com/o/r/issues/7"}})
 
+    def test_runs_keep_only_a_complete_context(self):
+        context = {"window": 1000000, "first": 35000, "call_10": 70000, "peak": 160000, "compactions": 0}
+        lease = {"kind": "lease", "run": "a", "agent": "reviewer", "runtime": "claude:m:high",
+                 "created": "2026-10-14T04:00:00Z"}
+        outcome = {"kind": "outcome", "run": "a", "status": "success", "outcome": "approved",
+                   "created": "2026-10-14T04:10:00Z", "context": context}
+        self.assertEqual(review.runs_of([lease, outcome])[0]["context"], context)
+        for broken in ({k: v for k, v in context.items() if k != "peak"}, context | {"window": 0},
+                       context | {"peak": 1}, context | {"first": "35000"}):
+            self.assertIsNone(review.runs_of([lease, outcome | {"context": broken}])[0]["context"])
+
+    def test_context_report_groups_by_agent_and_runtime(self):
+        def measured(agent, runtime, window, call_10, peak, compactions=0, cls="forward"):
+            return run(agent, "2026-10-14T04:00:00Z", 10, cls) | {"runtime": runtime, "url": "u", "context": {
+                "window": window, "first": 1000, "call_10": call_10, "peak": peak, "compactions": compactions}}
+        issues = [{"number": 5, "runs": [measured("implementer", "codex:g:x", 400000, 100000, 320000, 1),
+                                         measured("reviewer", "claude:m:h", 1000000, 50000, 60000),
+                                         measured("reviewer", "claude:m:h", 1000000, 70000, 100000),
+                                         run("integrator", "2026-10-14T05:00:00Z", 5, "forward") | {"runtime": "claude:m:h"},
+                                         run("reviewer", "2026-10-14T06:00:00Z", 5, "pending")]}]
+        summary, context = review.context_report(issues, lambda text: True)
+        self.assertEqual({k: summary[k] for k in ("context_runs", "context_peak_pct_max", "context_compacted")},
+                         {"context_runs": 3, "context_peak_pct_max": 80.0, "context_compacted": 1})
+        self.assertEqual(summary["context_by_runtime"]["claude"], {"runs": 2, "start_pct": 6.0, "peak_pct": 8.0,
+                                                                    "peak_pct_max": 10.0, "compacted": 0})
+        self.assertEqual(context["unmeasured"], 1, "the pending run is not counted; the integrator run has no context")
+        self.assertEqual([(a["agent"], a["runtime"], a["runs"]) for a in context["agents"]],
+                         [("implementer", "codex", 1), ("reviewer", "claude", 2)])
+        self.assertEqual([(t["item"], t["peak_pct"]) for t in context["top"]], [(5, 80.0), (5, 10.0), (5, 6.0)])
+        self.assertEqual(review.context_report([{"number": 1, "runs": [run("reviewer", "x", 1, "forward")]}],
+                                               lambda text: True), ({}, {"unmeasured": 1, "agents": [], "top": []}))
+
+    def test_page_charts_context_over_the_stored_days(self):
+        day = data()
+        day["summary"] |= dict.fromkeys(["loop_cycle_h_median", "cycle_h_median", "run_h_median", "run_h",
+                                         "additions", "deletions", "files"], 0) | {"headline": "A day."}
+        page = review.report(day | {"retrospective_groups": []})
+        self.assertIn("No run on this day recorded its context", page)
+        claude = {"runs": 2, "start_pct": 6.0, "peak_pct": 8.0, "peak_pct_max": 10.0, "compacted": 0}
+        codex = {"runs": 1, "start_pct": 25.0, "peak_pct": 80.0, "peak_pct_max": 80.0, "compacted": 1}
+        day["summary"] |= {"context_runs": 3, "context_start_pct": 7.0, "context_peak_pct": 10.0,
+                           "context_peak_pct_max": 80.0, "context_compacted": 1,
+                           "context_by_runtime": {"claude": claude, "codex": codex}}
+        day["context"] = {"unmeasured": 1, "agents": [
+            {"agent": "implementer", "runtime": "codex", "call_10_median": 100000} | codex],
+            "top": [{"item": 5, "agent": "implementer", "runtime": "codex", "url": "u", "peak_pct": 80.0,
+                     "window": 400000, "compactions": 1}]}
+        stored = {"2026-10-13": {"day": "2026-10-13", "context_runs": 4, "context_start_pct": 5.0,
+                                 "context_peak_pct": 9.0, "context_peak_pct_max": 30.0, "context_compacted": 0},
+                  "2026-10-12": {"day": "2026-10-12", "runs": 3}}
+        page = review.report(day | {"retrospective_groups": []}, stored)
+        self.assertEqual(re.findall(r'data-runtime="(\w+)"', page), ["all", "claude", "codex"])
+        self.assertEqual(page.count("<title>2026-10-1"), 4, "two days for all runtimes, this day alone for each runtime")
+        self.assertIn("↻1</text>", page)
+        self.assertIn('stroke-dasharray="5 4"', page)
+        self.assertIn("#5 implementer</a> 80% of 400k ↻1 · 1 runs without context", page)
+
+    def test_stored_days_read_get_data_and_earlier_reports(self):
+        folder = Path(self.enterContext(__import__("tempfile").TemporaryDirectory()))
+        (folder / "days.json").write_text('{"records": [{"id": "2026-10-12", "value": {"day": "2026-10-12"}}]}')
+        (folder / "report.json").write_text('{"day": "2026-10-13", "summary": {"day": "2026-10-13", "runs": 2}}')
+        self.assertEqual(sorted(review.stored_days([folder / "days.json", folder / "report.json", folder / "none"])),
+                         ["2026-10-12", "2026-10-13"])
+
+    def test_documents_chart_context_with_a_heavy_start_line(self):
+        chart = next(b for b in review.create_document(data())["blocks"]
+                     if b["type"] == "chart" and review.CONTEXT_CHART_TITLE in b["text"])
+        mapping = review.json.loads(chart["text"])
+        self.assertEqual([(y["field"], y.get("type", "line"), y.get("reference")) for y in mapping["y"]],
+                         [("context_start_pct", "bar", 20), ("context_peak_pct", "line", None),
+                          ("context_peak_pct_max", "line", None)])
+        self.assertEqual(review.document({}, data())["context_chart"]["block"], chart,
+                         "the same block, for documents created before the chart existed")
+        fields = review.SCHEMAS["days"]["schema"]["properties"]
+        self.assertTrue({"context_runs", "context_start_pct", "context_peak_pct", "context_peak_pct_max",
+                         "context_compacted", "context_by_runtime"} <= fields.keys())
+
+    def test_digest_says_how_much_context_the_day_used(self):
+        day = data()
+        day["summary"] |= {"context_runs": 3, "context_start_pct": 7.0, "context_peak_pct": 10.0,
+                           "context_peak_pct_max": 80.0, "context_compacted": 1}
+        day["context"] = {"unmeasured": 1, "agents": [], "top": [{"item": 5, "agent": "implementer", "runtime": "codex"}]}
+        self.assertIn("Context: 3 runs measured, 1 not; median start 7% of the window at call 10, median peak 10%, "
+                      "largest 80% (#5 implementer, codex); 1 compacted.", review.digest(day))
+
 
 if __name__ == "__main__":
     unittest.main()

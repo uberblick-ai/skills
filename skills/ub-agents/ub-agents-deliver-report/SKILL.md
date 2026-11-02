@@ -18,7 +18,7 @@ compatibility: >-
   the page.
 metadata:
   author: uberblick-ai
-  version: "1.10"
+  version: "1.11"
 ---
 
 # Deliver report
@@ -123,10 +123,12 @@ classes, the page and the records are defined in
    groups) and render:
 
    ```sh
-   python3 scripts/review.py render DIR/DAY/data.json DIR/DAY/notes.json DIR/DAY
+   python3 scripts/review.py render DIR/DAY/data.json DIR/DAY/notes.json DIR/DAY --days DIR/days.json
    ```
 
-   This checks the notes, writes `DIR/DAY/report.html` and `DIR/DAY/report.json` and
+   `--days` gives the page's context chart the stored days; during a
+   backfill, add `--days DIR/EARLIER/report.json` for each day already
+   reported in this run. A missing file adds nothing. This checks the notes, writes `DIR/DAY/report.html` and `DIR/DAY/report.json` and
    opens the page in the default browser. Pass `--no-open` for every day but
    the newest, and where there is no
    browser, such as a remote session, and give the path or publish the page
@@ -198,7 +200,10 @@ classes, the page and the records are defined in
    request or issue as a GitHub pill below, and mark the lesson `tracked`,
    so `document` keeps it that way until the change is done. If Uberblick refuses a card with `invalid_card`
    (0.4.3 has no card buttons), run `document` again with `--no-button`. The
-   charts and the Recent days table follow the data by themselves.
+   charts and the Recent days table follow the data by themselves. A document
+   without a chart titled `context_chart.title` gets `context_chart.block`
+   inserted after its last chart before "Recent days", once; when Uberblick
+   refuses it, leave it out and say so in the reply.
 
 8. Reply with the newest day's headline, the KPIs against their targets, one
    line per change, and where the days were stored or why they were not. For
@@ -209,6 +214,7 @@ classes, the page and the records are defined in
    ```text
    14 October: 6 of 8 deliveries went through alone; the preparer asked twice about scope the corpus already settles.
    Autonomous 75% (target 75% or more), wasted runs 12% (under 10%), runs with denials 4% (under 10%).
+   Context: median peak 12% of the window, largest 56% (#2195 implementer, Codex), none compacted.
    Changes: acme/app#2201, the preparer reads the corpus before asking, ends 3 wasted runs a day.
    Stored 12 to 14 October in the Delivery report.
    12 October: every delivery alone. Autonomous 100%, wasted 0%.

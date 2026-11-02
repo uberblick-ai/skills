@@ -2,7 +2,8 @@
 
 One page per repository per day, and one record of it. It answers, in this
 order: how autonomous the day was, what to change, where the extra runs went,
-how each item fared, what the roles said about themselves.
+how each item fared, how much context the runs used, what the roles said about
+themselves.
 `scripts/review.py digest` prints the day from `data.json` for the agent to
 read; `scripts/review.py render` lays the page out from `data.json` and
 `notes.json`; `scripts/review.py records` turns the result into dataset
@@ -58,6 +59,21 @@ started on the day; delivery figures count a loop delivery's runs up to the end
 of the day. Overnight launcher pauses still count toward cycle; ub-agents does
 not record them yet. Collect a day a few hours after midnight, so runs still
 going at midnight have reported.
+
+Context used, for reading, not a target. ub-agents 0.5.0 and later records
+each run's main-session `context` on its outcome: the window, the prompt
+tokens of the first call, of call 10 and of the largest call, and how often the
+runtime compacted. The day's figures are shares of each run's own window over
+the runs started that day that carry it; runs without it are left out, never
+counted as zero, and a day where none carries it has none of these fields.
+
+| Field | What it is |
+| --- | --- |
+| `context_runs` | Runs with recorded context |
+| `context_start_pct` | Median context after the first ten calls: how heavy runs start. 20% is the heavy-start level the chart marks |
+| `context_peak_pct`, `context_peak_pct_max` | Median and largest peak |
+| `context_compacted` | Runs that compacted their context |
+| `context_by_runtime` | The same five, as `runs`, `start_pct`, `peak_pct`, `peak_pct_max` and `compacted`, per runtime (`claude`, `codex`) |
 
 Inflow and capacity, also context:
 
@@ -135,7 +151,16 @@ same gap recurring is worth fixing.
    retrospectives, one chip per run in order (green forward, amber back, red
    stop or waste, grey pending), autonomous, wasted runs, review rounds, human
    stops, lines changed, lead, cycle without the wait, run time, and the note.
-6. **Retrospectives.** The day's board posts grouped by cause: one card per
+6. **Context used.** One chart over the stored days (the newest 30) and this
+   one, on one 0 to 100% axis: bars for the median start, a line each for
+   the median and the largest peak, `↻N` above a day where N runs compacted,
+   and a dashed line at 20%. Buttons switch between all runtimes and each
+   runtime; hovering a day shows its figures. Below it, one row per agent and
+   runtime (runs, start, call 10 in tokens, median and largest peak,
+   compacted), and the three runs that came closest to their window, with
+   links. `render --days` supplies the stored days; without them the chart
+   shows this day alone.
+7. **Retrospectives.** The day's board posts grouped by cause: one card per
    group with the number of posts, the cause, a one-sentence summary and links
    to the posts by role. Posts the notes did not group share one last card. A
    line says when none was posted or which board could not be read.
@@ -288,6 +313,23 @@ bottom:
                 {"field": "wasted_pct", "label": "Wasted share", "format": "number", "unit": "%", "decimals": 0}],
     "sort": {"field": "day", "direction": "desc"}, "limit": 7}
    ```
+
+   The context chart mixes bars and lines on one axis and draws the
+   heavy-start level as a reference line. Chart blocks have no point
+   annotations, so compactions are a column of the Recent days table, not a
+   mark on the chart:
+
+   ```json
+   {"version": 1, "type": "line", "collection": "days", "title": "Context used, as a share of the window",
+    "x": {"field": "day", "type": "date", "label": "Day"},
+    "y": [{"field": "context_start_pct", "label": "Median start (call 10)", "unit": "%", "type": "bar",
+           "range": [0, 100], "reference": 20},
+          {"field": "context_peak_pct", "label": "Median peak", "unit": "%", "range": [0, 100]},
+          {"field": "context_peak_pct_max", "label": "Largest peak", "unit": "%", "range": [0, 100]}]}
+   ```
+
+   `document` returns the same block as `context_chart`, so a document
+   created before it gets the chart once.
 
    `limit` keeps the newest seven days in the table. `pageSize`, which older
    documents carry, never affected the display.
