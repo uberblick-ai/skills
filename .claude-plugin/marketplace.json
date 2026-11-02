@@ -9,11 +9,12 @@
   "plugins": [
     {
       "name": "ub-agents",
-      "description": "Skills for repositories that run the ub-agents loop: the daily delivery report and unblocking stopped items.",
+      "description": "Skills for repositories that run the ub-agents loop: the daily delivery report, a report on how the loop's flow and gates work, and unblocking stopped items.",
       "source": "./",
       "strict": false,
       "skills": [
         "./skills/ub-agents/ub-agents-deliver-report",
+        "./skills/ub-agents/ub-agents-flow",
         "./skills/ub-agents/ub-agents-unblock"
       ]
     },
