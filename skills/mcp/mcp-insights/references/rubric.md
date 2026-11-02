@@ -27,7 +27,7 @@ audit's `summary`.
 | G12 single home | each format or syntax | explained in one place, others point to it | two or three copies that agree | four or more copies, or copies that disagree |
 | G13 true examples | each example, in descriptions and help | valid against the input schema and the server's behaviour | valid but misleading (an unusual value the model will copy) | invalid, or rejected by the server |
 | G14 no internals | the server's texts | none | a few internal names or history notes | internals, old-client notes or plans throughout |
-| G15 help structure | each help topic | example, syntax, reading, editing, errors | some parts missing, editing absent | creation only, or a pasted schema |
+| G15 help structure | each help topic | an example, the syntax or rules, how to use it for each job it covers, and its errors | some parts missing | one job only, or a pasted schema |
 | G16 no contradictions | each contradiction found | (list only contradictions, each scored 0) | | advice the server's behaviour or another text contradicts |
 | E10 recovery | each observed error | names the cause and the fix (valid values, the field, the tool or topic) | names the cause only | generic text, or a raw JSON-RPC code |
 | E11 real cause | each misleading error | (list only misleading ones) | | the stated cause is not the actual one |
@@ -46,7 +46,7 @@ topics.
 ```json
 {
   "judged": {
-    "G10": {"items": [{"item": "get_doc", "score": 0.5, "evidence": "\"Returns the doc.\" says nothing about ...", "fix": "Rewritten description ..."},
+    "G10": {"items": [{"item": "get_item", "score": 0.5, "evidence": "\"Returns the item.\" says nothing about ...", "fix": "Rewritten description ..."},
                       {"item": "search", "score": 1, "evidence": "Says what it matches, what each hit carries, and that unknown tags refuse."}],
             "summary": "One sentence on the pattern."},
     "G11": {"score": 1, "display": "orients well", "evidence": "quote", "summary": "..."},
@@ -54,8 +54,8 @@ topics.
   },
   "recommendations": [
     {"title": "Imperative, specific title", "category": "guidance",
-     "audits": ["G10:get_doc", "G10:list_docs", "C03"],
-     "targets": ["get_doc", "list_docs"],
+     "audits": ["G10:get_item", "G10:list_items", "C03"],
+     "targets": ["get_item", "list_items"],
      "why": "One or two sentences.", "fix": "Paste-ready text or concrete steps.",
      "check": "How the maintainer confirms it worked.",
      "saves": "about 2.5k tokens per turn", "evidence": "optional quote"}
@@ -63,11 +63,11 @@ topics.
   "help_resources": ["myserver://help/*"],
   "data_resources": ["myserver://tasks/*"],
   "density": {"texts": [
-    {"text_id": "tool:create_doc", "clarity": 0.5,
+    {"text_id": "tool:create_item", "clarity": 0.5,
      "waste": [{"quote": "exact text from the description", "why": "internals"}]}
   ]},
   "trials": {"t1-plain-read": {"outcome": "done", "success": 1, "evidence": "What the agent did and why it counts."},
-             "t4-wireframe#2": {"outcome": "failed", "evidence": "A repeated trial is judged per attempt."}},
+             "t3-query#2": {"outcome": "failed", "evidence": "A repeated trial is judged per attempt."}},
   "sdk": {"P18": "draft-07 schemas come from the SDK's schema converter"},
   "secrets": {"dismiss": [{"name": "DJANGO_SECRET_KEY", "reason": "documented dev placeholder"}]},
   "summaries": {"protocol": "One sentence per category, shown under its gauge."},
@@ -81,7 +81,7 @@ not where in the code or how to build it, and carry no effort estimate,
 because the review does not read the server's source.
 
 A recommendation's `audits` are what it moves: an audit id, or
-`AUDIT:item` when it fixes one item, such as `G10:get_doc`. The report
+`AUDIT:item` when it fixes one item, such as `G10:get_item`. The report
 re-scores the categories as if those passed, so the effect it shows is real,
 and a suggestion that lifts a critical cap ranks first. Two suggestions that
 only lift a cap together are shown as a pair. `targets` names the tools,
@@ -102,7 +102,7 @@ counts toward help size (C05, C06, C11); data does not.
 
 `density` lists the wasted spans of always-loaded texts and help topics. Text
 ids are `instructions`, `tool:NAME`, `field:NAME.PATH` (for example
-`field:create_doc.blocks[].text`) and `topic:URI`. Each quote must appear in
+`field:create_item.tags[]`) and `topic:URI`. Each quote must appear in
 the text (whitespace is normalized) or it is dropped with a warning. Waste is
 repetition, internals, history, restated schema, text about other tools and
 filler; a long text that is all signal has no waste. Filler is reported over
@@ -132,19 +132,19 @@ whose audits all match the SDK's defaults ranks below the server's own fixes.
 
 ```json
 {
-  "help": {"tools": ["get_help"], "resources": ["uberblick://help/*"]},
+  "help": {"tools": ["get_help"], "resources": ["myserver://help/*"]},
   "trials": [
     {"id": "t1-plain-read", "question": "Do plain reads work from the descriptions alone?",
-     "task": "When was the document titled 'Roadmap' last updated?",
+     "task": "When was the item titled 'Q3 launch' last updated?",
      "expects_help": false, "needs": []},
-    {"id": "t2-chart", "question": "Is the data help read before a chart is written?",
-     "task": "Create a document with a bar chart of ...", "expects_help": true,
-     "needs": ["create_doc", "update_data"],
-     "rules": [{"label": "reads the doc before editing", "first": ["insert_block"], "before": ["get_doc"]}]},
-    {"id": "t2-chart@sonnet", "model": "sonnet", "...": "same task, another model"},
-    {"id": "t3-wireframe", "question": "Is the wireframe syntax found, and does the parser accept the result?",
-     "task": "In the document 'Sandbox', add a wireframe of a sign-in dialog.", "expects_help": true,
-     "needs": ["insert_block"], "repeat": 3, "verify": "python3 check_wireframe.py sandbox.sqlite"}
+    {"id": "t2-update", "question": "Is the version rule followed before an update?",
+     "task": "Rename the item 'Q3 launch' to 'Q3 launch (moved)'.", "expects_help": false,
+     "needs": ["update_item"],
+     "rules": [{"label": "reads the item before changing it", "first": ["update_item"], "before": ["get_item"]}]},
+    {"id": "t2-update@sonnet", "model": "sonnet", "...": "same task, another model"},
+    {"id": "t3-query", "question": "Is the query syntax found, and does the server accept the saved query?",
+     "task": "Save a view of the open items assigned to Ana that are due this week.", "expects_help": true,
+     "needs": ["save_view"], "repeat": 3, "verify": "python3 check_view.py sandbox.db"}
   ]
 }
 ```
@@ -158,7 +158,7 @@ call, `tool` or `tool:pattern` (the pattern matches a resource URI as a glob or
 appears in the arguments), for example `ReadMcpResourceTool:mise://tasks` or
 `get_help:markdown`; `"help"` accepts any help read.
 Use names and data that exist in the server's workspace or sandbox.
-`repeat` runs the trial that many times (ids become `t3-wireframe#1` and so
+`repeat` runs the trial that many times (ids become `t3-query#1` and so
 on), and `verify` is a shell command run after each attempt whose exit code
 grades it. With writes allowed, pair it with `--before-each` so every attempt
 starts from the same sandbox.

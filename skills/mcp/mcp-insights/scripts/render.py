@@ -118,7 +118,7 @@ CATALOG = [
      "Declare outputSchema for tools with structured results.", ["tools"], "/server/tools#output-schema", False),
     ("G10", "guidance", 10, "judged", "Tool descriptions say what, returns, when not, and the main failure",
      "These four facts let a model choose the right tool and recover from the common mistake without help topics.",
-     "Rewrite each description as plain sentences covering the four facts; move syntax to one help topic.", ["tools"], "/server/tools#tool", False),
+     "Rewrite each description as plain sentences covering the four facts; move long syntax out of the description, to a help topic or a field description.", ["tools"], "/server/tools#tool", False),
     ("G11", "guidance", 5, "judged", "Startup instructions orient the agent",
      "A good orientation names the workflow across tools and where to read more, and nothing else.",
      "Rewrite the instructions around the one workflow that spans tools.", ["transport"], "/basic/lifecycle#initialization", False),
@@ -131,9 +131,9 @@ CATALOG = [
     ("G14", "guidance", 4, "judged", "No internals or history in model-facing text",
      "Internal function names, version history and future plans cost context and give the agent nothing to act on.",
      "Remove internals, old-client notes and plans from descriptions and help.", ["tools", "resources", "prompts"], "", False),
-    ("G15", "guidance", 3, "judged", "Help topics teach editing and errors",
-     "Agents fail most on edits and on reading errors; help that only shows creation leaves them guessing.",
-     "Give each help topic the same shape: example, syntax, reading, editing, errors.", ["resources", "prompts"], "", False),
+    ("G15", "guidance", 3, "judged", "Help topics teach use and errors",
+     "Help that shows only one job, usually the first, leaves agents guessing at the others and at the errors.",
+     "Give each help topic the same shape: an example, the syntax or rules, how to use it for each job it covers, and its errors.", ["resources", "prompts"], "", False),
     ("G16", "guidance", 5, "judged", "Guidance does not contradict itself or the server",
      "A rule the server does not follow is worse than no rule.",
      "Remove or fix advice that the server's behaviour contradicts.", ["tools", "resources", "prompts"], "", False),
@@ -174,7 +174,7 @@ CATALOG = [
      "Report each failure by what actually went wrong.", ["errors"], "", False),
     ("E12", "errors", 8, "judged", "Writes never store something else silently",
      "A write that silently drops or mangles input is the worst failure: every call reports success.",
-     "Return the checker's diagnostics with the write result, naming the part that will not round-trip; refuse only when nothing sensible can be stored.", ["tools", "errors"], "", True),
+     "Refuse the write, or store it and say in the result what differs from what was sent, naming the part.", ["tools", "errors"], "", True),
     ("E13", "errors", 3, "trial", "Agents recover from errors in one step",
      "In trials, an error should tell the agent enough to get the next call right.",
      "Put the valid values or the corrected call in the error text.", ["tools", "errors"], "", False),
@@ -184,7 +184,7 @@ CATALOG = [
      "Emit 2020-12 schemas, or drop the $schema line.", ["tools"], "/server/tools#tool", False),
     ("C01", "context", 7, "metric", "Tool list fits the budget",
      "Clients that load every tool send each one's name, description and input schema with every request; clients with tool search pay it per tool the agent picks.",
-     "Move syntax and examples into help topics and keep descriptions to plain sentences.", ["tools"], "", False),
+     "Cut what the model does not need on every turn: long syntax and examples, repeated text, and regex patterns that a format keyword already states.", ["tools"], "", False),
     ("C02", "context", 3, "metric", "Startup instructions fit the budget",
      "Instructions are always in context; long ones crowd out the task.",
      "Keep instructions to the cross-tool workflow and a pointer to help.", ["transport"], "", False),
@@ -365,6 +365,43 @@ def described_in_text(path: str, text: str) -> bool:
     model as well as a schema description does."""
     name = re.escape(path.split(".")[-1].replace("[]", ""))
     return bool(re.search(rf"(?m)^\s*[-*]?\s*`?{name}`?\s*(\([^)]*\))?\s*:\s*\S", text))
+
+
+LONG_PATTERN = 40  # a regex this long costs tokens on every turn and tells the model little that `format` does not
+
+
+def schema_texts(schema) -> tuple[list[str], list[str]]:
+    """Every description and every long `pattern` string anywhere in an input schema."""
+    descs, patterns = [], []
+    def walk(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k == "description" and isinstance(v, str):
+                    descs.append(v)
+                elif k == "pattern" and isinstance(v, str) and len(v) >= LONG_PATTERN:
+                    patterns.append(v)
+                else:
+                    walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+    walk(schema)
+    return descs, patterns
+
+
+def context_parts(tool: dict, model_tokens: int, desc_waste: int, field_waste: int) -> dict:
+    """Split a tool's model-facing tokens into what they are: prose the model reads, schema it parses, long patterns
+    and reviewed filler. Each part is estimated on its own and the schema structure takes the remainder."""
+    descs, patterns = schema_texts(tool.get("inputSchema") or {})
+    desc = estimate_tokens(tool.get("description") or "")
+    fields = estimate_tokens("\n".join(descs)) if descs else 0
+    pats = estimate_tokens(json.dumps(patterns, ensure_ascii=False)) if patterns else 0
+    filler = min(desc_waste, desc) + min(field_waste, fields)
+    parts = {"description": desc - min(desc_waste, desc), "fields": fields - min(field_waste, fields),
+             "patterns": pats, "filler": filler}
+    parts["structure"] = max(0, model_tokens - sum(parts.values()))
+    parts["pattern_count"] = len(patterns)
+    return parts
 
 
 def model_facing(tool: dict) -> dict:
@@ -600,6 +637,9 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             "waste_tokens": (waste.get(f"tool:{t.get('name')}") or {}).get("tokens", 0)
                             + sum(v["tokens"] for k, v in waste.items() if k.startswith(f"field:{t.get('name')}.")),
         })
+        per_tool[-1]["parts"] = context_parts(
+            t, per_tool[-1]["model_tokens"], (waste.get(f"tool:{t.get('name')}") or {}).get("tokens", 0),
+            sum(v["tokens"] for k, v in waste.items() if k.startswith(f"field:{t.get('name')}.")))
     m["tools"] = per_tool
     m["tool_count"] = len(tools)
     m["tool_list_model_bytes"] = sum(p["model_bytes"] for p in per_tool) if tools else 0
@@ -1412,50 +1452,6 @@ def recommendations(results: dict, findings: dict, cats: dict) -> list[dict]:
     return recs
 
 
-def squarify(items, x, y, w, h):
-    """items: list of (key, value) sorted desc. Returns list of (key, x, y, w, h)."""
-    out = []
-    items = [(k, v) for k, v in items if v > 0]
-    total = sum(v for _, v in items)
-    if not items or total <= 0:
-        return out
-    scale = w * h / total
-    vals = [(k, v * scale) for k, v in items]
-
-    def worst(row, side):
-        s = sum(v for _, v in row)
-        return max(max(side * side * v / (s * s), (s * s) / (side * side * v)) for _, v in row)
-
-    while vals:
-        side = min(w, h)
-        row = [vals[0]]
-        i = 1
-        while i < len(vals) and worst(row + [vals[i]], side) <= worst(row, side):
-            row.append(vals[i])
-            i += 1
-        s = sum(v for _, v in row)
-        if w >= h:
-            cw = s / h
-            cy = y
-            for k, v in row:
-                rh = v / cw
-                out.append((k, x, cy, cw, rh))
-                cy += rh
-            x += cw
-            w -= cw
-        else:
-            rh = s / w
-            cx = x
-            for k, v in row:
-                cw = v / rh
-                out.append((k, cx, y, cw, rh))
-                cx += cw
-            y += rh
-            h -= rh
-        vals = vals[i:]
-    return out
-
-
 def esc(s) -> str:
     return html.escape(str(s if s is not None else ""), quote=True)
 
@@ -1484,32 +1480,60 @@ def shape(b) -> str:
     return f'<span class="shape {b}" aria-hidden="true"></span>'
 
 
-def treemap_svg(per_tool) -> str:
-    W, H = 960, 360
-    items = sorted(((p["name"], p["model_tokens"]) for p in per_tool), key=lambda kv: -kv[1])
-    rects = squarify(items, 0, 0, W, H)
-    by = {p["name"]: p for p in per_tool}
-    parts = [f'<svg class="treemap" viewBox="0 0 {W} {H}" role="img" aria-label="Model-facing tool list tokens by tool">']
-    for name, x, y, w, h in rects:
-        p = by[name]
-        desc_share = p["description_tokens"] / p["model_tokens"] if p["model_tokens"] else 0
-        dh = h * desc_share
-        tip = (f"{name}: {fmt_tokens(p['model_tokens'])} (description {fmt_tokens(p['description_tokens'])}, "
-               f"input schema and name {fmt_tokens(p['model_tokens'] - p['description_tokens'])})")
-        parts.append(f'<g><title>{esc(tip)}</title>'
-                     f'<rect class="tm-desc" x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{dh:.1f}"/>'
-                     f'<rect class="tm-schema" x="{x:.1f}" y="{y + dh:.1f}" width="{w:.1f}" height="{h - dh:.1f}"/>'
-                     f'<rect class="tm-border" x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}"/>')
-        if w > 70 and h > 34:
-            fit = max(3, int((w - 14) / 7.9))
-            label = name if len(name) <= fit else name[:fit - 1] + "\u2026"
-            parts.append(f'<text x="{x + 8:.1f}" y="{y + 18:.1f}" class="tm-name">{esc(label)}</text>'
-                         f'<text x="{x + 8:.1f}" y="{y + 34:.1f}" class="tm-size">{esc(fmt_tokens(p["model_tokens"]))}</text>')
-        elif w > 44 and h > 20:
-            parts.append(f'<text x="{x + 5:.1f}" y="{y + 15:.1f}" class="tm-size">{esc(fmt_tokens(p["model_tokens"]))}</text>')
-        parts.append("</g>")
-    parts.append("</svg>")
-    return "".join(parts)
+CONTEXT_PARTS = [("description", "Tool descriptions"), ("fields", "Field descriptions"), ("structure", "Schema structure"),
+                 ("patterns", "Long regex patterns"), ("filler", "Flagged filler")]
+CONTEXT_SHOWN_ROWS = 10
+
+
+def context_html(per_tool) -> str:
+    """Where the tool list's tokens go: one segmented bar for the whole list, then ranked rows per tool on one scale."""
+    rows = sorted((p for p in per_tool if p.get("model_tokens")), key=lambda p: -p["model_tokens"])
+    if not rows:
+        return '<p class="empty">No tools.</p>'
+    totals = {k: sum((p.get("parts") or {}).get(k, 0) for p in rows) for k, _ in CONTEXT_PARTS}
+    whole = sum(totals.values()) or 1
+    keys = [(k, label) for k, label in CONTEXT_PARTS if totals[k] > 0]
+
+    def tip(name, parts, total):
+        return f"{name}: {fmt_tokens(total)}. " + "; ".join(f"{label} {fmt_tokens(parts.get(k, 0))}" for k, label in keys if parts.get(k))
+
+    segs = []
+    for k, label in keys:
+        share = totals[k] / whole
+        text = f"<b>{share:.0%}</b>" if share >= 0.07 else ""
+        segs.append(f'<span class="seg c-{k}" style="flex-grow:{totals[k]}" tabindex="0" '
+                    f'data-tip="{esc(label)}: {esc(fmt_tokens(totals[k]))} ({share:.0%} of the tool list)">{text}</span>')
+    summary = "; ".join(f"{lab} {fmt_tokens(totals[k])}" for k, lab in keys)
+    out = [f'<div class="ctx-total" role="img" aria-label="Tool list, {esc(fmt_tokens(whole))}: {esc(summary)}">{"".join(segs)}</div>',
+           '<div class="ctx-legend">' + "".join(f'<span><i class="c-{k}"></i>{esc(lab)}</span>' for k, lab in keys) + "</div>"]
+
+    top = rows[0]["model_tokens"]
+
+    def row(p):
+        parts = p.get("parts") or {}
+        bar = "".join(f'<span class="c-{k}" style="flex-grow:{parts.get(k, 0)}"></span>' for k, _ in keys if parts.get(k))
+        t = tip(p["name"], parts, p["model_tokens"])
+        return (f'<div class="ctx-row" tabindex="0" data-tip="{esc(t)}" aria-label="{esc(t)}">'
+                f'<code class="ctx-name">{esc(p["name"])}</code>'
+                f'<span class="ctx-track"><span class="ctx-bar" style="width:{100 * p["model_tokens"] / top:.1f}%">{bar}</span></span>'
+                f'<span class="ctx-val">{esc(fmt_tokens(p["model_tokens"]).replace(" tokens", ""))}</span></div>')
+
+    out.append('<div class="ctx-rows">' + "".join(row(p) for p in rows[:CONTEXT_SHOWN_ROWS]) + "</div>")
+    if len(rows) > CONTEXT_SHOWN_ROWS:
+        rest = rows[CONTEXT_SHOWN_ROWS:]
+        out.append(f'<details class="trials-more"><summary>The other {len(rest)} tools '
+                   f'({esc(fmt_tokens(sum(p["model_tokens"] for p in rest)))})</summary>'
+                   f'<div class="ctx-rows">{"".join(row(p) for p in rest)}</div></details>')
+    head = "".join(f"<th>{esc(lab)}</th>" for _, lab in keys)
+    body = "".join(f'<tr><td><code>{esc(p["name"])}</code></td>'
+                   + "".join(f'<td>{(p.get("parts") or {}).get(k, 0):,}</td>' for k, _ in keys)
+                   + f'<td>{p["model_tokens"]:,}</td></tr>' for p in rows)
+    foot = ("<tr><td>All tools</td>" + "".join(f"<td>{totals[k]:,}</td>" for k, _ in keys)
+            + f'<td>{sum(p["model_tokens"] for p in rows):,}</td></tr>')
+    out.append(f'<details class="trials-more"><summary>As a table</summary><div class="table-wrap"><table class="ctx-table">'
+               f'<thead><tr><th>Tool</th>{head}<th>Total</th></tr></thead><tbody>{body}</tbody><tfoot>{foot}</tfoot>'
+               f'</table></div></details>')
+    return "".join(out)
 
 
 def render_html(report: dict) -> str:
@@ -1698,10 +1722,13 @@ def render_html(report: dict) -> str:
                           "with a stated saving, as if the text were that much smaller: what a complete fix would earn, not a forecast. "
                           "They describe what an agent saw and what it should see instead, judged from the outside; "
                           "finding the cause and the change in code is the maintainer's part."),
-        "TREEMAP": treemap_svg(m.get("tools") or []) if m.get("tools") else '<p class="empty">No tools.</p>',
+        "TREEMAP": context_html(m.get("tools") or []),
         "TREEMAP_NOTE": esc(f"{fmt_tokens(m.get('tool_list_model_tokens'))} reach the model (name, title, description and input schema of every tool"
                             + ("), as the client shows them; the server's own tools/list was not visible." if meta.get("via") else
-                               f"). The full tools/list is {fmt_tokens(m.get('tool_list_wire_tokens'))}; output schemas and annotations stay with the client.")),
+                               f"). The full tools/list is {fmt_tokens(m.get('tool_list_wire_tokens'))}; output schemas and annotations stay with the client.")
+                            + " Schema structure is the JSON around the prose: property names, types, enums and nesting. Long regex patterns are "
+                            f"`pattern` strings of {LONG_PATTERN} characters or more. Flagged filler is what the review quoted as waste. "
+                            "Each row is one tool in tokens, all on one scale; hover or focus a row for its parts."),
         "SECTIONS": "".join(sections),
         "INVENTORY": "".join(inventory_rows),
         "NOTES": notes_html,

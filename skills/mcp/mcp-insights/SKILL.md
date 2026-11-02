@@ -91,11 +91,13 @@ less (C13):
 
 ```json
 {"calls": [
-  {"tool": "list_docs", "arguments": {}, "purpose": "list"},
-  {"tool": "get_doc", "arguments": {"uuid": "<id from list_docs>"}, "purpose": "largest typical read"},
-  {"tool": "list_docs", "arguments": {"tag": "<one tag>"}, "purpose": "the list, narrowed"}
+  {"tool": "list_items", "arguments": {}, "purpose": "list"},
+  {"tool": "get_item", "arguments": {"id": "<id from list_items>"}, "purpose": "largest typical read"},
+  {"tool": "list_items", "arguments": {"status": "<one status>"}, "purpose": "the list, narrowed"}
 ]}
 ```
+
+Tool names in this file are placeholders: use the server's own.
 
 Chain them: list first, then use real ids. A tool not marked
 `readOnlyHint: true` runs only with `"confirmed_read_only": true`, which you
@@ -112,12 +114,13 @@ trial per behavioural question the report leaves open, never a fixed set.
 Test the claims the server's own text makes, because that is where agents go
 wrong:
 
-- each format the server defines beyond plain Markdown (a diagram language,
-  a card or widget grammar): one trial per format, graded by that format's
-  real parser through `verify`, not by reading the transcript
-- each edit rule (what `old_text` must hold, read before writing, keep
-  comments and ids): an edit trial on a block that carries a comment, checked
-  by reading the block back
+- each syntax the server asks the agent to write (a query or filter
+  language, a template, a diagram or markup format): one trial per syntax,
+  graded by a real parser or the server's own validation through `verify`,
+  not by reading the transcript
+- each write rule the text states (what a field must contain, read before
+  writing, a version or etag to send, what an update keeps): one trial that
+  depends on the rule, checked by reading the result back
 - help or syntax that must be read before a tool works
 - tools that change things with unclear or missing annotations
 - tool names that are easy to confuse
@@ -133,7 +136,7 @@ trial `"repeat": 3` (5 when the result decides a fix) and a Sonnet copy, so
 the report shows "k of n" per model. `verify` is a shell command run after
 each attempt: exit 0 means the task is done, and its output appears on the
 trial card. Write it against the server's own reads or the format's parser,
-for example a script that reads the block back and parses it.
+for example a script that reads the result back and parses it.
 
 When the maintainer has a fix on a branch, run the same plan against the
 baseline and the branch, with the same models and repeats, and render the
@@ -157,19 +160,22 @@ Write tools are blocked, and the blocked call is recorded as what the agent
 would have sent. In a sandbox, add `--allow-writes` and `--before-each` with a
 command that restores the sandbox, so every trial starts from the same state.
 Then read what the agent wrote back through the server and check it with the
-server's own reads; that is how silent truncation and Markdown stored as
-literal text show up (E12).
+server's own reads; that is how silent truncation, dropped fields and
+formatting stored as literal text show up (E12).
 
 With a sandbox, also send deliberately wrong writes yourself: add calls with
 `"write_probe": true`, an `expect` and a `read_back` read to `calls.json` and
-run `probe.py call --allow-writes` against the sandbox. Good probes are a
-table row longer than the header, an edit whose `old_text` is only the part
-being changed, the same without `rev`, and an unknown key:
+run `probe.py call --allow-writes` against the sandbox. Derive each probe
+from a rule the server's own text states, then break it the way an agent
+would: a value the schema accepts but the text forbids (too long, one list
+item too many, nested data in the wrong shape), part of a value where the
+text asks for the whole, a stale or missing version token, an id that does
+not exist, the same create sent twice, and an unknown key:
 
 ```json
-{"tool": "insert_block", "write_probe": true, "purpose": "row longer than the header", "expect": "refused, naming the row",
- "arguments": {"uuid": "<sandbox doc>", "type": "table", "text": "| a | b |\n| --- | --- |\n| 1 | 2 | 3 |"},
- "read_back": {"tool": "get_doc", "arguments": {"uuid": "<sandbox doc>"}}}
+{"tool": "update_item", "write_probe": true, "purpose": "stale version token", "expect": "refused, naming the current version",
+ "arguments": {"id": "<sandbox item>", "version": 1, "title": "Renamed"},
+ "read_back": {"tool": "get_item", "arguments": {"id": "<sandbox item>"}}}
 ```
 
 Each probe keeps the server's answer and what the read-back shows was
@@ -190,7 +196,7 @@ the old text gave (what refuses before writing, partial writes, recovery).
 For behaviour, say what the agent should see (refused with an error naming
 the row), not how to build it. Quote wasted spans under `density`, so context cost counts
 waste rather than length. For a server with many formats or a large help
-surface, judge one content family at a time (a syntax, a block type, a
+surface, judge one content family at a time (a syntax, a resource type, a
 workflow), one sub-agent per family when you can start them: each reads the
 help for its family and reports the copies that drift, editing that is not
 taught, and internals that leak. Read each trial's transcript in `DIR/trials/` and
