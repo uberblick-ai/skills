@@ -128,7 +128,10 @@ class Tests(unittest.TestCase):
         self.assertEqual(len(links), 1, "only the proposed lesson, not one already being handled")
         prompt = unquote(links[0].replace("&amp;", "&").split("q=", 1)[1])
         for part in ("From the delivery report for o/n, evidence as of 2026-10-14", "Recommendation: Shorter brief.",
-                     "Where: AGENTS.md", "5 runs on 11 October", "items: #7", "wait for my go-ahead"):
+                     "Where: AGENTS.md", "5 runs on 11 October", "items: #7", "wait for my go-ahead",
+                     "\n\nFirst check that nobody is on it already: search the issues and pull requests of o/n",
+                     "open ones (drafts included) and ones merged or closed in the last 30 days",
+                     "as soon as a pull request implements it (a draft counts)"):
             self.assertIn(part, prompt)
 
     def test_a_day_is_a_utc_day_in_any_local_zone(self):

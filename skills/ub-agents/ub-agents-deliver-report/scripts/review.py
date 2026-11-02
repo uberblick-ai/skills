@@ -932,6 +932,12 @@ def changelog(changes, limit=5):
 # link is a `button:` line, which Uberblick reads from the release after 0.4.3.
 CLAUDE_CODE = "claude://code/new?q="
 CHECK = "Check it against the repository: is it sound, what would it change, what are the risks, and is there a simpler way?"
+# Two people can open the same card hours apart, so the session looks for work already under way before planning any.
+ALREADY = ("First check that nobody is on it already: search the issues and pull requests of {repo}, and of "
+           "uberblick-ai/ub-agents when the change is to the loop itself, for the same change, open ones (drafts "
+           "included) and ones merged or closed in the last 30 days. If one covers it, link it and say where it "
+           "stands, and we work from it instead of starting another; an open one means the card is marked with it "
+           "now, as below.")
 
 
 def inline(text):
@@ -956,7 +962,7 @@ def tracked_card(lesson):
 
 def discuss_link(data, lesson, doc=None):
     """A link that opens Claude Code with a prompt to discuss the lesson before changing anything: the repository,
-    the change, its evidence, what to check, then a plan. If the outcome is to apply it, the prompt says how to mark
+    the change, its evidence, a search for issues and pull requests already on it, what to check, then a plan. If the outcome is to apply it, the prompt says how to mark
     the card and the lesson."""
     source = f"the delivery report for {data['repo']}" + (f" (Uberblick document {doc})" if doc else "")
     evidence = "; ".join(filter(None, [lesson.get("cost"),
@@ -968,10 +974,11 @@ def discuss_link(data, lesson, doc=None):
               f"Recommendation: {lesson['title'].rstrip('.')}.\nChange: {lesson['change']}\n"
               + (f"Where: {lesson['where']}\n" if lesson.get("where") else "")
               + (f"Evidence: {evidence}\n" if evidence else "")
-              + f"\nLet's discuss this before changing anything. {CHECK} Then propose a plan and wait for my go-ahead.")
+              + f"\n{ALREADY.format(repo=data['repo'])}\n\n"
+              + f"Let's discuss this before changing anything. {CHECK} Then propose a plan and wait for my go-ahead.")
     where = f"Uberblick document {doc}" if doc else f"the delivery report document for {data['repo']} in Uberblick"
-    prompt += ("\n\nIf we decide to apply it, mark the card once a pull request implements it or an issue plans it, so "
-               f"the report shows it is being handled. In {where}, replace the card titled \"{inline(lesson['title'])}\" "
+    prompt += ("\n\nIf we decide to apply it, mark the card as soon as a pull request implements it (a draft counts) or "
+               f"an issue plans it, so the report shows it is being handled before anyone else starts. In {where}, replace the card titled \"{inline(lesson['title'])}\" "
                "under Recommended Actions with this one (delete_block, then insert_block in the same place, since "
                "edit_block cannot change formatting). STATUS is Implemented or Planned, REF is owner/repo#number and "
                "URL its GitHub address; keeping the reference as the link text makes it show as a GitHub pill:\n\n"

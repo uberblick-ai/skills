@@ -20,7 +20,7 @@ compatibility: >-
   the `ub` command; without either the skill prints a table.
 metadata:
   author: uberblick-ai
-  version: "1.9"
+  version: "1.10"
 ---
 
 # CI health
@@ -205,6 +205,31 @@ decide.
    mark is being handled: someone discussed it and opened the pull request
    or issue the mark names. Keep it, struck through, in its place while that
    pull request or issue is open, and drop it once it is merged or closed.
+
+   Then check, for each action you keep or add, that nobody is on it
+   already: a card can wait for days, and two people reading it should not
+   both build the change.
+
+   ```sh
+   gh pr list --repo REPO --state all --search "WORDS updated:>=DAY" --json number,title,state,isDraft,url
+   gh issue list --repo REPO --state all --search "WORDS updated:>=DAY" --json number,title,state,url
+   ```
+
+   `WORDS` are a few words of the change and the job or workflow file it
+   touches, `DAY` 30 days before the last day; `--state all` lists open ones,
+   drafts included, and merged or closed ones. Read the ones that look
+   close: only one that makes this change counts, not one that touches the
+   same job for another reason. An open pull request or issue that makes
+   it is someone handling it: with `DOC`, add a mark for the action to the
+   records of `DIR/applied.json` unless it has one, `{"id": ID, "value":
+   {"status": "implemented", "ref": "owner/name#N", "url": URL, "day":
+   TODAY}}`, `planned` for an issue, giving a new action an `id` in
+   lowercase words joined by hyphens; without `DOC`, name it with the
+   action. A merged one means the action is done: drop it. One closed
+   without merging means someone tried and stopped: keep the action only
+   while its evidence holds, with that reference in `evidence` and why it
+   closed in `why`.
+
    Without `DOC`, nothing keeps actions between runs, so choose them afresh.
    Fewer than three is fine, and no action goes without data behind it.
    Write `DIR/actions.json` in rank order, in the shape `references/data.md`
@@ -231,8 +256,10 @@ decide.
    python3 scripts/ci.py records DIR/data.json [DIR/incidents.json] --actions DIR/actions.json [--applied DIR/applied.json] --doc DOC > DIR/update.json
    ```
 
-   `DIR/applied.json` is the `applied` collection as `get_data` returned
-   it; the marks of dropped actions are deleted with them.
+   `DIR/applied.json` is the `applied` collection, read again with
+   `get_data` just before so a mark another session set meanwhile is kept,
+   plus the marks step 7 added; `records` writes the marks of kept actions
+   and deletes those of dropped ones.
 
    Pass it as the arguments of `update_data`, then read the area summary
    back with `get_data` and confirm `days`, `incidents` and `actions` are
@@ -266,7 +293,7 @@ decide.
     ```text
     CI on main, 7 days to 28 October: 9.7 min median (± 1.2), P95 14.1 min. 6% of runs failed. 2,431 tests, test ratio 0.82, coverage 71%.
     New incident: 27 October, 2.5 min slower, job e2e, after acme/app#412 added browser tests.
-    Actions: 1. Shard the e2e job, could save about 60 min of waiting a day (new). 2. Cache the pnpm store (kept). Dropped: retry the flaky sync test, fixed by acme/app#405.
+    Actions: 1. Shard the e2e job, could save about 60 min of waiting a day (new). 2. Cache the pnpm store (kept). 3. Split the lint job (already in draft acme/app#417, struck through). Dropped: retry the flaky sync test, fixed by acme/app#405.
     Measured: acme/app#398 (cache Playwright browsers) estimated 20 min a day; the days since show 1.1 min less per push, about 25 min a day.
     Stored 26 to 28 October in the CI Health Report.
     ```
