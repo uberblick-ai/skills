@@ -97,6 +97,40 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual((commit["wall_min"], commit["wait_min"], commit["runs"]), (5.0, 1.0, ["success"]))
         self.assertEqual((data["days"][0]["commits"], data["days"][0]["failure_pct"]), (1, 0.0))
 
+    def test_finished_runs_are_read_once_across_reports_until_rerun(self):
+        run = {"id": 7, "head_sha": "a", "head_branch": "main", "path": ".github/workflows/ci.yml", "name": "CI",
+               "status": "completed", "conclusion": "success", "run_attempt": 2, "updated_at": "2026-10-14T09:06:00Z",
+               "created_at": "2026-10-14T09:00:00Z", "head_commit": {"message": "Change"}}
+        job = {"id": 3, "name": "tests", "started_at": "2026-10-14T09:00:00Z",
+               "completed_at": "2026-10-14T09:05:00Z", "conclusion": "success"}
+        reads = []
+
+        def read(path, raw=False, *flags):
+            reads.append(path)
+            if path == "repos/o/r":
+                return {"default_branch": "main"}
+            if "/attempts/1" in path:
+                return {"conclusion": "failure"}
+            if "/jobs" in path:
+                return {"jobs": [job]}
+            return {"workflow_runs": [run]}
+
+        day = ci.dt.date(2026, 10, 14)
+        with tempfile.TemporaryDirectory() as root, mock.patch.object(ci, "gh", side_effect=read), \
+                mock.patch.object(ci, "STABLE", ci.ReadCache(root)):
+            first = ci.collect("o/r", day, day)
+            self.assertEqual(sum("/jobs" in p or "/attempts/" in p for p in reads), 2)
+            reads.clear()
+            ci.CACHE = ci.ReadCache()  # a new report
+            self.assertEqual(ci.collect("o/r", day, day)["days"], first["days"])
+            self.assertFalse([p for p in reads if "/jobs" in p or "/attempts/" in p],
+                             "a finished run's jobs and attempts come from the shared cache")
+            run.update(run_attempt=3, updated_at="2026-10-14T10:00:00Z")
+            reads.clear()
+            ci.CACHE = ci.ReadCache()
+            ci.collect("o/r", day, day)
+            self.assertEqual(sum("/jobs" in p for p in reads), 1, "a re-run reads its jobs again")
+
     def test_logs_and_test_count_share_completed_job_logs_on_disk(self):
         day = "2026-10-14"
         jobs = [{"id": 1, "workflow": "CI", "name": "Batch 1"},

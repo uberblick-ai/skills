@@ -37,6 +37,7 @@ import sys
 import tempfile
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import quote
 
@@ -87,6 +88,38 @@ class ReadCache:
 
 
 CACHE = ReadCache()
+# Reads that never change once made (a finished run attempt's jobs, an attempt's conclusion, a job's log), shared
+# by every report so a daily run fetches only the new runs. Set by the CLI; None leaves them to CACHE alone.
+STABLE = None
+STABLE_DAYS = LOG_DAYS + LOOKBACK + WINDOW  # entries older than any collection reaches are pruned
+GH_WORKERS = 8  # parallel `gh api` reads; GitHub's secondary rate limit tolerates this
+
+
+def stable_cache():
+    """The shared cache directory: $CI_HEALTH_CACHE, or ~/.cache/ci-health; an empty value turns it off."""
+    root = os.environ.get("CI_HEALTH_CACHE")
+    if root == "":
+        return None
+    root = Path(root) if root else Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "ci-health"
+    cutoff = time.time() - STABLE_DAYS * 86400
+    try:
+        for entry in root.iterdir() if root.is_dir() else ():
+            if entry.stat().st_mtime < cutoff:
+                entry.unlink(missing_ok=True)
+    except OSError as exc:
+        print(f"ci: cannot prune {root}: {exc}", file=sys.stderr)
+    return ReadCache(root)
+
+
+def gh_stable(path, version):
+    """gh(path) for a read that `version` pins for good, from the shared cache when one is set."""
+    key = ("api", path, version)
+    if STABLE is not None and (cached := STABLE.get(key)) is not None:
+        return json.loads(cached)
+    result = gh(path)
+    if STABLE is not None:
+        STABLE.put(key, json.dumps(result).encode())
+    return result
 
 
 def gh(path, raw=False, *flags):
@@ -120,11 +153,12 @@ def gh(path, raw=False, *flags):
         time.sleep(2 ** attempt)
 
 
-def pages(path, key, **params):
+def pages(path, key, version=None, **params):
     query = "&".join(f"{k}={v}" for k, v in params.items())
     page = 1
     while True:
-        batch = gh(f"{path}?{query}&per_page=100&page={page}")[key]
+        url = f"{path}?{query}&per_page=100&page={page}"
+        batch = (gh(url) if version is None else gh_stable(url, version))[key]
         yield from batch
         if len(batch) < 100:
             return
@@ -191,6 +225,9 @@ def job_log(repo, job_id):
     key = ("job-log", repo, job_id)
     if (cached := CACHE.get(key)) is not None:
         return cached.decode()
+    if STABLE is not None and (cached := STABLE.get(key)) is not None:
+        CACHE.put(key, cached)
+        return cached.decode()
     path = f"repos/{repo}/actions/jobs/{job_id}/logs"
     try:
         data = gh(path, True)
@@ -205,6 +242,8 @@ def job_log(repo, job_id):
     else:
         text = data.decode(errors="replace")
     CACHE.put(key, text.encode())
+    if STABLE is not None:
+        STABLE.put(key, text.encode())
     return text
 
 
@@ -256,7 +295,8 @@ def attempts(repo, run):
     earlier = []
     for n in range(1, run.get("run_attempt", 1)):
         try:
-            earlier.append(gh(f"repos/{repo}/actions/runs/{run['id']}/attempts/{n}").get("conclusion"))
+            earlier.append(gh_stable(f"repos/{repo}/actions/runs/{run['id']}/attempts/{n}", "attempt")
+                           .get("conclusion"))
         except RuntimeError as e:
             print(f"collect: attempt {n} of run {run['id']}: {e}", file=sys.stderr)
     return [*earlier, run["conclusion"]]
@@ -279,21 +319,31 @@ def collect(repo, first, last, required=(), floor=None):
     runs = [r for r in pages(f"repos/{repo}/actions/runs", "workflow_runs", branch=branch, event="push",
                              created=f"{start.isoformat()}..{last.isoformat()}")
             if r["head_branch"] == branch and not r["path"].startswith("dynamic/")]
+    def read(run):
+        """A finished run's jobs and attempt conclusions; its attempt number and update time pin them for good."""
+        jobs = [] if run["conclusion"] == "skipped" else [
+            j for j in pages(f"repos/{repo}/actions/runs/{run['id']}/jobs", "jobs",
+                             version=f"{run.get('run_attempt', 1)}@{run.get('updated_at')}", filter="latest")
+            if j.get("started_at") and j.get("completed_at") and j["conclusion"] not in ("skipped", None)]
+        return jobs, attempts(repo, run) if not required or run["name"] in required else None
+
+    done = [r for r in runs if r["status"] == "completed"]
+    print(f"collect: {len(done)} finished runs from {start} to {last}", file=sys.stderr)
+    with ThreadPoolExecutor(GH_WORKERS) as pool:
+        fetched = dict(zip((r["id"] for r in done), pool.map(read, done)))
     commits, pending = {}, set()
     for run in sorted(runs, key=lambda r: r["created_at"]):
         if run["status"] != "completed":
             pending.add(run["head_sha"])
             continue
-        jobs = [] if run["conclusion"] == "skipped" else [
-            j for j in pages(f"repos/{repo}/actions/runs/{run['id']}/jobs", "jobs", filter="latest")
-            if j.get("started_at") and j.get("completed_at") and j["conclusion"] not in ("skipped", None)]
+        jobs, conclusions = fetched[run["id"]]
         c = commits.setdefault(run["head_sha"], {
             "sha": run["head_sha"], "created": run["created_at"],
             "title": (run.get("head_commit") or {}).get("message", "").split("\n")[0][:200],
             "workflows": {}, "jobs": []})
         c["workflows"][run["name"]] = run["conclusion"]
-        if not required or run["name"] in required:
-            c.setdefault("runs", []).extend(attempts(repo, run))
+        if conclusions is not None:
+            c.setdefault("runs", []).extend(conclusions)
         c["jobs"] += [{"id": j["id"], "workflow": run["name"], "name": j["name"], "started": j["started_at"],
                        "completed": j["completed_at"], "conclusion": j["conclusion"],
                        "min": minutes(j["started_at"], j["completed_at"])} for j in jobs]
@@ -1180,8 +1230,10 @@ def main():
     u.add_argument("--calls", help='a JSON file listing calls, [{"tool": ..., "arguments": {...}}], run in order')
     u.add_argument("--checkout", default=".", help="a checkout bound to the workspace (default here)")
     args = parser.parse_args()
-    global CACHE
+    global CACHE, STABLE
     CACHE = ReadCache(getattr(args, "cache", None))
+    if args.command in ("collect", "logs", "tests"):
+        STABLE = stable_cache()
     if args.command == "collect":
         if sum(map(bool, (args.day, args.since or args.until, args.after))) > 1:
             sys.exit("--day, --since/--until and --after do not combine")

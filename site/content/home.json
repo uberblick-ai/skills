@@ -18,6 +18,7 @@
     {"label": "Contribute", "question": "How do I write a skill for this repository?", "links": [["Guide", "AGENTS.md", "https://github.com/uberblick-ai/skills/blob/main/AGENTS.md"], ["Spec", "Agent Skills specification", "https://agentskills.io/specification"]]}
   ],
   "changes": [
+    ["2026-11-02", "Skill", "ci-health 1.11: collecting CI runs takes seconds after the first report, since finished runs are read once and kept, and a first report reads them eight at a time."],
     ["2026-11-02", "Skill", "ub-agents-deliver-report 1.11: the discussion an action card opens looks for issues and pull requests already on the change, drafts included, before planning one."],
     ["2026-11-02", "Skill", "ci-health 1.10: before an action is built, the skill and its discussion prompt look for issues and pull requests already on it, drafts included, and mark the card as taken."],
     ["2026-11-01", "Skill", "backlog-grooming 1.5: when most issues have a milestone, the report groups them by milestone, and recommends one, or none, for each issue without. A Discuss with Claude link opens the findings in Claude Code."],
