@@ -11,7 +11,7 @@
     "Reads how the repository runs its loop: <code>ub-agents.yaml</code>, <code>AGENTS.md</code> and each agent's instructions, so labels, roles and merge policy come from your setup, not the defaults.",
     "Lists stopped items with <code>ub-agents status</code>, highest priority and longest waiting first: items with a stop label such as <code>needs-human</code>, and blocked or failed runs.",
     "Takes one item at a time and asks with an interactive prompt that stands on its own (see the example below).",
-    "Says exactly what it will change, then posts your answer and swaps the stop label for the label of the role that acts next. It can also merge a PR at the reviewed commit, approve, retry or close."
+    "Says exactly what it will change, then posts your answer and swaps the stop label for the label of the role that acts next. It can also merge a PR at the reviewed commit, approve, retry or close. Afterwards it checks with <code>ub-agents status</code> that each resumed item is eligible again and reports any still stuck."
   ],
   "example": {
     "title": "claude · uberblick-2",
