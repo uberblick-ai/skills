@@ -17,8 +17,15 @@ states:
 
 E12 and S12 are critical: one item scored 0 caps the category at 49.
 
-When you judge a sample (6 of 33 help topics), say which and why in the
-audit's `summary`.
+When you judge a sample (6 of 33 help topics), add `"sample": "6 of 33
+topics"` to the audit and say which and why in its `summary`. The report
+marks the category as sampled and lists the sample beside its score, so a
+reader does not take it for the whole surface. Context waste (C10, C11) is
+marked the same way when `density` covers only some of the texts.
+
+A schema check of an example (G13) shows it is valid, not that it is safe to
+copy: still read what the call would do, and score 0.5 an example whose
+values would cause an unwanted change if copied as they are.
 
 | Audit | Item | 1 | 0.5 | 0 |
 | --- | --- | --- | --- | --- |
@@ -50,7 +57,8 @@ topics.
                       {"item": "search", "score": 1, "evidence": "Says what it matches, what each hit carries, and that unknown tags refuse."}],
             "summary": "One sentence on the pattern."},
     "G11": {"score": 1, "display": "orients well", "evidence": "quote", "summary": "..."},
-    "G15": {"na": true, "reason": "no help topics"}
+    "G15": {"items": [...], "sample": "6 of 33 topics", "summary": "Which topics and why."},
+    "S10": {"na": true, "reason": "no destructive tools"}
   },
   "recommendations": [
     {"title": "Imperative, specific title", "category": "guidance",
@@ -84,7 +92,10 @@ A recommendation's `audits` are what it moves: an audit id, or
 `AUDIT:item` when it fixes one item, such as `G10:get_item`. The report
 re-scores the categories as if those passed, so the effect it shows is real,
 and a suggestion that lifts a critical cap ranks first. Two suggestions that
-only lift a cap together are shown as a pair. `targets` names the tools,
+only lift a cap together are shown as a pair. A suggestion in a capped
+category is scored as if the cap-lifting fix were done, and shows that gain
+"after" it. Gains are what a complete fix would earn under the rubric, not a
+forecast, and they do not add up across suggestions. `targets` names the tools,
 fields or topics to change and `check` says how to confirm the change; the
 renderer warns when either is missing. Failed audits that no recommendation
 covers get a generic one from the catalog.
@@ -105,7 +116,10 @@ ids are `instructions`, `tool:NAME`, `field:NAME.PATH` (for example
 `field:create_item.tags[]`) and `topic:URI`. Each quote must appear in
 the text (whitespace is normalized) or it is dropped with a warning. Waste is
 repetition, internals, history, restated schema, text about other tools and
-filler; a long text that is all signal has no waste. Filler is reported over
+filler; a long text that is all signal has no waste. A sentence that states
+a guarantee (nothing is rolled back, which side wins a concurrent change,
+what still works offline) is signal even when it uses internal names: quote
+only the internal name, and suggest the guarantee in plain words. Filler is reported over
 the texts you reviewed, and the report says how many that is.
 
 `trials` records each trial's `outcome`:
@@ -121,7 +135,7 @@ the texts you reviewed, and the report says how many that is.
 
 A trial with `verify` is `done` when the check passes and `failed` when it
 does not, unless you record another outcome. Blocked and declined trials do
-not count toward "tasks completed". Trials are
+not count toward "runs done". Trials are
 shown beside the scores and never change them, because which trials run is
 the reviewer's choice. `secrets.dismiss` clears a redacted value that is not
 a real secret; it needs a reason. `sdk` names audits whose response matches
@@ -133,6 +147,7 @@ whose audits all match the SDK's defaults ranks below the server's own fixes.
 ```json
 {
   "help": {"tools": ["get_help"], "resources": ["myserver://help/*"]},
+  "confirmed_read_only": ["get_stats"],
   "trials": [
     {"id": "t1-plain-read", "question": "Do plain reads work from the descriptions alone?",
      "task": "When was the item titled 'Q3 launch' last updated?",
@@ -149,8 +164,11 @@ whose audits all match the SDK's defaults ranks below the server's own fixes.
 }
 ```
 
-`help` says which calls count as reading help (globs; default: tools named
-like help, and every resource read). `task` is what a user would type, with
+`help` says which calls count as reading help (globs). Set it: the default
+counts tools named like help, guide or manual and every resource read, which
+misses a help tool with another name, and `trial.py` prints what it guessed.
+`confirmed_read_only` lists tools not marked `readOnlyHint` that you have
+checked change nothing; trials may call them while writes are blocked. `task` is what a user would type, with
 no hint about help. `needs` names the tools whose first call should come after
 a help read when `expects_help` is true. `rules` check a written rule: some
 call in `before` must come before the first call in `first`. Name the exact

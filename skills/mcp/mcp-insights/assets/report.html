@@ -230,7 +230,7 @@ table.items td:nth-child(2) { width: 28%; }
 .table-wrap { overflow-x: auto; }
 table.inventory { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 760px; }
 table.inventory th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12.5px; padding: 8px; border-bottom: 1px solid var(--line-strong); cursor: pointer; white-space: nowrap; user-select: none; }
-table.inventory th[aria-sort="ascending"]::after { content: " \2191"; } table.inventory th[aria-sort="descending"]::after { content: " \2193"; }
+table.inventory th .unit { font-weight: 400; } table.inventory th[aria-sort="ascending"]::after { content: " \2191"; } table.inventory th[aria-sort="descending"]::after { content: " \2193"; }
 table.inventory td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 table.inventory td.grade { font-weight: 700; text-align: center; }
 .g-A, .g-B { color: var(--good); } .g-C { color: var(--avg); } .g-D, .g-F { color: var(--poor); }
@@ -309,10 +309,10 @@ footer { margin-top: 40px; color: var(--faint); font-size: 12.5px; text-align: c
   {{SECTIONS}}
 
   <h2 class="section-title">Tool inventory</h2>
-  <p class="section-lead">One row per tool. Click a column to sort. The grade rates what the model reads about the tool: the judged description and, for tools that take input, how many fields are described. An F means the text adds little beyond the tool's name, not that the tool fails.</p>
+  <p class="section-lead">One row per tool. Click a column to sort. Input schema counts the name and schema; model-facing adds the description. The grade rates what the model reads about the tool: the judged description and, for tools that take input, how many fields are described. An F means the text adds little beyond the tool's name, not that the tool fails.</p>
   <div class="card table-wrap">
     <table class="inventory" id="inventory">
-      <thead><tr><th data-type="text">Tool</th><th data-type="num">Grade</th><th data-type="num">Description</th><th data-type="num">Input schema</th><th data-type="num">Model-facing</th><th data-type="num">Output schema</th><th data-type="num">Fields described</th><th data-type="text">Annotations</th></tr></thead>
+      <thead><tr><th data-type="text">Tool</th><th data-type="num">Grade</th><th data-type="num">Description <span class="unit">chars</span></th><th data-type="num">Input schema <span class="unit">tokens</span></th><th data-type="num">Model-facing <span class="unit">tokens</span></th><th data-type="num">Output schema <span class="unit">tokens</span></th><th data-type="num">Fields described</th><th data-type="text">Annotations</th></tr></thead>
       <tbody>{{INVENTORY}}</tbody>
     </table>
   </div>

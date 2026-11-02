@@ -770,6 +770,12 @@ def write_record(out: Path, record: dict) -> None:
               + ", ".join(sorted({f"{s['name']} ({s['where']})" for s in real})), file=sys.stderr)
 
 
+def help_topic_id(tool: str, arguments: dict) -> str:
+    """get_help with {"topic": "markdown"} -> get_help:markdown; without arguments, the tool's name (its catalog)."""
+    vals = [str(v) for v in arguments.values() if isinstance(v, (str, int, float))]
+    return f"{tool}:{'/'.join(vals)}" if vals else tool
+
+
 def call(args) -> int:
     out = Path(args.out)
     probe_path = out / "probe.json"
@@ -817,6 +823,11 @@ def call(args) -> int:
                 entry["has_structured"] = "structuredContent" in res
                 text = content_text(res)
                 entry["text_head"] = text[:1500]
+                if c.get("help"):
+                    # Help served by a tool counts toward help size and is judged like a help resource.
+                    entry["help"] = True
+                    entry["topic"] = str(c.get("topic") or help_topic_id(name, c.get("arguments") or {}))
+                    entry["text"] = text
                 # What the model receives is the content text; structuredContent mirrors it for programs.
                 entry["text_bytes"] = len(text.encode("utf-8"))
                 entry["tokens"] = estimate_tokens(text)

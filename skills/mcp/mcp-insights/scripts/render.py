@@ -205,7 +205,7 @@ CATALOG = [
      "Give large reads a way to narrow them (a limit with a cursor, a field or name selection, a filter or range) and keep the default small.", ["tools"], "", True),
     ("C08", "context", 3, "metric", "Starts quickly",
      "Slow starts delay every session and time out some clients.",
-     "Defer heavy work until the first call that needs it.", ["transport"], "", False),
+     "Answer initialize and tools/list within a second of launch; anything slower can wait for the first call that needs it.", ["transport"], "", False),
     ("C09", "context", 3, "metric", "Little text is repeated across tools",
      "The same sentence in many descriptions is paid for many times.",
      "Say shared rules once, in instructions or a help topic.", ["tools"], "", False),
@@ -261,6 +261,8 @@ PROVISIONAL = 0.8  # categories with less of their applicable weight checked are
 # good is about the 75th percentile, poor about the 90th. Sizes are effective
 # sizes: text the reviewer quoted as waste counts twice. Context sizes are in
 # Claude tokens (probe.estimate_tokens); single texts are in characters.
+# Few of those servers have help topics, so the help budgets (C05, C06, C11, C12) rest on little data: treat them as a
+# reasonable line, not a percentile, until more servers with help have been reviewed.
 BUDGETS = {
     "C01": (10_000, 20_000, "tok"),
     "C02": (500, 1000, "tok"),
@@ -276,11 +278,31 @@ BUDGETS = {
 }
 LEFTOVERS = (r"^\s*(Args|Arguments|Parameters|Returns|Raises|Yields|Example usage):\s*$|\bctx\s*:\s*\w|\bself\b\.|"
              r"\b(TODO|FIXME|XXX)\b|\bOptional\[|\bList\[|->\s*(dict|str|list|None)\b|:param \w+:|@param\b|:returns?:")
-INSTRUCTIONS_SHOWN = 2048  # bytes of instructions Claude Code shows (Uberblick's help review, 2026-10-21)
+INSTRUCTIONS_SHOWN = 2048  # bytes of startup instructions Claude Code shows the model (measured 2026-10-21)
 
-READ_VERBS = r"^(get|list|search|read|find|fetch|query|describe|show|export|lookup|view|count|status|sync status|backlinks)\b"
-WRITE_VERBS = r"\b(create|update|delete|remove|set|edit|insert|write|archive|restore|pin|unpin|move|send|post|add|annotate|link|upload|merge|close|toggle|trigger|run|execute)\b"
-DESTRUCTIVE_VERBS = r"\b(delete|remove|drop|purge|destroy|reset|wipe|archive)\b"
+# Verbs common across MCP servers (files, issues, mail, chat, cloud, databases). A tool's verb is the first word of
+# its name found in these sets, so a server prefix ("github_get_label") or a noun that is also a verb ("label") does not mislead.
+READ_VERBS = set("""get list search read find fetch query describe show export lookup view count status check inspect preview
+    download browse explain diff compare validate summarize summarise watch poll tail whoami ping""".split())
+WRITE_VERBS = set("""create update delete remove set edit insert write archive restore pin unpin move send post add annotate link
+    unlink upload merge close reopen toggle trigger run execute approve reject assign unassign deploy publish invite grant revoke
+    transfer cancel rename import apply commit push reply forward label tag schedule book pay charge refund enable disable install
+    uninstall start stop restart kill scale rollback revert submit accept decline block unblock ban mute subscribe unsubscribe
+    share unshare lock unlock mark clear save store put patch replace""".split())
+DESTRUCTIVE_VERBS = set("delete remove drop purge destroy reset wipe archive truncate revoke uninstall kill terminate erase empty".split())
+
+
+def tool_verb(words: list[str]) -> str | None:
+    """read, write or destructive, from the first verb in the tool's name; None when no word is a known verb."""
+    verb = next((w for w in words if w in READ_VERBS or w in WRITE_VERBS or w in DESTRUCTIVE_VERBS), None)
+    if verb is None or verb in READ_VERBS:
+        return "read" if verb else None
+    return "destructive" if verb in DESTRUCTIVE_VERBS or any(w in DESTRUCTIVE_VERBS for w in words) else "write"
+
+
+# Audits measured against one client: another client may show more or less, or recover differently.
+CLIENT_BOUND = {code: "Measured in Claude Code; other clients may differ."
+                for code in ("G07", "G17", "G18", "G19", "G20", "E13")}
 # Audits that match on names or patterns rather than behaviour: a hit is a lead to verify, not a proven defect.
 HEURISTIC = {"S01": "Matched on tool names, not on what the tools do: a hit is a lead to check, not a verified defect.",
              "G08": "Matched on wording patterns: check each hit in context."}
@@ -526,7 +548,22 @@ def text_index(probe: dict) -> dict:
     for x in probe.get("prompt_gets") or []:
         if x.get("text"):
             idx[f"topic:prompt:{x['name']}"] = x["text"]
+    for x in help_calls(probe):
+        idx.setdefault(f"topic:{x['uri']}", x["text"])
     return idx
+
+
+def help_calls(probe: dict) -> list[dict]:
+    """Help an agent reads through a tool (calls marked "help": true), as topics. A topic whose text a help
+    resource already carries is left out, so a server that serves its help both ways is not counted twice."""
+    seen = {(x.get("text") or "").strip() for x in probe.get("resource_reads") or [] if x.get("text")}
+    out = {}
+    for c in probe.get("calls") or []:
+        text = c.get("text") or ""
+        if c.get("help") and text.strip() and text.strip() not in seen and not c.get("isError"):
+            out.setdefault(c.get("topic") or c["tool"], {"uri": c.get("topic") or c["tool"], "text": text,
+                                                          "text_bytes": len(text.encode("utf-8"))})
+    return list(out.values())
 
 
 def waste_index(probe: dict, findings: dict) -> tuple[dict, list]:
@@ -672,6 +709,7 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     topics = [dict(x) for x in probe.get("resource_reads") or [] if x.get("text_bytes") and is_help(x["uri"], probe, findings)]
     topics += [{"uri": f"prompt:{x['name']}", "text_bytes": len((x.get("text") or "").encode("utf-8")), "text": x.get("text")}
                for x in probe.get("prompt_gets") or [] if x.get("text")]
+    topics += help_calls(probe)
     for x in topics:
         # Probes keep the text; without it, assume the help average of 3 bytes per token.
         x["tokens"] = estimate_tokens(x["text"]) if x.get("text") else round(x["text_bytes"] / 3)
@@ -1036,6 +1074,8 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
                 items.append({"item": tid, "score": 0, "evidence": f"\u201c{norm(w['quote'])[:260]}\u201d \u2014 {w['why']}"})
         res(code, lognormal_score(max(ratio, 1e-6), good, poor), f"{fmt_tokens(wasted)} of {fmt_tokens(total)} ({ratio * 100:.0f}%)",
             items=items, note=f"Share of the reviewed text quoted as waste ({len(group)} of {n_all} texts reviewed); good \u2264 {good * 100:.0f}%, poor \u2265 {poor * 100:.0f}%.")
+        if len(group) < n_all:
+            r[code]["sample"] = f"{len(group)} of {n_all} {'texts' if code == 'C10' else 'topics'}"
         r[code]["value"] = wasted
         r[code]["ratio"] = ratio
     m["waste_per_turn"] = {"tokens": sum(v["tokens"] for v in always.values()), "total": always_total,
@@ -1137,14 +1177,21 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
                 items=[{"item": tid, "score": 1 if r["followed"] else 0, "evidence": r["label"]} for tid, r in rules])
         else:
             res("G20", 0, na=True, note="no trial checked a written rule")
-        errs = [t for t in runs if t.get("errors")]
+        errs, accepted = [], 0
+        for t in runs:
+            counted, ok, skipped = error_recovery(t, trial_outcome(t, verdicts.get(t["id"]) if isinstance(verdicts.get(t["id"]), dict) else {}))
+            accepted += skipped
+            if counted:
+                errs.append((t, counted, ok))
         if errs:
-            res("E13", sum(t["recovered"] for t in errs) / sum(t["errors"] for t in errs),
-                f"{sum(t['recovered'] for t in errs)} of {sum(t['errors'] for t in errs)} errors",
-                items=[{"item": t["id"], "score": t["recovered"] / t["errors"],
-                        "evidence": "; ".join((e.get("error") or "")[:160] for e in t["events"] if e.get("is_error"))[:400]} for t in errs])
+            n, k = sum(c for _, c, _ in errs), sum(o for *_, o in errs)
+            res("E13", k / n, f"{k} of {n} errors" + (f"; {accepted} accepted refusals not counted" if accepted else ""),
+                items=[{"item": t["id"], "score": o / c,
+                        "evidence": "; ".join((e.get("error") or "")[:160] for e in t["events"] if e.get("is_error"))[:400]}
+                       for t, c, o in errs])
         else:
-            res("E13", 0, na=True, note="no errors in the trials")
+            res("E13", 0, na=True, note=(f"no errors to recover from: {accepted} refusal{'s' if accepted != 1 else ''} accepted, task still done"
+                                         if accepted else "no errors in the trials"))
     else:
         for code in ("G17", "G18", "G19", "G20", "E13"):
             res(code, 0, na=True, note="agent trials not run")
@@ -1158,14 +1205,15 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             name = " ".join(words)
             ann = t.get("annotations") or {}
             ro = ann.get("readOnlyHint")
-            if re.search(DESTRUCTIVE_VERBS, name):
+            kind = tool_verb(words)
+            if kind == "destructive":
                 good = ro is not True and ann.get("destructiveHint") is not False
                 checks.append({"item": t.get("name"), "score": 1 if good else 0,
                                "evidence": "deleting tool" + ("" if good else f": readOnlyHint={ro}, destructiveHint={ann.get('destructiveHint')}")})
-            elif re.search(READ_VERBS, name) and not re.search(WRITE_VERBS, name):
+            elif kind == "read":
                 checks.append({"item": t.get("name"), "score": 1 if ro is True else 0.5,
                                "evidence": "read tool" + ("" if ro is True else ": not marked readOnlyHint")})
-            elif re.search(WRITE_VERBS, name):
+            elif kind == "write":
                 checks.append({"item": t.get("name"), "score": 0 if ro is True else 1,
                                "evidence": "write tool" + (": marked readOnlyHint" if ro is True else "")})
         if checks:
@@ -1265,7 +1313,16 @@ def merge_judged(results: dict, findings: dict) -> list[str]:
             continue
         results[code] = {"score": round(score, 2), "display": j.get("display") or display, "items": items,
                          "note": j.get("summary", ""), "evidence": j.get("evidence", ""), "na": False, "judged": True}
+        if j.get("sample"):
+            # Judged on part of what the audit covers: say so wherever the score is shown.
+            results[code]["sample"] = str(j["sample"])
     return warnings
+
+
+def samples_in(key: str, results: dict) -> list[tuple[str, str]]:
+    """(audit, sample) for the scored audits of a category that were judged on part of what they cover."""
+    return [(row[0], results[row[0]]["sample"]) for row in CATALOG
+            if row[1] == key and (results.get(row[0]) or {}).get("sample") and not results[row[0]].get("na")]
 
 
 def category_score(key: str, results: dict) -> dict:
@@ -1425,12 +1482,30 @@ def recommendations(results: dict, findings: dict, cats: dict) -> list[dict]:
                 for r in group:
                     r["lifts_cap_with"] = [g["title"] for g in group if g is not r]
                     r["joint_effects"] = eff
+    # A fix in a capped category shows no gain on its own. Score it as if the fixes that lift the cap were done,
+    # so it ranks by what it is worth once they are, and say which ones it waits for.
+    lifters = [r for r in recs if r["lifts_cap"] or r.get("lifts_cap_with")]
+    for rec in recs:
+        if rec["effects"] or rec in lifters:
+            continue
+        holding = set((cats.get(rec["category"]) or {}).get("capped_by") or [])
+        first = [r for r in lifters if holding & set(r["audits"])]
+        if not holding or not first:
+            continue
+        base = apply_fix(results, [t for r in first for t in r["targets_audits"]])
+        if holding & {c for key, _, _ in CATEGORIES for c in category_score(key, base)["capped_by"]}:
+            continue
+        base_cats = {key: category_score(key, base) for key, _, _ in CATEGORIES}
+        after = fix_effects(base, base_cats, rec["targets_audits"], per_turn_saving(rec.get("saves")))
+        if after:
+            rec["after_effects"], rec["after"] = after, [r["title"] for r in first]
     for rec in recs:
         rec["gain"] = round(sum(rec["effects"].values()), 1)
         joint_gain = sum((rec.get("joint_effects") or {}).values()) / (len(rec.get("lifts_cap_with") or []) + 1)
-        # A fix that lifts a critical cap goes first; the rest rank by points.
+        after_gain = sum((rec.get("after_effects") or {}).values())
+        # A fix that lifts a critical cap goes first; the rest rank by points, counted after any cap they wait for.
         rec["rank_value"] = ((1000 if rec["lifts_cap"] or rec.get("lifts_cap_with") else 0)
-                             + max(rec["gain"], joint_gain) - (100 if rec["sdk"] else 0))
+                             + max(rec["gain"], joint_gain, after_gain) - (100 if rec["sdk"] else 0))
         if rec["sdk"]:
             rec["why"] = ((rec.get("why") or "") + " This matches the SDK's default behaviour, so an SDK upgrade may fix it "
                           "rather than a change to the server's own code.")
@@ -1438,6 +1513,9 @@ def recommendations(results: dict, findings: dict, cats: dict) -> list[dict]:
         if rec.get("lifts_cap_with"):
             joint = ", ".join(f"+{v:g} {cat_names.get(k, k)}" for k, v in sorted(rec["joint_effects"].items(), key=lambda kv: -kv[1]))
             effects = (effects + "; " if effects else "") + f"{joint} together with: {'; '.join(rec['lifts_cap_with'])}"
+        if rec.get("after_effects"):
+            after = ", ".join(f"+{v:g} {cat_names.get(k, k)}" for k, v in sorted(rec["after_effects"].items(), key=lambda kv: -kv[1]))
+            effects = f"{after} once the cap is lifted by: {'; '.join(rec['after'])}"
         body = [f"**Expected effect:** {effects or 'no score change (category not scored or already capped elsewhere)'}"]
         if rec.get("targets"):
             body += [f"**Where:** {', '.join(rec['targets'])}"]
@@ -1553,8 +1631,11 @@ def render_html(report: dict) -> str:
             delta = f'<span class="delta {"up" if d > 0 else "down" if d < 0 else ""}">{"+" if d > 0 else ""}{d}</span>'
         sub = ("unusable" if c.get("capped_by") == ["P01"] and c["score"] == 0 else
                "capped by " + ", ".join(c["capped_by"]) if c.get("capped_by") else
-               f'provisional \u00b7 {round(c.get("coverage", 0) * 100)}% checked' if c.get("provisional") else
-               "not scored" if c["score"] is None else f'{round(c.get("coverage", 0) * 100)}% checked')
+               f'provisional \u00b7 {round(c.get("coverage", 0) * 100)}% of audits run' if c.get("provisional") else
+               "not scored" if c["score"] is None else
+               "all audits run" if c.get("coverage", 0) >= 0.995 else f'{round(c.get("coverage", 0) * 100)}% of audits run')
+        if c["score"] is not None and samples_in(key, results):
+            sub += " \u00b7 sampled"
         gauges.append(f'<a class="gauge-link{" provisional" if c.get("provisional") else ""}" href="#{key}">{gauge_svg(c["score"])}'
                       f'<span class="gauge-name">{esc(name)}</span><span class="gauge-sub">{esc(sub)}</span>{delta}</a>')
 
@@ -1608,6 +1689,10 @@ def render_html(report: dict) -> str:
             effects = [f'<span class="pill crit">lifts a cap with #{", #".join(ranks)}</span>'] + [
                 f'<span class="pill cat-{esc(k)}">+{v:g} {esc(cat_names.get(k, k))} together</span>'
                 for k, v in sorted(rec["joint_effects"].items(), key=lambda kv: -kv[1])]
+        elif rec.get("after_effects"):
+            ranks = [str(j) for j, other in enumerate(report["recommendations"], 1) if other["title"] in rec["after"]]
+            effects = [f'<span class="pill cat-{esc(k)}">+{v:g} {esc(cat_names.get(k, k))} after #{", #".join(ranks)}</span>'
+                       for k, v in sorted(rec["after_effects"].items(), key=lambda kv: -kv[1])]
         elif not effects:
             effects = [f'<span class="pill effort">{esc(cat_names.get(rec["category"], ""))}</span>']
         if rec.get("lifts_cap"):
@@ -1651,6 +1736,9 @@ def render_html(report: dict) -> str:
             capped = f'<p class="capped">Capped at 49 by a failed critical audit: {esc(", ".join(c["capped_by"]))}.</p>'
         elif c.get("note"):
             capped = f'<p class="question">{esc(c["note"])}</p>'
+        if samples_in(key, results):
+            capped += ('<p class="question">Judged on a sample: '
+                       + "; ".join(f"{code} {smp}" for code, smp in samples_in(key, results)) + ".</p>")
         if c.get("provisional"):
             capped += (f'<p class="question">Provisional: {round(c.get("coverage", 0) * 100)}% of the applicable checks ran. '
                        "Audits that were not checked are listed below; the score can move either way once they are.</p>")
@@ -1717,7 +1805,7 @@ def render_html(report: dict) -> str:
         "TRIALS": trials_html(report.get("trials"), results),
         "FIXES": "".join(fixes) or '<p class="empty">Nothing to suggest above the noise.</p>',
         "FIXES_LEAD": esc("Ranked by expected effect on the scores, those that lift a cap first; the rest fold below the first five. "
-                          "A fix in a category capped by another audit shows no gain until that cap is lifted. "
+                          "A fix in a category capped by another audit shows its gain after the fix that lifts the cap. "
                           "Each gain is the category re-scored as if the audits the suggestion names passed, or, for a size fix "
                           "with a stated saving, as if the text were that much smaller: what a complete fix would earn, not a forecast. "
                           "They describe what an agent saw and what it should see instead, judged from the outside; "
@@ -1777,6 +1865,8 @@ def audit_group(title, rows, by_code, open_=False, folded=False, hint="") -> str
             crit += '<span class="tag">depends on data</span>'
         if code in HEURISTIC:
             crit += '<span class="tag">heuristic</span>'
+        if code in CLIENT_BOUND:
+            crit += f'<span class="tag" title="{esc(CLIENT_BOUND[code])}">Claude Code</span>'
         if res.get("sdk"):
             crit += '<span class="tag">SDK default</span>'
         spec = f' <a href="{SPEC}{row[8]}" target="_blank" rel="noopener">Spec</a>' if row[8] else ""
@@ -1845,6 +1935,33 @@ def trial_outcome(run: dict, verdict: dict) -> str | None:
     return "partial" if s > 0 else "failed"
 
 
+def error_recovery(run: dict, outcome: str | None) -> tuple[int, int, int]:
+    """(errors counted, recovered, accepted refusals) for one trial run.
+
+    Recovered: the agent called the same tool again with changed input within two server calls and it worked.
+    An error is an accepted refusal, and not counted, when the agent never called that tool again and the task
+    still ended done: the refusal was the right answer and the agent took it.
+    """
+    events = run.get("events") or []
+    server = [x for x in events if x.get("kind") in ("tool", "help")]
+    counted = ok = accepted = 0
+    for e in server:
+        if not e.get("is_error"):
+            continue
+        after = [x for x in server if x["i"] > e["i"]]
+        nxt = next((k for k, x in enumerate(after) if x["tool"] == e["tool"]), None)
+        if nxt is None and outcome == "done":
+            accepted += 1
+            continue
+        counted += 1
+        ok += bool(nxt is not None and nxt <= 2 and after[nxt].get("input") != e.get("input")
+                   and not after[nxt].get("is_error") and not after[nxt].get("denied"))
+    if not events and run.get("errors"):
+        # Older records carry only the counts.
+        return run["errors"], run.get("recovered", 0), 0
+    return counted, ok, accepted
+
+
 def outcome_score(outcome: str, verdict: dict) -> float:
     if outcome == "partial":
         return max(0.0, min(1.0, float(verdict.get("success") or 0.5)))
@@ -1874,7 +1991,7 @@ def trials_html(trials: dict | None, results: dict) -> str:
     models = sorted({str(r.get("model") or "?").replace("claude-", "") for r in runs})
     stats = []
     for code, label in (("G17", "Help read when needed"), ("G18", "Plain tasks without help"),
-                        ("G19", "Tasks completed"), ("G20", "Written rules followed"), ("E13", "Errors recovered")):
+                        ("G19", "Runs done"), ("G20", "Written rules followed"), ("E13", "Errors recovered")):
         res = results.get(code) or {}
         if res.get("na"):
             continue
@@ -1981,7 +2098,12 @@ def trials_html(trials: dict | None, results: dict) -> str:
     drafted = sum(1 for r in judged if r["outcome"] == "drafted")
     helpy = [r for r in runs if r.get("expects_help") is True and r.get("help_before_use") is not None]
     plain = [r for r in runs if r.get("expects_help") is False]
-    parts = [f"{done} of {len(judged)} tasks done" if judged else f"{len(runs)} trials, outcomes not judged"]
+    checked = sum(1 for r in judged if r.get("verify") and r["outcome"] == "done")
+    # Say how many runs of how many tasks, and what graded them: a script check is not the same as a reading of the transcript.
+    parts = [(f"{done} of {len(judged)} runs done across {len(groups)} tasks"
+              + (f" ({checked} graded by a check script, {done - checked} by the reviewer)" if checked and checked < done else
+                 " (graded by a check script)" if checked else " (graded by the reviewer)" if done else ""))
+             if judged else f"{len(runs)} trials, outcomes not judged"]
     if drafted:
         parts.append(f"{drafted} more drafted with the write blocked")
     if helpy:
@@ -2068,7 +2190,7 @@ def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) ->
     n_judged = sum(1 for x in judged_rows if x and not x.get("na"))
     n_open = sum(1 for x in judged_rows if not x or x.get("untested"))
     review_mode = ("handshake failed" if not init.get("ok") else "automatic checks only" if not n_judged
-                   else "full review" if not n_open else "partial review")
+                   else "every audit judged" if not n_open else "partial review")
     n_trials = len([r for r in (probe.get("trials") or {}).get("runs") or [] if not r.get("invalid")])
     unjudged = [code for code, r in results.items() if r.get("unjudged")]
     if not init.get("ok"):

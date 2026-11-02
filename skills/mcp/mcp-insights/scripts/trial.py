@@ -39,7 +39,8 @@ SESSION_ENV = ["CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_COD
                "CLAUDE_AFTER_LAST_COMPACT", "CLAUDE_CODE_TEE_SDK_STDOUT", "CLAUDE_CODE_DIAGNOSTICS_FILE"]
 NOTE_BLOCKED = ("Tools that change data may be blocked in this session. If a call is denied, do not look for a "
                 "workaround: finish with the exact call you would have made and why.")
-DEFAULT_HELP_TOOLS = ["*help*", "*guide*", "*docs*", "*manual*"]
+# Used only when the plan names no help tools. "docs" is left out: it matches list_docs and get_docs, which read data.
+DEFAULT_HELP_TOOLS = ["*help*", "*guide*", "*manual*", "*documentation*", "*instructions*"]
 
 
 def result_text(content) -> str:
@@ -224,6 +225,10 @@ def run(args) -> int:
     if args.allow_writes:
         allowed = [f"mcp__{server}"] + CLIENT_TOOLS
     help_spec = plan.get("help") or {}
+    if "tools" not in help_spec:
+        guessed = [t["name"] for t in record.get("tools") or [] if any(fnmatch.fnmatch(t.get("name") or "", g) for g in DEFAULT_HELP_TOOLS)]
+        print("trials.json names no help tools; counting as help: " + (", ".join(guessed) or "none")
+              + ". Set help.tools (an empty list if the server has none) to be sure.", file=sys.stderr)
     env = {k: v for k, v in os.environ.items() if k not in SESSION_ENV}
     # The user's own CLAUDE.md, AGENTS.md and memories must not steer the trial agent.
     env.update({"CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"})

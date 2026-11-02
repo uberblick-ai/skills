@@ -29,7 +29,8 @@ read its implementation or look for the cause of a failure; that is the
 maintainer's part once the report shows what an agent meets.
 The report is the result; the suggestions at its end are a starting point
 for the maintainer. Each score shows how much of its category was checked,
-so a quick automatic run is not mistaken for a full review.
+and which audits rest on a sample, so a quick automatic run or a sampled
+judgement is not mistaken for a full review.
 `scripts/probe.py` and `scripts/render.py` live next to this file; call them
 by their path inside this skill's directory. `DIR` is a scratch directory
 outside the server's repository.
@@ -99,6 +100,13 @@ less (C13):
 
 Tool names in this file are placeholders: use the server's own.
 
+When the server serves help through a tool instead of resources (a help,
+guide or docs tool), add one call per topic with `"help": true` and the
+topic's name in `"topic"`, for example
+`{"tool": "get_help", "arguments": {"topic": "queries"}, "help": true, "topic": "get_help:queries"}`.
+Those answers count toward help size like help resources (C05, C06, C11) and
+are judged with them; a topic a help resource also serves is counted once.
+
 Chain them: list first, then use real ids. A tool not marked
 `readOnlyHint: true` runs only with `"confirmed_read_only": true`, which you
 set after reading its description and being sure it changes nothing. Then:
@@ -156,6 +164,8 @@ python3 scripts/trial.py run --mcp-config DIR/mcp.json --server NAME --plan DIR/
 
 It needs Claude Code (`claude`) on PATH and costs a few cents per trial with
 the default Haiku; add a `"model": "sonnet"` copy of a trial to compare.
+What the trials measure is what an agent in Claude Code does; the report tags
+those audits, and the instructions cut-off (G07), with the client's name.
 Write tools are blocked, and the blocked call is recorded as what the agent
 would have sent. In a sandbox, add `--allow-writes` and `--before-each` with a
 command that restores the sandbox, so every trial starts from the same state.
@@ -227,7 +237,8 @@ an earlier run or against the baseline of a branch comparison.
 ## 7. Reply
 
 Give the five scores, the top three suggestions and the path to
-`report.html`. Say whether this was a full review, a partial one or automatic
-checks only, name any provisional category, and say whether trials ran and
-how many times each.
+`report.html`. Say whether every audit was judged, some were, or the run was
+automatic checks only; name any provisional category and any audit judged on
+a sample; and say whether trials ran, how many times each, and what graded
+them (a check script or your reading of the transcript).
 Scores are for the team's own use: do not publish them.
