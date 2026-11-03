@@ -284,8 +284,14 @@ derivable fields, and storing a day deletes `items` records older than 14 days.
     "x": {"field": "day", "type": "date"},
     "y": [{"field": "autonomous_pct", "label": "Autonomous", "unit": "%"},
           {"field": "wasted_pct", "label": "Wasted runs", "unit": "%"},
-          {"field": "denial_pct", "label": "Runs with denials", "unit": "%"}]}
+          {"field": "denial_pct", "label": "Runs with denials", "unit": "%"}],
+    "missing": "connect"}
    ```
+
+   A day without loop runs stores its shares and medians as null, not zero,
+   since a share of no deliveries is undefined. The charts that plot them
+   (autonomy, cycle and run time, context) set `"missing": "connect"`, so
+   their lines bridge such a day instead of breaking at it.
 
    ```json
    {"version": 1, "type": "table", "collection": "days", "title": "Recent days",
@@ -306,7 +312,8 @@ derivable fields, and storing a day deletes `items` records older than 14 days.
     "y": [{"field": "context_start_pct", "label": "Median start (call 10)", "unit": "%", "type": "bar",
            "range": [0, 100], "reference": 20},
           {"field": "context_peak_pct", "label": "Median peak", "unit": "%", "range": [0, 100]},
-          {"field": "context_peak_pct_max", "label": "Largest peak", "unit": "%", "range": [0, 100]}]}
+          {"field": "context_peak_pct_max", "label": "Largest peak", "unit": "%", "range": [0, 100]}],
+    "missing": "connect"}
    ```
 
    `document` returns the same block as `context_chart`, so a document
