@@ -27,6 +27,15 @@
         "./skills/maintenance/backlog-grooming",
         "./skills/maintenance/ci-health"
       ]
+    },
+    {
+      "name": "mcp",
+      "description": "Review MCP servers from the outside: what an agent meets in the tool list, help and errors, and what to fix first.",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/mcp/mcp-insights"
+      ]
     }
   ]
 }
