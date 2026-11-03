@@ -4,7 +4,9 @@
 places every node; the renderer sizes the grid, routes the edges and reports
 every problem with its line number. It never moves anything, so the drawing is
 what you wrote. Each document has one flow: the overview's and one per
-phase. The worked examples are
+phase. A flow ends with `play` scenarios: in Uberblick the drawing stays whole
+until a reader presses Play, then each scenario lights its steps one by one
+with a caption under the drawing. The worked examples are
 [../assets/overview.flow](../assets/overview.flow),
 [../assets/issue.flow](../assets/issue.flow) and
 [../assets/pr.flow](../assets/pr.flow). Uberblick draws the same source from
@@ -37,6 +39,12 @@ legend
   decision tone=system "gate, numbered as in the cards"
   pill tone=done "GitHub label"
   panel tone=stop "a person decides"
+
+play "Clean run"
+  step needs-preparation
+  step issue-preparer actor="issue-preparer" "Writes the behavior and criteria"
+  step g2 "Yes: prepared"
+  step ready
 ```
 
 - `columns` names the columns left to right, once. Comments are whole lines starting with `#`.
@@ -53,6 +61,12 @@ legend
   back instead.
 - Tones: `ink`, `muted`, `neutral`, `agent`, `system`, `done`, `rework`,
   `stop`.
+- `play "Name"` starts a scenario, after everything else. Its indented
+  `step TARGET` lines name a node id each; a step lights the node and the
+  edge from the step before it, so consecutive steps need an edge between
+  them. Then optionally a duration (`2.4s`, from `100ms` to `60s`),
+  `actor="..."` and a quoted caption. An optional `tempo 1.8s` line before
+  the steps sets the default, 1.6s.
 
 ## Conventions for a loop flow
 
@@ -124,11 +138,47 @@ legend
   than about 20 nodes no longer fits a page: merge labels into edge text before
   dropping a gate.
 
+## Play scenarios
+
+Each flow plays the paths items take most often, from `scripts/paths.py`
+(step 3 of the skill), so a reader sees a typical item move before reading
+the gates.
+
+- One `play` per common path, most common first, up to four per flow. Keep a
+  path while it covers a real share of the items (about 5% or more), and
+  drop one that would play the same steps as a scenario already there. A
+  route no item took gets no scenario; its gate card explains it.
+- Translate each `agent outcome` into the drawing's ids: the agent's box,
+  its gate, then the node its outcome's edge leads to (the label the outcome
+  adds, the stop panel, the `end`). A stop is a step into the panel; a
+  person's answer is the panel's edge back. `merged` and `closed` end on the
+  phase's `end` node. A path the drawing cannot play misses a route: add the
+  route, never bend the scenario around it.
+- The first scenario starts at the phase's entry and runs to its end. Later
+  ones start one step before they leave the first scenario's path (the gate
+  that sends work back, the integrator before a maintainer's merge), so a
+  reader does not replay what they saw.
+- Name a scenario for what happens, in a few words: "Clean run", "One review
+  round", "A maintainer answers", "A bot's pull request". No counts, shares
+  or dates in a name or a caption: the drawing describes the loop as it
+  runs, and the shares go in the reply to the maintainer.
+- Captions on agents and gates, a few words each in the instructions' terms.
+  The controls show the node's own text above the caption, so the caption
+  says what happens in this scenario, never the node's text again: what the
+  agent does, or a gate's answer and why (`"No: a criterion is not met"`).
+  A step on a label needs none. `actor=` names the agent
+  as the config does, or "A maintainer" on a person's step. Give a person's
+  step `2.4s`, since that is where a reader stops to read.
+- The overview plays one scenario per way work enters that the paths show,
+  most common first: the entry, each phase box it passes, `Merged`.
+- Without observed paths, play the passing path and the most likely route
+  back, and say in the reply that the scenarios come from the config.
+
 ## An issue-reviewer
 
 When the config has an issue-reviewer, draw it in a second column beside the
 preparer, with its own gate, and put `ready` on that gate's row (renders clean
-with ablauf 0.2.0):
+with ablauf 0.3.0):
 
 ```
 columns main review

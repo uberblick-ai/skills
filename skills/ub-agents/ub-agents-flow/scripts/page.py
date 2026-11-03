@@ -12,11 +12,12 @@ from pathlib import Path
 DECIDERS = {"launcher", "agent", "person"}
 GATE_ID = re.compile(r"^G\d+$")
 EDGE = re.compile(r"\s-\.?->\s")
+PLAY = re.compile(r"(?m)^play\b")
 SOURCE = re.compile(r"^([^\s:]+)(?::(\d+)(?:-(\d+))?)?$")
-# ablauf 0.2.0's light palette, forced when printing so a dark screen still prints on white.
+# ablauf 0.3.0's light palette, forced when printing so a dark screen still prints on white.
 LIGHT = {"bg": "#ffffff", "ink": "#17202c", "muted": "#5a6575", "line": "#d3d9e2", "band": "#e9eef5",
          "surface": "#ffffff", "neutral": "#59616c", "neutral-bg": "#e1e3e6", "agent": "#3e6563",
-         "agent-bg": "#e7eeed", "system": "#4f5d76", "system-bg": "#ebedf3", "rework": "#826954",
+         "agent-bg": "#e7eeed", "system": "#4f5d76", "system-bg": "#ebedf3", "rework": "#806752",
          "rework-bg": "#f3f0eb", "stop": "#815f5a", "stop-bg": "#ede6e5", "done": "#536e5a", "done-bg": "#e8ede9"}
 # Past these a document stops reading at a glance.
 BUDGET = {"summary": 60, "phase": 30, "point": 30, "does": 20, "rule": 30}
@@ -212,15 +213,24 @@ def validate(data, flows=None):
                          + "; ".join(filter(None, [missing and f"missing {', '.join(missing)}",
                                                    twice and f"twice {', '.join(twice)}"])))
     if flows is not None:
+        for name, flow in [("overview", overview["flow"])] + [(p["name"], p["flow"]) for p in phases]:
+            if not PLAY.search(flows.get(flow, "")):
+                warnings.append(f"{name}: {flow} has no play scenario; play its most common path")
         for phase in phases:
             # A gate is drawn as a node; a number in an edge label alone is easy to miss.
             source = flows.get(phase["flow"], "")
-            shown = {gid for line in source.splitlines() if not EDGE.search(line)
+            found = PLAY.search(source)
+            # Play sections close a flow; their captions may name a gate but do not draw it.
+            drawing, plays = (source[:found.start()], source[found.start():]) if found else (source, "")
+            shown = {gid for line in drawing.splitlines() if not EDGE.search(line)
                      for gid in re.findall(r"\bG\d+\b", line)}
             ids = [g["id"] for g in phase["gates"]]
             warnings += [f"{phase['name']}: {gid} is not in {phase['flow']}" for gid in ids if gid not in shown]
             warnings += [f"{phase['name']}: {phase['flow']} shows {gid}, which is not one of its gates"
                          for gid in sorted(shown - set(ids))]
+            named = set(re.findall(r"\bG\d+\b", plays))
+            warnings += [f"{phase['name']}: a play caption in {phase['flow']} names {gid}, which is not one of its "
+                         "gates" for gid in sorted(named - set(ids))]
     return warnings
 
 

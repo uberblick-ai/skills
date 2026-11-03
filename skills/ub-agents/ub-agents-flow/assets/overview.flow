@@ -11,3 +11,9 @@ end merged tone=done "Merged"
 issue --> preparation
 preparation --> implementation
 implementation --> merged
+
+play "An issue to the merge"
+  step issue actor="A maintainer" "Opens an issue and adds needs-preparation"
+  step preparation actor="issue-preparer" "Turns it into behavior and acceptance criteria"
+  step implementation actor="implementer, reviewer, integrator" "One PR, reviewed on another model, merged"
+  step merged

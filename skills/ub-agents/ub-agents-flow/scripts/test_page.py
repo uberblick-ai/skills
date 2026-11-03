@@ -43,6 +43,27 @@ class PageTests(unittest.TestCase):
             "g2 --> ready : prepared", "g2 --> ready : G2 prepared")
         self.assertIn("Issue phase: G2 is not in issue.flow", page.validate(self.data, self.flows))
 
+    def test_every_flow_plays_a_scenario(self):
+        self.flows["overview.flow"] = self.flows["overview.flow"].split("\nplay ")[0]
+        self.assertEqual(page.validate(self.data, self.flows),
+                         ["overview: overview.flow has no play scenario; play its most common path"])
+
+    def test_a_gate_only_in_a_play_caption_is_not_drawn(self):
+        self.flows["issue.flow"] = self.flows["issue.flow"].replace(
+            '"G2 Clear and in scope?"', '"Clear and in scope?"').replace(
+            'step g2 "Yes: prepared"', 'step g2 "G2 Yes: prepared"').replace(
+            'step g1 "Nothing holds it"', 'step g1 "G7 Nothing holds it"')
+        warnings = page.validate(self.data, self.flows)
+        self.assertIn("Issue phase: G2 is not in issue.flow", warnings)
+        self.assertIn("Issue phase: a play caption in issue.flow names G7, which is not one of its gates", warnings)
+        self.assertNotIn("Issue phase: issue.flow shows G7, which is not one of its gates", warnings)
+
+    def test_the_markdown_keeps_the_play_scenarios(self):
+        docs = page.documents(self.data)
+        pr = page.markdown(docs[2][1], docs[2][2], self.flows)
+        self.assertIn('play "Clean run"\n  step ready', pr)
+        self.assertLess(pr.index('play "One review round"'), pr.index("\n```\n"))
+
     def test_every_role_sits_in_one_phase_and_gates_count_from_one(self):
         for change in (lambda d: d["phases"][1]["roles"].remove("reviewer"),
                        lambda d: d["phases"][0]["roles"].append("reviewer"),
@@ -119,7 +140,8 @@ class PageTests(unittest.TestCase):
                                     "continues": "Implementation and PR phase", "roles": ["integrator"],
                                     "gates": [merge, maintainer]})
         self.flows["pr.flow"] = self.flows["pr.flow"].replace("G4 Final", "Final")
-        self.flows["merge.flow"] = 'decision g4 tone=system "G4 Green Test on head?"\npanel p\n  strong "G5 A maintainer merges"\n'
+        self.flows["merge.flow"] = ('decision g4 tone=system "G4 Green Test on head?"\npanel p\n  strong "G5 A maintainer merges"\n'
+                                    'g4 --> p\n\nplay "A maintainer merges"\n  step g4\n  step p\n')
 
     def test_a_document_can_continue_another_ones_gate_numbers(self):
         self.split_merge_step()

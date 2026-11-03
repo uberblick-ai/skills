@@ -86,7 +86,8 @@ illustration from uberblick-ai/ub-agents, not a default.
   continue that phase's numbers, and that phase's drawing ends where the step
   begins, in an `end` node saying what the item waits for. Use it when one
   drawing would pass about 20 nodes. `flow` names the phase's ablauf source
-  next to `flow.json`. An optional `title` replaces "The loop in OWNER/NAME:
+  next to `flow.json`; it goes into the document's `ablauf` block as it is,
+  `play` scenarios included. An optional `title` replaces "The loop in OWNER/NAME:
   issue phase". The `summary` follows the
   "Details of" line, so it reads as one paragraph: the journey of one item
   through the phase and the document it hands over to. When the phase's
