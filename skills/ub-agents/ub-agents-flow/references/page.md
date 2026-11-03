@@ -17,6 +17,10 @@ illustration from uberblick-ai/ub-agents, not a default.
     "points": [
       "**Preparation.** At most 30 words on what happens in the phase.",
       "**Implementation.** At most 30 words on what happens in the phase."
+    ],
+    "changelog": [
+      {"date": "2026-10-19", "who": "bk-one", "what": "At most 25 words on what changed for the loop", "pr": 591},
+      {"date": "2026-10-17", "who": "uberblick-agent", "what": "One change per pull request", "pr": 566, "open": true}
     ]
   },
   "phases": [
@@ -77,8 +81,17 @@ illustration from uberblick-ai/ub-agents, not a default.
   on where a person steps in at any point (unclear intent, work too big for
   one PR, a decision only a maintainer can make). The ways work enters stay
   in the drawing: a sentence repeating them adds nothing. It names no labels
-  and has no table or notes; those belong to the phases. An optional `title`
-  replaces "How the loop runs in OWNER/NAME".
+  and has no table or notes before its changelog; those belong to the
+  phases. An optional `title` replaces "How the loop runs in OWNER/NAME".
+- `overview.changelog` lists the last five changes to how the loop runs,
+  newest first, and ends the overview as a Date, Who, What table (the last
+  section of a `--combine` document). `date` is the merge date, `who` the
+  author's GitHub login without `@` (a bot's login too), `what` the change
+  in a few plain words, as the loop runs after it, and `pr` its pull
+  request, linked in the table. `open: true` marks a pull request the
+  maintainer decided but has not merged, which the documents already
+  describe (see the last paragraph). Leave out changes that only reword or
+  reformat.
 - `phases` are the issue phase and the implementation and PR phase, in that
   order. A step with its own entries, forks and person gates, such as the
   merge when a bot's pull requests enter there, can be a phase of its own

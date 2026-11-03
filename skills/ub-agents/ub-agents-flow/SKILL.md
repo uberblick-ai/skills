@@ -58,6 +58,20 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    trigger label that no outcome adds, such as a bot's own label: work enters
    there without an issue.
 
+   Collect the changelog: the last five changes on the default branch to
+   `ub-agents.yaml`, the `shared-instructions` file, each agent's
+   `instructions` file and the policy files they point to. For each path:
+
+   ```sh
+   gh api "repos/REPO/commits?path=PATH&per_page=10" --jq '.[] | [.sha, .commit.author.date[:10], (.author.login // .commit.author.name), (.commit.message | split("\n")[0])] | @tsv'
+   ```
+
+   Merge the lists by SHA, newest first, and keep five. The pull request is
+   the `(#N)` in a squash-merged title, or
+   `gh api repos/REPO/commits/SHA/pulls --jq '.[0].number'`. An open pull
+   request the maintainer decided (see `references/page.md`) counts too,
+   marked `open`.
+
 2. Read the guidance with line numbers: `AGENTS.md`, the
    `shared-instructions` file, each agent's `instructions` file and the policy
    files those point to directly, from the checkout or with
@@ -180,11 +194,12 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    ```
 
    It writes one Markdown file per document and `DIR/flow.html`, the same
-   blocks styled like Uberblick, with each drawing whole; the scenarios play
-   in Uberblick. When the maintainer asks for one document,
-   add `--combine`: it writes `DIR/flow.md` instead. Fix every warning it
-   prints unless it is a real finding about the loop, which belongs in
-   `notes`.
+   blocks styled like Uberblick, changelog included, with each drawing whole;
+   the scenarios play in Uberblick. Without a corpus, or when the maintainer
+   asks for files only, `DIR/flow.html` is the report. When the maintainer
+   asks for one document, add `--combine`: it writes `DIR/flow.md` instead.
+   Fix every warning it prints unless it is a real finding about the loop,
+   which belongs in `notes`.
 
 9. Store the documents in the corpus whenever there is one, unless the
    maintainer asked for files only. Follow the repository's rules for corpus
@@ -213,8 +228,13 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    every document with the corpus's tag for workflow documents, such as
    `workflow`, when it has one; never invent a tag. With
    `--combine`, store the one document. Check that every write was applied
-   and synced, and name any that was not. Without a corpus, the Markdown files
-   are the result.
+   and synced, and name any that was not. Without a corpus, the HTML page
+   and the Markdown files are the result.
+
+   The overview's changelog is a table at its end. Updating, replace its
+   rows with the last five changes, keeping the wording a maintainer gave a
+   row that stays and the maintainer's columns, if they changed them; add
+   the table when the overview has none.
 
    Updating or creating, each drawing goes to the corpus with its `play`
    sections, in the same `ablauf` block, so a reader can play the common
@@ -226,12 +246,12 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    and write again.
 
 10. Tell the maintainer which documents were created or updated, or where the
-    page and the Markdown are, then in a few sentences: the path an item takes
-    in each phase, the gates where a person decides, and anything from the
-    notes that looks like a mistake in the config or the instructions. Name
-    the scenarios each drawing plays with the share of items behind each,
-    from step 3, or say they come from the config. Then number the
-    differences from step 4, one line each. Change nothing on
+    page (`DIR/flow.html`) and the Markdown are, then in a few sentences: the
+    path an item takes in each phase, the gates where a person decides, and
+    anything from the notes that looks like a mistake in the config or the
+    instructions. Name the scenarios each drawing plays with the share of
+    items behind each, from step 3, or say they come from the config. Then
+    number the differences from step 4, one line each. Change nothing on
     GitHub; offer to open an issue only if they ask. For example:
 
     ```text

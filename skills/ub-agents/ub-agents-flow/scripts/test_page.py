@@ -116,8 +116,9 @@ class PageTests(unittest.TestCase):
         self.assertIn("\n\nThe issue phase and the implementation and PR phase each have their own document."
                       "\n\n```ablauf\n", overview)
         self.assertIn("## The steps in detail\n\n- **Preparation.**", overview)
+        before_changelog = overview.split("## Changelog")[0]
         for absent in (":::card", "| ", "## Notes"):
-            self.assertNotIn(absent, overview)
+            self.assertNotIn(absent, before_changelog)
         self.assertIn("## Notes\n\n- `queue.milestones: order` At equal priority", issue)
         self.assertTrue(issue.startswith("# The loop in uberblick-ai/ub-agents: issue phase\n\n"
                                          "Details of **How the loop runs in uberblick-ai/ub-agents**. "))
@@ -190,6 +191,45 @@ class PageTests(unittest.TestCase):
         self.assertEqual(md.count(":::card\n"), 8)
         self.assertIn("## Implementation and PR phase", md)
         self.assertIn("### Notes", md)
+
+    def test_the_overview_ends_with_the_changelog(self):
+        """The last changes to the loop as a table: date, GitHub login, what changed with its pull request linked."""
+        changes = self.data["overview"]["changelog"]
+        changes[0]["open"] = True
+        _, title, blocks = page.documents(self.data)[0]
+        md = page.markdown(title, blocks, self.flows)
+        self.assertTrue(md.rstrip().endswith(
+            "| 2026-10-09 | uberblick-agent | Delivery reports use the published maintainer skill "
+            "([#409](https://github.com/uberblick-ai/ub-agents/pull/409)) |"))
+        self.assertIn("## Changelog\n\n| Date | Who | What |\n|---|---|---|\n| 2026-10-19 | bk-one | Pull requests "
+                      "with outside input wait for a maintainer's merge "
+                      "([#591](https://github.com/uberblick-ai/ub-agents/pull/591), open) |", md)
+        [(_, title, blocks)] = page.combined(self.data)
+        self.assertEqual(blocks[-2:], page.changelog(self.data))
+        del self.data["overview"]["changelog"]
+        self.assertEqual(page.changelog(self.data), [])
+
+    def test_the_page_shows_the_changelog_without_a_corpus(self):
+        html = page.render(page.documents(self.data), self.svgs, self.data["repository"])
+        self.assertIn("<h2>Changelog</h2>", html)
+        self.assertIn('<td>bk-one</td><td>Pull requests with outside input wait for a maintainer&#x27;s merge '
+                      '(<a href="https://github.com/uberblick-ai/ub-agents/pull/591" rel="noreferrer">#591</a>)</td>', html)
+
+    def test_the_changelog_keeps_five_changes_newest_first(self):
+        changes = self.data["overview"]["changelog"]
+        changes.append(dict(changes[-1], date="2026-10-01"))
+        self.assertIn("overview: changelog lists 6 changes; keep the last 5", page.validate(self.data, self.flows))
+        changes.reverse()
+        self.assertIn("overview: changelog must run newest first", page.validate(self.data, self.flows))
+        for bad in ({"date": "19 Oct"}, {"who": "@bk-one"}, {"who": "Ben Kubota"}, {"what": ""}, {"pr": "591"},
+                    {"open": True, "pr": None}):
+            data = copy.deepcopy(self.data)
+            entry = data["overview"]["changelog"][0]
+            entry.update(bad)
+            if entry.get("pr") is None:
+                entry.pop("pr")
+            with self.assertRaises(ValueError):
+                page.validate(data)
 
     def test_consecutive_list_items_form_one_list(self):
         self.data["overview"]["points"] = ["One.", "Two.", "Three.", "Four."]
