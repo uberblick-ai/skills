@@ -33,7 +33,7 @@ from pathlib import Path
 
 PROBE_VERSION = "0.4"
 TOKEN_ESTIMATOR = "chars-2026-10-21"  # see estimate_tokens
-CLIENT_INFO = {"name": "mcp-insights", "version": PROBE_VERSION}
+CLIENT_INFO = {"name": "mcp-audit", "version": PROBE_VERSION}
 REQUESTED_VERSION = "2025-11-25"
 MODERN_VERSION = "2026-07-28"
 META_VERSION = "io.modelcontextprotocol/protocolVersion"
@@ -248,7 +248,7 @@ class StdioConnection:
             if "method" in msg and "id" in msg:
                 # A server-to-client request (sampling, roots, elicitation): decline it.
                 self.send_raw(json.dumps({"jsonrpc": "2.0", "id": msg["id"],
-                                          "error": {"code": -32601, "message": "not supported by mcp-insights"}}))
+                                          "error": {"code": -32601, "message": "not supported by mcp-audit"}}))
                 continue
             if "method" in msg:
                 continue  # notification
@@ -526,7 +526,7 @@ def minimal_invalid_args(tool: dict):
     props = schema.get("properties") or {}
     for name, prop in props.items():
         if isinstance(prop, dict) and isinstance(prop.get("enum"), list) and all(isinstance(v, str) for v in prop["enum"]):
-            return {name: "mcp-insights-not-an-option"}, f"{name} is not one of its enum values"
+            return {name: "mcp-audit-not-an-option"}, f"{name} is not one of its enum values"
     for name, prop in props.items():
         t = prop.get("type") if isinstance(prop, dict) else None
         if t is None and isinstance(prop, dict):
@@ -540,7 +540,7 @@ def minimal_invalid_args(tool: dict):
                      "boolean": "not-a-boolean", "array": "not-an-array", "object": "not-an-object"}[t]
             return {name: wrong}, f"{name} has the wrong type"
     if schema.get("additionalProperties") is False:
-        return {"mcp_insights_unknown": 1}, "an unknown field where additionalProperties is false"
+        return {"mcp_audit_unknown": 1}, "an unknown field where additionalProperties is false"
     return None, None
 
 
@@ -698,10 +698,10 @@ def collect(args) -> int:
             prompt_gets.append(entry)
         record["prompt_gets"] = prompt_gets
 
-        msg, ms = conn.request("mcp-insights/no-such-method", {})
+        msg, ms = conn.request("mcp-audit/no-such-method", {})
         probes["unknown_method"] = {"response": error_of(msg) or {"kind": "success"}}
 
-        msg, ms = conn.request("tools/call", {"name": "mcp_insights_no_such_tool", "arguments": {}})
+        msg, ms = conn.request("tools/call", {"name": "mcp_audit_no_such_tool", "arguments": {}})
         probes["unknown_tool"] = {"response": error_of(msg) or {"kind": "success"}}
 
         invalid = []
@@ -717,18 +717,18 @@ def collect(args) -> int:
                             "response": error_of(msg) or {"kind": "success", "text": content_text((msg or {}).get("result"))[:1000]}})
         probes["invalid_arguments"] = invalid
 
-        msg, ms = conn.request("resources/read", {"uri": "mcp-insights://no-such-resource"})
+        msg, ms = conn.request("resources/read", {"uri": "mcp-audit://no-such-resource"})
         probes["resource_not_found"] = {"response": error_of(msg) or {"kind": "success"}}
         # A URI no template matches is answered by most SDKs before the server's code runs; one that fits a
         # template but names nothing reaches the server's own handler.
         templates = [t.get("uriTemplate") for t in record.get("resourceTemplates") or [] if t.get("uriTemplate")]
         if templates:
-            uri = re.sub(r"\{[^}]*\}", "mcp-insights-no-such-item", templates[0])
+            uri = re.sub(r"\{[^}]*\}", "mcp-audit-no-such-item", templates[0])
             msg, ms = conn.request("resources/read", {"uri": uri})
             probes["resource_not_found_template"] = {"uri": uri, "response": error_of(msg) or {"kind": "success"}}
 
         if isinstance(conn, StdioConnection):
-            conn.send_raw('{"jsonrpc": "2.0", "id": "mcp-insights-parse", "method": ')
+            conn.send_raw('{"jsonrpc": "2.0", "id": "mcp-audit-parse", "method": ')
             msg, ms = conn.wait_any_response(5)
             after, _ = conn.request("ping", {}, timeout=10)
             probes["parse_error"] = {"response": error_of(msg) if msg else {"kind": "timeout"},

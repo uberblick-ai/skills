@@ -1,5 +1,5 @@
 ---
-name: mcp-insights
+name: mcp-audit
 description: >-
   Review an MCP server the way PageSpeed Insights reviews a web page: five
   scores from 0 to 100 (protocol, agent guidance, error recovery, context
@@ -10,7 +10,7 @@ description: >-
   cost?" or "what should we fix first in our MCP server?". Works on any stdio
   or Streamable HTTP server. Writes only to a scratch directory and calls only
   read tools, unless you point it at a sandbox for write probes. Not for load
-  testing, a security pentest or debugging why a tool fails.
+  testing, a security pentest or debugging your MCP server.
 license: MIT
 compatibility: >-
   Requires python3 (standard library only) and a way to start or reach the
@@ -21,7 +21,7 @@ metadata:
   version: "0.1"
 ---
 
-# MCP Insights
+# MCP Audit
 
 Scripts collect facts, you judge the text, and the renderer computes the
 scores, so numbers are reproducible and every judgement shows its evidence.

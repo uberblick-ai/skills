@@ -34,7 +34,7 @@
       "source": "./",
       "strict": false,
       "skills": [
-        "./skills/mcp/mcp-insights"
+        "./skills/mcp/mcp-audit"
       ]
     }
   ]

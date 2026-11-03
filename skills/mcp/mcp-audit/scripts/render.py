@@ -937,7 +937,7 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
         res("P17", 0, na=True, note="only applies to servers that speak 2026-07-28")
     ut = (probes.get("unknown_tool") or {}).get("response") or {}
     if ut.get("kind") in ("tool", "protocol"):
-        named = "mcp_insights_no_such_tool" in (ut.get("message") or "")
+        named = "_no_such_tool" in (ut.get("message") or "")
         res("P14", 1 if named else 0.5, "names the tool" if named else "generic error",
             items=[{"item": "tools/call", "score": 1 if named else 0.5, "evidence": ut.get("message", "")}])
     else:
@@ -1583,7 +1583,7 @@ def recommendations(results: dict, findings: dict, cats: dict) -> list[dict]:
             body += ["", "**Done when**", "", rec["check"]]
         if rec.get("evidence"):
             body += ["", "**Evidence**", "", rec["evidence"]]
-        body += ["", f"Found by mcp-insights ({', '.join(rec['audits'])})."]
+        body += ["", f"Found by mcp-audit ({', '.join(rec['audits'])})."]
         rec["issue"] = {"title": rec.get("issue_title") or rec["title"], "body": "\n".join(body)}
     recs.sort(key=lambda r: -r["rank_value"])
     return recs
@@ -1851,7 +1851,7 @@ def render_html(report: dict) -> str:
         badges.append(f'{meta["calls"]} read call{"" if meta["calls"] == 1 else "s"}')
     template = TEMPLATE.read_text(encoding="utf-8")
     fill = {
-        "TITLE": esc(f"MCP Insights: {meta['server_title']}"),
+        "TITLE": esc(f"MCP Audit: {meta['server_title']}"),
         "SERVER_TITLE": esc(meta["server_title"]),
         "SERVER_META": esc(" · ".join(dict.fromkeys(x for x in (
             meta.get("server_name"), meta.get("server_version"), meta.get("protocol") and f"protocol {meta['protocol']}",
@@ -1880,7 +1880,7 @@ def render_html(report: dict) -> str:
         "INVENTORY": "".join(inventory_rows),
         "NOTES": notes_html,
         "WARNINGS": warn,
-        "FOOTER": esc(f"mcp-insights probe {meta.get('probe_version')} · render {RENDER_VERSION} · audit catalog {CATALOG_VERSION} · "
+        "FOOTER": esc(f"mcp-audit probe {meta.get('probe_version')} · render {RENDER_VERSION} · audit catalog {CATALOG_VERSION} · "
                       f"collected {meta['collected_at']} · this is a lab run: one session, one machine"),
     }
     for k, v in fill.items():
