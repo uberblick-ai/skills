@@ -31,7 +31,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-PROBE_VERSION = "0.4"
+PROBE_VERSION = "0.5"
 TOKEN_ESTIMATOR = "chars-2026-10-21"  # see estimate_tokens
 CLIENT_INFO = {"name": "mcp-audit", "version": PROBE_VERSION}
 REQUESTED_VERSION = "2025-11-25"
@@ -41,6 +41,9 @@ META_CAPS = "io.modelcontextprotocol/clientCapabilities"
 KNOWN_VERSIONS = ["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
 LIST_PAGE_LIMIT = 50
 RESOURCE_READ_LIMIT = 200
+# What one resource read, prompt or call may leave on disk. The server sends its whole answer; the probe measures all of
+# it and keeps at most this much of the text, in probe.json and in the transcripts.
+MAX_KEEP_BYTES = 256 * 1024
 
 
 class ProbeError(Exception):
@@ -143,14 +146,40 @@ def scrub(obj, found: list | None = None, path: str = ""):
 
 
 class Transcript:
+    """Every message on the wire, scrubbed. A message over the keep limit is cut to its head, so a transcript never holds
+    more of one answer than probe.json does; with --no-transcripts nothing is written at all."""
+    enabled = True
+    max_bytes = MAX_KEEP_BYTES
+
     def __init__(self, path: Path | None):
-        self.fh = path.open("a", encoding="utf-8") if path else None
+        self.fh = path.open("a", encoding="utf-8") if path and Transcript.enabled else None
 
     def write(self, direction: str, payload) -> None:
         if not self.fh:
             return
-        self.fh.write(json.dumps(scrub({"t": round(time.time(), 3), "dir": direction, "msg": payload})) + "\n")
+        line = json.dumps(scrub({"t": round(time.time(), 3), "dir": direction, "msg": payload}))
+        if len(line) > Transcript.max_bytes:
+            line = json.dumps({"t": round(time.time(), 3), "dir": direction, "cut": len(line),
+                               "head": line[:Transcript.max_bytes]})
+        self.fh.write(line + "\n")
         self.fh.flush()
+
+
+def keep(text: str, entry: dict) -> str:
+    """The text as kept on disk: whole up to the keep limit, else its head, marked so sizes still use the full text."""
+    raw = text.encode("utf-8")
+    if len(raw) <= MAX_KEEP_BYTES:
+        return text
+    entry["truncated"] = True
+    return raw[:MAX_KEEP_BYTES].decode("utf-8", "ignore")
+
+
+def skipped(patterns: list[str] | None, *names) -> str | None:
+    import fnmatch
+    for pat in patterns or []:
+        if any(n and fnmatch.fnmatchcase(str(n), pat) for n in names):
+            return pat
+    return None
 
 
 class StdioConnection:
@@ -576,6 +605,7 @@ def collect(args) -> int:
                    "command": args.command, "url": args.url, "cwd": args.cwd,
                    "label": args.label},
         "source": source_revision(args.cwd, args.commit, args.package),
+        "retention": {"max_keep_bytes": MAX_KEEP_BYTES, "transcripts": Transcript.enabled, "skip": args.skip or []},
         "probes": {},
     }
     probes = record["probes"]
@@ -605,7 +635,7 @@ def collect(args) -> int:
                 conn.protocol_version = MODERN_VERSION
             dres = discover.get("result") or {}
             init = {"result": {"protocolVersion": MODERN_VERSION, "capabilities": dres.get("capabilities") or {},
-                               "serverInfo": dres.get("serverInfo") or {}, "instructions": dres.get("instructions")}}
+                               "serverInfo": discovered_info(dres), "instructions": dres.get("instructions")}}
         if init is None or "error" in init:
             failure = error_of(init)
             if init is None and not conn.alive():
@@ -668,6 +698,13 @@ def collect(args) -> int:
         reads = []
         for r in record["resources"][:RESOURCE_READ_LIMIT]:
             uri = r.get("uri")
+            pat = skipped(args.skip, uri, r.get("name"))
+            declared = r.get("size") if isinstance(r.get("size"), int) else None
+            if pat or (declared is not None and declared > MAX_KEEP_BYTES):
+                # Listed, never read: the reviewer excluded it, or it says it is larger than the probe keeps.
+                reads.append({"uri": uri, "skipped": f"--skip {pat}" if pat else
+                              f"declares {declared:,} bytes, over the {MAX_KEEP_BYTES:,}-byte keep limit"})
+                continue
             msg, ms = conn.request("resources/read", {"uri": uri})
             entry = {"uri": uri, "ms": ms, "error": error_of(msg) if (msg is None or "error" in msg) else None}
             if msg and "result" in msg:
@@ -675,15 +712,20 @@ def collect(args) -> int:
                 text = "\n".join(str(c.get("text", "")) for c in contents if isinstance(c, dict) and "text" in c)
                 entry["bytes"] = size(msg["result"])
                 entry["text_bytes"] = len(text.encode("utf-8"))
-                entry["text"] = text
+                entry["text"] = keep(text, entry)
                 entry["mimeTypes"] = sorted({str(c.get("mimeType")) for c in contents if isinstance(c, dict)})
             reads.append(entry)
         record["resource_reads"] = reads
+        if record["resources"][RESOURCE_READ_LIMIT:]:
+            print(f"read the first {RESOURCE_READ_LIMIT} of {len(record['resources'])} resources", file=sys.stderr)
 
         prompt_gets = []
         for p in record["prompts"]:
             required = [a.get("name") for a in (p.get("arguments") or []) if a.get("required")]
             if required:
+                continue
+            if skipped(args.skip, p.get("name")):
+                prompt_gets.append({"name": p.get("name"), "skipped": "--skip"})
                 continue
             msg, ms = conn.request("prompts/get", {"name": p.get("name"), "arguments": {}})
             entry = {"name": p.get("name"), "ms": ms, "error": error_of(msg) if (msg is None or "error" in msg) else None}
@@ -694,7 +736,7 @@ def collect(args) -> int:
                     c = m.get("content") if isinstance(m, dict) else None
                     if isinstance(c, dict) and c.get("type") == "text":
                         texts.append(str(c.get("text", "")))
-                entry["text"] = "\n".join(texts)
+                entry["text"] = keep("\n".join(texts), entry)
             prompt_gets.append(entry)
         record["prompt_gets"] = prompt_gets
 
@@ -704,18 +746,9 @@ def collect(args) -> int:
         msg, ms = conn.request("tools/call", {"name": "mcp_audit_no_such_tool", "arguments": {}})
         probes["unknown_tool"] = {"response": error_of(msg) or {"kind": "success"}}
 
-        invalid = []
-        for tool in record["tools"]:
-            ann = tool.get("annotations") or {}
-            if ann.get("readOnlyHint") is not True:
-                continue
-            bad_args, why = minimal_invalid_args(tool)
-            if bad_args is None:
-                continue
-            msg, ms = conn.request("tools/call", {"name": tool.get("name"), "arguments": bad_args})
-            invalid.append({"tool": tool.get("name"), "arguments": bad_args, "why": why, "ms": ms,
-                            "response": error_of(msg) or {"kind": "success", "text": content_text((msg or {}).get("result"))[:1000]}})
-        probes["invalid_arguments"] = invalid
+        # No tool is called here. readOnlyHint is the server's own claim and the review is checking that server, so it
+        # never authorizes a call: the invalid-argument probes go to the tools the reviewer confirms as reads, in `call`.
+        probes["invalid_arguments"] = []
 
         msg, ms = conn.request("resources/read", {"uri": "mcp-audit://no-such-resource"})
         probes["resource_not_found"] = {"response": error_of(msg) or {"kind": "success"}}
@@ -755,6 +788,11 @@ def collect(args) -> int:
     write_record(out, record)
     print(summary_line(record))
     return 0
+
+
+def discovered_info(res: dict) -> dict:
+    """2026-07-28 puts the server's name and version in _meta; early drafts had a top-level serverInfo."""
+    return ((res.get("_meta") or {}).get("io.modelcontextprotocol/serverInfo") or res.get("serverInfo") or {})
 
 
 def discover_first(args, out: Path) -> dict:
@@ -861,12 +899,18 @@ def call(args) -> int:
     conn = open_connection(args, transcript)
     results, write_probes = [], []
     try:
-        init, _ = initialize(conn, timeout=args.start_timeout)
-        if init is None or "error" in init:
-            raise ProbeError(f"initialize failed: {error_of(init)}")
-        if isinstance(conn, HttpConnection):
-            conn.protocol_version = (init.get("result") or {}).get("protocolVersion")
-        conn.notify("notifications/initialized")
+        if record.get("lifecycle") == "modern":
+            # 2026-07-28 has no handshake: every request carries its version in _meta.
+            conn.meta = {META_VERSION: MODERN_VERSION, META_CAPS: {}}
+            if isinstance(conn, HttpConnection):
+                conn.protocol_version = MODERN_VERSION
+        else:
+            init, _ = initialize(conn, timeout=args.start_timeout)
+            if init is None or "error" in init:
+                raise ProbeError(f"initialize failed: {error_of(init)}")
+            if isinstance(conn, HttpConnection):
+                conn.protocol_version = (init.get("result") or {}).get("protocolVersion")
+            conn.notify("notifications/initialized")
         for c in plan.get("calls") or []:
             name = c.get("tool")
             tool = tools.get(name)
@@ -879,8 +923,10 @@ def call(args) -> int:
                 else:
                     write_probes.append(write_probe(conn, c, tools))
                 continue
-            if (tool.get("annotations") or {}).get("readOnlyHint") is not True and not c.get("confirmed_read_only"):
-                results.append({"tool": name, "skipped": "not marked read-only; set confirmed_read_only after checking"})
+            if not c.get("confirmed_read_only"):
+                # The annotation is the server's claim, not a guarantee: only the reviewer's confirmation runs a call.
+                results.append({"tool": name, "skipped": "not confirmed as a read; set confirmed_read_only after reading "
+                                                         "its description (readOnlyHint alone is not enough)"})
                 continue
             msg, ms = conn.request("tools/call", {"name": name, "arguments": c.get("arguments") or {}}, timeout=60)
             entry = {"tool": name, "arguments": c.get("arguments") or {}, "purpose": c.get("purpose"), "ms": ms}
@@ -903,15 +949,14 @@ def call(args) -> int:
                     # Help served by a tool counts toward help size and is judged like a help resource.
                     entry["help"] = True
                     entry["topic"] = str(c.get("topic") or help_topic_id(name, c.get("arguments") or {}))
-                    entry["text"] = text
+                    entry["text"] = keep(text, entry)
                 # What the model receives is the content text; structuredContent mirrors it for programs.
                 entry["text_bytes"] = len(text.encode("utf-8"))
                 entry["tokens"] = estimate_tokens(text)
                 if tool.get("outputSchema") and "structuredContent" in res:
                     entry["schema_problems"] = validate(res["structuredContent"], tool["outputSchema"])[:10]
             results.append(entry)
-        # Servers without annotations get no invalid-argument probes in collect;
-        # the tools confirmed as reads here can take them now.
+        # The tools confirmed as reads here take the invalid-argument probes; collect calls no tool.
         probed = {x.get("tool") for x in (record.get("probes") or {}).get("invalid_arguments") or []}
         extra = []
         for name in dict.fromkeys(r["tool"] for r in results if "bytes" in r):
@@ -1054,6 +1099,12 @@ def import_catalog(args) -> int:
     return 0
 
 
+def set_retention(max_bytes: int, transcripts: bool) -> None:
+    global MAX_KEEP_BYTES
+    MAX_KEEP_BYTES = Transcript.max_bytes = max(1024, max_bytes)
+    Transcript.enabled = transcripts
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1067,7 +1118,15 @@ def main(argv=None) -> int:
         p.add_argument("--header", action="append", help="'Name: value' for an HTTP server (repeatable)")
         p.add_argument("--out", required=True, help="directory for probe.json and transcripts")
         p.add_argument("--start-timeout", type=float, default=60, help="seconds to wait for initialize")
+        p.add_argument("--max-keep-bytes", type=int, default=MAX_KEEP_BYTES,
+                       help=f"most of one resource, prompt or call answer kept on disk (default {MAX_KEEP_BYTES}); the size "
+                            "is measured on the whole answer, and a resource that declares a larger size is not read")
+        p.add_argument("--no-transcripts", action="store_true",
+                       help="write no transcript files: probe.json keeps the measurements and the texts the review judges")
         if name == "collect":
+            p.add_argument("--skip", action="append", metavar="PATTERN",
+                           help="resource URI or name, or prompt name, to list but never read (glob, repeatable), "
+                                "e.g. 'db://customers/*'")
             p.add_argument("--label", help="a short name for the server in the report")
             p.add_argument("--commit", help="the commit the server was built from, when --cwd is not its git checkout")
             p.add_argument("--package", help="the installed release that answers, e.g. NAME@1.2.0, when the server is a "
@@ -1088,6 +1147,8 @@ def main(argv=None) -> int:
                                    "and why for an invalid-argument probe")
     p.add_argument("--out", required=True, help="directory for probe.json")
     args = parser.parse_args(argv)
+    if args.cmd in ("collect", "call"):
+        set_retention(args.max_keep_bytes, not args.no_transcripts)
     try:
         if args.cmd == "import":
             return import_catalog(args)

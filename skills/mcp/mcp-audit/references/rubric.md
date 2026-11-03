@@ -173,9 +173,11 @@ whose audits all match the SDK's defaults ranks below the server's own fixes.
 `help` says which calls count as reading help (globs). Set it: the default
 counts tools named like help, guide or manual and every resource read, which
 misses a help tool with another name, and `trial.py` prints what it guessed.
-`confirmed_read_only` lists tools not marked `readOnlyHint` that you have
-checked change nothing; trials may call them, with any arguments, while
-writes are blocked. Leave out a tool that is a read only with some arguments
+`confirmed_read_only` lists the reads that trials may call, with any
+arguments, while writes are blocked, beyond those already run as confirmed
+reads in `calls.json`. `readOnlyHint` alone allows nothing: it is the
+server's own claim, and the review is checking that server. `trial.py`
+prints which tools the agent may call and which are blocked. Leave out a tool that is a read only with some arguments
 (a query tool that also takes mutations, a credentials tool whose status
 action reads), and any tool you are unsure of: its calls are then blocked and
 recorded as what the agent would have sent. `task` is what a user would type, with

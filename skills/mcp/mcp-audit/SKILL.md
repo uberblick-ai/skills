@@ -9,16 +9,19 @@ description: >-
   "why do agents struggle with this MCP?", "how much context do these tools
   cost?" or "what should we fix first in our MCP server?". Works on any stdio
   or Streamable HTTP server. Writes only to a scratch directory and calls only
-  read tools, unless you point it at a sandbox for write probes. Not for load
-  testing, a security pentest or debugging your MCP server.
+  the read tools you confirm, unless you point it at a sandbox for write
+  probes. Not for load testing, debugging your MCP server, or a security
+  audit: it does not test authentication, tenant isolation or prompt
+  injection.
 license: MIT
 compatibility: >-
   Requires python3 (standard library only) and a way to start or reach the
   server: its stdio command or its HTTP URL plus any auth header. Read-only
-  by default: it calls only tools marked readOnlyHint or confirmed as reads.
+  by default: it calls only tools the reviewer confirmed as reads, never on a
+  readOnlyHint alone. Agent trials need Claude Code.
 metadata:
   author: uberblick-ai
-  version: "0.1"
+  version: "0.2"
 ---
 
 # MCP Audit
@@ -37,6 +40,20 @@ judgement is not mistaken for a full review.
 by their path inside this skill's directory. `DIR` is a scratch directory
 outside the server's repository.
 
+The scores are evidence-backed assessments, not objective measurements.
+Automatic audits are measured and repeat exactly; judged audits are your
+reading against the rubric, and another reviewer, model or run may judge
+them differently. Each score says how much of it is judged, token counts are
+estimates from the text, and trials show one client (Claude Code) with the
+models you chose. Say so whenever you quote a score.
+
+It reviews usability and behaviour, not security. The safety audits check
+what an agent is told about risk, whether reads only read and whether
+secrets reach the model; nothing here tests authentication, authorization,
+tenant isolation, prompt-injection resistance or what a compromised agent
+could do with legitimate tools. Point the user to a security review for
+those.
+
 ## 1. Ask
 
 Get the server's stdio command (and working directory) or its URL, and how
@@ -47,9 +64,27 @@ the command is stored in `probe.json`. Ask whether a sandbox exists (a scratch
 workspace or test instance) before any write; without one the run stays
 read-only.
 
-Against a production server, look before anything runs: `collect --list-only`
-lists the tools, resources and prompts and reads or calls nothing. Check what
-the resources hold and which tools are reads, then collect in full.
+Against any server that holds real data, look before anything runs:
+`collect --list-only` lists the tools, resources and prompts and reads or
+calls nothing. Check what the resources hold and which tools are reads, then
+collect in full, leaving out what should not be read:
+
+- `--skip PATTERN` (repeatable glob on a resource URI or name, or a prompt
+  name) lists a resource or prompt but never reads it. Skip anything holding
+  customer, personal or confidential data; help and reference resources are
+  what the review needs.
+- `--max-keep-bytes N` (default 262144) is the most of one answer kept on
+  disk. Sizes are measured on the whole answer; a resource that declares a
+  larger `size` is not read at all.
+- `--no-transcripts` writes no transcript files, only `probe.json`.
+
+What stays on disk, all of it scrubbed of recognisable secrets and email
+addresses (a pattern match, so not a guarantee for names, phone numbers or
+business data): `DIR/probe.json` (the server's texts, resource and help
+texts, the head of each call's answer), `DIR/transcript*.jsonl` (every
+message on the wire, each cut at the keep limit) and `DIR/trials/*.jsonl`
+(each trial agent's session). Tell the user where `DIR` is, and delete it
+when the review is done if the server holds data they would not share.
 
 ## 2. Collect
 
@@ -63,9 +98,9 @@ page, reads every resource and argument-free prompt, sends safe error probes
 (unknown method, unknown tool, schema-invalid arguments to read-only tools,
 malformed JSON on stdio, an unknown protocol version) and times the cold
 start. It writes `DIR/probe.json` and transcripts. A failed start leaves the
-server's stderr in `probe.json` under `stderr_tail`. The error probes go only
-to tools marked `readOnlyHint`; tools you confirm as reads in step 3 get them
-then. When `--cwd` is the server's git checkout, the record pins its commit
+server's stderr in `probe.json` under `stderr_tail`. Collect calls no tool:
+the invalid-argument probes go to the tools you confirm as reads in step 3.
+Planned calls work against 2026-07-28 servers too, which have no handshake. When `--cwd` is the server's git checkout, the record pins its commit
 and notes uncommitted changes; otherwise pass `--commit SHA`. When the server
 is an installed package that a project runs from its own directory, the
 project's commit says nothing about it: pass `--package NAME@VERSION`. Without
@@ -118,10 +153,12 @@ topic's name in `"topic"`, for example
 Those answers count toward help size like help resources (C05, C06, C11) and
 are judged with them; a topic a help resource also serves is counted once.
 
-Chain them: list first, then use real ids. A tool not marked
-`readOnlyHint: true` runs only with `"confirmed_read_only": true`, which you
-set after reading its description and being sure that call, with those
-arguments, changes nothing. Then:
+Chain them: list first, then use real ids. Every call runs only with
+`"confirmed_read_only": true`, which you set after reading the tool's
+description and being sure that call, with those arguments, changes nothing.
+`readOnlyHint` is the server's own claim, the thing under review, so it
+never authorizes a call; a tool marked read-only whose name or description
+says it changes data is a finding (S01), not a call to make. Then:
 
 ```sh
 python3 scripts/probe.py call --command "..." --out DIR --calls DIR/calls.json
@@ -162,8 +199,9 @@ for example a script that reads the result back and parses it.
 
 When the maintainer has a fix on a branch, run the same plan against the
 baseline and the branch, with the same models and repeats, and render the
-branch with `--baseline`: that measures a suggestion's effect instead of
-assuming it. When the startup instructions can be changed locally, an
+branch with `--baseline`: each trial card then shows the baseline's "k of n"
+beside the branch's, which measures a suggestion's effect instead of
+assuming it. The gains on suggestions are projections, never measurements. When the startup instructions can be changed locally, an
 ablation does the same for discovery: the same trial with and without the
 help topics listed in the instructions.
 
@@ -180,13 +218,16 @@ python3 scripts/trial.py run --mcp-config DIR/mcp.json --server NAME --plan DIR/
 
 It needs Claude Code (`claude`) on PATH and costs a few cents per trial with
 the default Haiku; add a `"model": "sonnet"` copy of a trial to compare.
-What the trials measure is what an agent in Claude Code does; the report tags
-those audits, and the instructions cut-off (G07), with the client's name.
-Write tools are blocked, and the blocked call is recorded as what the agent
-would have sent. Claude Code saves a result over its output limit to a file
-under `~/.claude/projects/`, in full and unredacted, and shows the agent a
-notice instead; `trial.py` records the real size and prints where those files
-are. Tell the user, and delete them once the review is done. In a sandbox, add `--allow-writes` and `--before-each` with a
+What the trials measure is what an agent in Claude Code does, with these
+models; the report names the client version and the models at the top and
+tags the client-bound audits, and the instructions cut-off (G07), with the
+client's name. The agent may call only confirmed reads (those run in step 3
+and the plan's `confirmed_read_only`); every other tool is blocked, and the
+blocked call is recorded as what the agent would have sent. Claude Code saves
+a result over its output limit to a file under `~/.claude/projects/`, in full
+and unredacted, and shows the agent a notice instead; `trial.py` records the
+real size and deletes those files once the trials are done (keep them with
+`--keep-client-copies`). In a sandbox, add `--allow-writes` and `--before-each` with a
 command that restores the sandbox, so every trial starts from the same state.
 Then read what the agent wrote back through the server and check it with the
 server's own reads; that is how silent truncation, dropped fields and
@@ -248,13 +289,14 @@ python3 scripts/render.py DIR --open
 ```
 
 It merges `probe.json` and `findings.json`, scores each category, ranks the
-suggestions by their effect (re-scoring the categories as if each one were
-done, those that lift a critical cap first), and writes `DIR/report.html`
+suggestions by their projected effect (re-scoring the categories as if each
+one were done, those that lift a critical cap first), and writes `DIR/report.html`
 and `DIR/report.json`. Fix any warning it prints about suggestions without
 `targets` or `check`, or scores without evidence. Check each `lead:` it
 prints, such as a limit that returned the same answer as the default, and
 judge it before you reply. Add `--baseline OLD_DIR/report.json` to show
-changes since an earlier run or against the baseline of a branch comparison;
+score changes and, for trials with the same ids, the baseline's runs done,
+since an earlier run or against the baseline of a branch comparison;
 the report says when the baseline differs in more than the code (another
 version, a changed tool list, an older audit catalog).
 
@@ -266,9 +308,11 @@ and leave out a line that has nothing in it:
 
 ```text
 acme-tasks at 4f2c1e0: protocol 96, agent guidance 71, error recovery 49 (capped: a write stored something else silently), context cost 64, safety 92.
+Assessed, not measured: guidance is 80% judged, so another review may differ by a few points. Usability only, not a security review.
 Every audit judged; agent guidance and context cost rest on samples (8 of 30 help topics, 20 of 140 texts).
-Trials: 4 tasks, 3 runs each on Haiku and Sonnet, 22 of 24 done (12 graded by a check script).
+Trials in Claude Code 2.1.3: 4 tasks, 3 runs each on claude-haiku-4-5 and claude-sonnet-4-5, 22 of 24 done (12 graded by a check script).
 Suggestions: 1. Refuse a due date in the past instead of storing today (lifts the cap). 2. Name the missing field and where its value comes from in validation errors. 3. Drop the 300-character id pattern from 18 fields, could save about 2k tokens per turn.
+Left on disk: DIR (probe.json, transcripts, trial sessions); 2 resources skipped.
 Report: DIR/report.html
 ```
 
@@ -276,4 +320,5 @@ With `--baseline`, add a line with what moved and why, and say which
 suggestion's effect the baseline-versus-branch run measured. When a re-run
 finds nothing new, one line is enough:
 `acme-tasks at 9b1d2a7: no score moved since 4f2c1e0, same three suggestions.`
-Scores are for the team's own use: do not publish them.
+Scores are for the team's own use: do not publish them, and do not present
+them as a benchmark, a certification or a security rating.
