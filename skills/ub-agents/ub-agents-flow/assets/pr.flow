@@ -44,3 +44,36 @@ legend
   decision tone=system "gate, numbered as in the cards"
   pill tone=done "GitHub label"
   panel tone=stop "a person decides"
+
+play "Clean run"
+  step ready
+  step g1 "Nothing holds it"
+  step implementer actor="implementer" "Builds the change, runs the checks, opens a draft PR"
+  step g3 "Yes: handed off for review"
+  step needs-review
+  step reviewer actor="reviewer" "Reviews the exact head on another model"
+  step g4 "Yes: approved"
+  step ready-to-merge
+  step integrator actor="integrator" "Merges the base in, reruns the final checks"
+  step g5 "Yes: the integrator merges"
+  step merged
+
+play "A maintainer merges"
+  step integrator actor="integrator" "The final checks pass"
+  step g5 "No: it touches a guarded path"
+  step human 2.4s actor="A maintainer" "Reviews and merges it"
+
+play "One review round"
+  step needs-review
+  step reviewer actor="reviewer" "Reviews the exact head"
+  step g4 "No: a criterion is not met"
+  step needs-changes
+  step implementer actor="implementer" "Revises the same PR"
+  step g3 "Yes: handed off again"
+  step needs-review
+  step reviewer actor="reviewer" "Reviews the new head"
+  step g4 "Yes: approved"
+  step ready-to-merge
+  step integrator actor="integrator"
+  step g5
+  step merged

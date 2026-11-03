@@ -10,6 +10,38 @@
       "**Preparation.** The issue-preparer states the behavior and the smallest set of acceptance criteria.",
       "**Implementation.** The implementer builds one PR, a reviewer on another model checks the exact head, and the integrator runs the final checks and merges.",
       "**At any point** an agent that meets unclear intent, work too big for one PR or a decision only a maintainer can make stops with `needs-human`."
+    ],
+    "changelog": [
+      {
+        "date": "2026-10-19",
+        "who": "bk-one",
+        "what": "Pull requests with outside input wait for a maintainer's merge",
+        "pr": 591
+      },
+      {
+        "date": "2026-10-17",
+        "who": "bk-one",
+        "what": "The loop policy keeps to loop-specific, language-neutral rules",
+        "pr": 566
+      },
+      {
+        "date": "2026-10-15",
+        "who": "bk-one",
+        "what": "Headless Claude runs avoid shell loops that pipe or use their variable",
+        "pr": 517
+      },
+      {
+        "date": "2026-10-10",
+        "who": "bk-one",
+        "what": "Merges and releases gate on GitHub Actions instead of a local signoff",
+        "pr": 429
+      },
+      {
+        "date": "2026-10-09",
+        "who": "uberblick-agent",
+        "what": "Delivery reports use the published maintainer skill",
+        "pr": 409
+      }
     ]
   },
   "phases": [

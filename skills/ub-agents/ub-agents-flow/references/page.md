@@ -17,6 +17,10 @@ illustration from uberblick-ai/ub-agents, not a default.
     "points": [
       "**Preparation.** At most 30 words on what happens in the phase.",
       "**Implementation.** At most 30 words on what happens in the phase."
+    ],
+    "changelog": [
+      {"date": "2026-10-19", "who": "bk-one", "what": "At most 25 words on what changed for the loop", "pr": 591},
+      {"date": "2026-10-17", "who": "uberblick-agent", "what": "One change per pull request", "pr": 566, "open": true}
     ]
   },
   "phases": [
@@ -77,16 +81,30 @@ illustration from uberblick-ai/ub-agents, not a default.
   on where a person steps in at any point (unclear intent, work too big for
   one PR, a decision only a maintainer can make). The ways work enters stay
   in the drawing: a sentence repeating them adds nothing. It names no labels
-  and has no table or notes; those belong to the phases. An optional `title`
-  replaces "How the loop runs in OWNER/NAME".
+  and has no table or notes before its changelog; those belong to the
+  phases. An optional `title` replaces "How the loop runs in OWNER/NAME".
+- `overview.changelog` lists the last five changes to how the loop runs,
+  newest first, and ends the overview as a Date, Who, What table (the last
+  section of a `--combine` document). `date` is the merge date, `who` the
+  author's GitHub login without `@` (a bot's login too), `what` the change
+  in a few plain words, as the loop runs after it, and `pr` its pull
+  request, linked in the table. `open: true` marks a pull request the
+  maintainer decided but has not merged, which the documents already
+  describe (see the last paragraph). Leave out changes that only reword or
+  reformat.
 - `phases` are the issue phase and the implementation and PR phase, in that
   order. A step with its own entries, forks and person gates, such as the
   merge when a bot's pull requests enter there, can be a phase of its own
   after them, with `"continues": "Implementation and PR phase"`: its gates
   continue that phase's numbers, and that phase's drawing ends where the step
   begins, in an `end` node saying what the item waits for. Use it when one
-  drawing would pass about 20 nodes. `flow` names the phase's ablauf source
-  next to `flow.json`. An optional `title` replaces "The loop in OWNER/NAME:
+  drawing would pass about 20 nodes, or when a route skips an agent that has
+  both a rework and a stop edge, such as an exempt PR going around the
+  reviewer: rejoining below that agent crosses one of its edges, while in a
+  drawing of its own the skipped route is an `end` beside the gate and an
+  entry of the next one. `flow` names the phase's ablauf source
+  next to `flow.json`; it goes into the document's `ablauf` block as it is,
+  `play` scenarios included. An optional `title` replaces "The loop in OWNER/NAME:
   issue phase". The `summary` follows the
   "Details of" line, so it reads as one paragraph: the journey of one item
   through the phase and the document it hands over to. When the phase's

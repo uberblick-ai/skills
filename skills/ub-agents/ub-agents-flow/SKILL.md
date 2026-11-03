@@ -2,23 +2,25 @@
 name: ub-agents-flow
 description: >-
   Explain how the ub-agents loop runs in a repository as an overview and one
-  document per phase, each with an ablauf drawing and every gate that holds
-  work back, numbered, from the config and the agents' instruction files.
-  Use for "how does our loop work?", "draw the agent flow and its gates",
-  "update the loop docs after the config change" or "where does a person step
-  in?". Writes Uberblick Markdown and a printable page to a scratch directory
-  and, when an Uberblick MCP server is connected, creates or updates the loop
-  documents in the corpus; changes nothing on GitHub. Not for running a loop
+  document per phase, each with an ablauf drawing that plays the paths items
+  most often take and every gate that holds work back, numbered, from the
+  config, the agents' instruction files and the loop's recent runs. Use for
+  "how does our loop work?", "draw the agent flow and its gates", "update the
+  loop docs after the config change" or "show how a typical issue moves
+  through the loop". Writes Uberblick Markdown and a printable page to a
+  scratch directory and, when an Uberblick MCP server is connected, creates or
+  updates the loop documents in the corpus; changes nothing on GitHub. Not for running a loop
   role, reviewing a pull request or reporting a day's deliveries.
 license: MIT
 compatibility: >-
   Requires python3 and Node.js 22.18 or newer with npm, to install the
   @uberblick/ablauf renderer into a scratch directory. Reads the repository's
-  checkout, or GitHub through an authenticated gh without one, and the
+  checkout, or GitHub through an authenticated gh without one, the loop's
+  coordination records on GitHub through an authenticated gh, and the
   Uberblick corpus through a connected Uberblick MCP server when there is one.
 metadata:
   author: uberblick-ai
-  version: "0.1"
+  version: "0.2"
 ---
 
 # Loop flow
@@ -26,11 +28,14 @@ metadata:
 A maintainer should see in a few pages how work moves through their loop:
 which agent picks up which label, what each checks before an item moves on,
 where work goes back and where it waits for a person. The config says who runs
-when; the instruction files say what each agent checks. The skill writes an
-overview with the whole loop in one drawing, then one document per phase with
-its gates, in Uberblick Markdown.
+when; the instruction files say what each agent checks; the loop's runs say
+which routes items really take. The skill writes an overview with the whole
+loop in one drawing, then one document per phase with its gates, in Uberblick
+Markdown. Each drawing ends with ablauf `play` scenarios for the paths items
+take most often, which a reader plays step by step in Uberblick.
 
-`scripts/render.mjs` and `scripts/page.py` live next to this file; call them
+`scripts/render.mjs`, `scripts/paths.py` and `scripts/page.py` live next to
+this file; call them
 by their path inside this skill's directory. `REPO` is the `OWNER/NAME` of the
 repository the loop runs on, `DIR` a scratch directory outside the repository.
 
@@ -52,6 +57,20 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    `shared-instructions`, and any outcome's `sub-issues` labels. Note any
    trigger label that no outcome adds, such as a bot's own label: work enters
    there without an issue.
+
+   Collect the changelog: the last five changes on the default branch to
+   `ub-agents.yaml`, the `shared-instructions` file, each agent's
+   `instructions` file and the policy files they point to. For each path:
+
+   ```sh
+   gh api "repos/REPO/commits?path=PATH&per_page=10" --jq '.[] | [.sha, .commit.author.date[:10], (.author.login // .commit.author.name), (.commit.message | split("\n")[0])] | @tsv'
+   ```
+
+   Merge the lists by SHA, newest first, and keep five. The pull request is
+   the `(#N)` in a squash-merged title, or
+   `gh api repos/REPO/commits/SHA/pulls --jq '.[0].number'`. An open pull
+   request the maintainer decided (see `references/page.md`) counts too,
+   marked `open`.
 
 2. Read the guidance with line numbers: `AGENTS.md`, the
    `shared-instructions` file, each agent's `instructions` file and the policy
@@ -94,7 +113,33 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    sub-issues that get no label from a `sub-issues` outcome or from the
    instructions and so wait for a person.
 
-3. Read the corpus, if there is one. The corpus is available when an
+3. Count the paths items took, from the coordination records the launcher
+   posts on each issue and pull request:
+
+   ```sh
+   python3 scripts/paths.py --repo REPO --days 30
+   ```
+
+   It prints, per phase, the most common paths as the outcomes the agents
+   reported, with how many finished items took each and a few examples, and
+   how work entered (an issue, a pull request, a bot's pull request). For
+   example:
+
+   ```text
+   PR phase (87 items):
+   1. 55x (63.2%) implementer handed-off > reviewer approved > integrator merged > merged  #805 #801 #800
+   2. 7x (8.0%) implementer handed-off > reviewer approved > integrator maintainer-merge > merged  #808 #798
+   ```
+
+   These paths become each drawing's play scenarios in step 6. With fewer
+   than about ten finished items, widen `--days`. A path the drawing has no
+   route for, or a route the config declares that no item took, is a finding
+   for the notes once checked against the config: an outcome the
+   instructions never report, or a route the documents leave out. When
+   `gh` cannot read the records or the loop has not run yet, there are no
+   observed paths: the scenarios come from the config, and the reply says so.
+
+4. Read the corpus, if there is one. The corpus is available when an
    Uberblick MCP server is connected, whatever its name, such as `uberblick`
    or `uberblick-agents`. Its tools may be listed by name only; load them
    before using them, and with more than one server, search each. Search for
@@ -103,53 +148,62 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    read each one (`export_markdown` or `get_doc`). Read the repository's own
    rules for writing corpus pages too, if it has any (in `AGENTS.md` or the
    files it points to). Without a server there is no corpus; skip this step. Compare what the documents say with what steps 1
-   and 2 found, and keep a list of the differences that matter: a gate, a
+   to 3 found, and keep a list of the differences that matter: a gate, a
    route, a label, an agent, a rule or a person's decision that the corpus
    describes otherwise or leaves out, each with the document, what it says
    and what the config or the instructions say, with the line. Leave out
-   wording and layout. Step 8 fixes in place what the corpus states wrongly;
+   wording and layout. Step 9 fixes in place what the corpus states wrongly;
    the list itself goes in no document. A gap between the config and the
    instructions is a finding for the notes instead.
 
-4. Write `DIR/flow.json` from what steps 1 and 2 found, as
-   [references/page.md](references/page.md) describes. When step 3 found
-   earlier documents, steps 4 to 7 are a check on the gates and drawings:
-   what you store is step 8's list of block edits.
+5. Write `DIR/flow.json` from what steps 1 and 2 found, as
+   [references/page.md](references/page.md) describes. When step 4 found
+   earlier documents, steps 5 to 8 are a check on the gates and drawings:
+   what you store is step 9's list of block edits.
 
-5. Draw every `.flow` that `flow.json` names as
-   [references/flow.md](references/flow.md) describes. When step 3 found the
-   drawings an earlier run stored, start from those, so a maintainer's layout
-   survives; otherwise start from [assets/](assets/).
+6. Draw every `.flow` that `flow.json` names as
+   [references/flow.md](references/flow.md) describes, and end each with a
+   `play` section per common path from step 3, as its "Play scenarios"
+   section describes. When step 4 found the drawings an earlier run stored,
+   start from those, so a maintainer's layout and scenarios survive;
+   otherwise start from [assets/](assets/).
 
-6. Render them all, installing the renderer once per scratch directory:
+7. Render them all, installing the renderer once per scratch directory:
 
    ```sh
-   npm install --prefix DIR/ablauf @uberblick/ablauf@0.2.0
+   npm install --prefix DIR/ablauf @uberblick/ablauf@0.3.0
    node scripts/render.mjs DIR/ablauf DIR/*.flow
    ```
 
    Each `.svg` lands next to its `.flow`. It fails on any diagnostic and names
    the line; fix it, usually by moving a node with `row=` or an edge end with
-   `to=`, until every drawing prints `clean`. Then look at each drawing
-   (rasterize the `.svg` at its full width and read the image), since a clean
+   `to=`, until every drawing prints `clean` with its scenarios. A play step
+   with no edge from the step before it is a diagnostic too: the scenario
+   follows the drawing's edges, so fix the step, or the drawing when it
+   misses a route items take. Then look at each drawing
+   (rasterize the `.svg` at its full width and read the image; macOS Quick
+   Look crops to a square, so use a headless browser sized to the `viewBox`),
+   since a clean
    render can still read badly: the passing path runs straight down, a
    side route that rejoins it runs straight across, and every label reads.
 
-7. Build the documents and open them:
+8. Build the documents and open them:
 
    ```sh
    python3 scripts/page.py DIR/flow.json --out DIR/flow.html --open
    ```
 
    It writes one Markdown file per document and `DIR/flow.html`, the same
-   blocks styled like Uberblick. When the maintainer asks for one document,
-   add `--combine`: it writes `DIR/flow.md` instead. Fix every warning it
-   prints unless it is a real finding about the loop, which belongs in
-   `notes`.
+   blocks styled like Uberblick, changelog included, with each drawing whole;
+   the scenarios play in Uberblick. Without a corpus, or when the maintainer
+   asks for files only, `DIR/flow.html` is the report. When the maintainer
+   asks for one document, add `--combine`: it writes `DIR/flow.md` instead.
+   Fix every warning it prints unless it is a real finding about the loop,
+   which belongs in `notes`.
 
-8. Store the documents in the corpus whenever there is one, unless the
+9. Store the documents in the corpus whenever there is one, unless the
    maintainer asked for files only. Follow the repository's rules for corpus
-   pages from step 3. When step 3 found the documents an earlier run wrote,
+   pages from step 4. When step 4 found the documents an earlier run wrote,
    update them in place: change only the blocks whose facts changed, and keep
    every edit a maintainer made (wording, added or removed blocks, links,
    headings, merged paragraphs, a removed TL;DR). Never add back what a
@@ -162,7 +216,8 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    bold, code or a link, replace the block (`insert_block` the new one, then
    `delete_block` the old). A block that carries comments is never replaced:
    edit only its outdated words. Update a document's description when it
-   names something that changed. Check every edited block with
+   names something that changed, in at most 300 characters (the corpus
+   refuses longer ones). Check every edited block with
    `export_markdown` afterwards, and name to the maintainer any whose
    formatting you could not keep. Otherwise
    create them: the phase documents first, then the overview, with each
@@ -173,26 +228,45 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    every document with the corpus's tag for workflow documents, such as
    `workflow`, when it has one; never invent a tag. With
    `--combine`, store the one document. Check that every write was applied
-   and synced, and name any that was not. Without a corpus, the Markdown files
-   are the result.
+   and synced, and name any that was not. Without a corpus, the HTML page
+   and the Markdown files are the result.
 
-9. Tell the maintainer which documents were created or updated, or where the
-   page and the Markdown are, then in a few sentences: the path an item takes
-   in each phase, the gates where a person decides, and anything from the
-   notes that looks like a mistake in the config or the instructions. Then
-   number the differences from step 3, one line each. Change nothing on
-   GitHub; offer to open an issue only if they ask. For example:
+   The overview's changelog is a table at its end. Updating, replace its
+   rows with the last five changes, keeping the wording a maintainer gave a
+   row that stays and the maintainer's columns, if they changed them; add
+   the table when the overview has none.
 
-   ```text
-   Updated "Loop: issue phase" (G2 card, one note) and "Loop: PR phase" (drawing).
-   Issue phase: a maintainer adds needs-preparation; the preparer checks intent
-   and scope (G2-G4) and marks small work ready, the rest gets one review (G5).
-   PR phase: one PR, a review on another runtime when owed, the integrator's
-   final gates, then the merge. A person decides at needs-human and tier-3 merges.
-   Looks like a mistake: workflow.md describes the milestone order otherwise
-   than the launcher runs it.
-   Corpus differences:
-   1. G2 card: another PR for the issue goes to needs-human, not returned.
-   ```
+   Updating or creating, each drawing goes to the corpus with its `play`
+   sections, in the same `ablauf` block, so a reader can play the common
+   paths. A stored drawing without them gets them; one whose route changed
+   gets its scenarios' steps updated; a common path no scenario plays gets
+   one. Keep a maintainer's scenarios, names, captions and tempo, and never
+   add back a scenario a maintainer removed. Every write of a drawing answers
+   with a `drawing` summary: anything but `clean` is a step or route to fix
+   and write again.
 
-   When nothing changed: `The loop documents match <ref>; nothing to update.`
+10. Tell the maintainer which documents were created or updated, or where the
+    page (`DIR/flow.html`) and the Markdown are, then in a few sentences: the
+    path an item takes in each phase, the gates where a person decides, and
+    anything from the notes that looks like a mistake in the config or the
+    instructions. Name the scenarios each drawing plays with the share of
+    items behind each, from step 3, or say they come from the config. Then
+    number the differences from step 4, one line each. Change nothing on
+    GitHub; offer to open an issue only if they ask. For example:
+
+    ```text
+    Updated "Loop: issue phase" (G2 card, one note) and "Loop: PR phase" (drawing).
+    Scenarios, from 87 items finished in the last 30 days: issue phase
+    "Prepared" (97%); PR phase "Clean run" (63%), "A maintainer merges" (8%),
+    "One review round" (7%).
+    Issue phase: a maintainer adds needs-preparation; the preparer checks intent
+    and scope (G2-G4) and marks small work ready, the rest gets one review (G5).
+    PR phase: one PR, a review on another runtime when owed, the integrator's
+    final gates, then the merge. A person decides at needs-human and tier-3 merges.
+    Looks like a mistake: workflow.md describes the milestone order otherwise
+    than the launcher runs it.
+    Corpus differences:
+    1. G2 card: another PR for the issue goes to needs-human, not returned.
+    ```
+
+    When nothing changed: `The loop documents match <ref>; nothing to update.`

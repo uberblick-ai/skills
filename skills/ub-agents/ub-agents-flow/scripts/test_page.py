@@ -43,6 +43,27 @@ class PageTests(unittest.TestCase):
             "g2 --> ready : prepared", "g2 --> ready : G2 prepared")
         self.assertIn("Issue phase: G2 is not in issue.flow", page.validate(self.data, self.flows))
 
+    def test_every_flow_plays_a_scenario(self):
+        self.flows["overview.flow"] = self.flows["overview.flow"].split("\nplay ")[0]
+        self.assertEqual(page.validate(self.data, self.flows),
+                         ["overview: overview.flow has no play scenario; play its most common path"])
+
+    def test_a_gate_only_in_a_play_caption_is_not_drawn(self):
+        self.flows["issue.flow"] = self.flows["issue.flow"].replace(
+            '"G2 Clear and in scope?"', '"Clear and in scope?"').replace(
+            'step g2 "Yes: prepared"', 'step g2 "G2 Yes: prepared"').replace(
+            'step g1 "Nothing holds it"', 'step g1 "G7 Nothing holds it"')
+        warnings = page.validate(self.data, self.flows)
+        self.assertIn("Issue phase: G2 is not in issue.flow", warnings)
+        self.assertIn("Issue phase: a play caption in issue.flow names G7, which is not one of its gates", warnings)
+        self.assertNotIn("Issue phase: issue.flow shows G7, which is not one of its gates", warnings)
+
+    def test_the_markdown_keeps_the_play_scenarios(self):
+        docs = page.documents(self.data)
+        pr = page.markdown(docs[2][1], docs[2][2], self.flows)
+        self.assertIn('play "Clean run"\n  step ready', pr)
+        self.assertLess(pr.index('play "One review round"'), pr.index("\n```\n"))
+
     def test_every_role_sits_in_one_phase_and_gates_count_from_one(self):
         for change in (lambda d: d["phases"][1]["roles"].remove("reviewer"),
                        lambda d: d["phases"][0]["roles"].append("reviewer"),
@@ -95,8 +116,9 @@ class PageTests(unittest.TestCase):
         self.assertIn("\n\nThe issue phase and the implementation and PR phase each have their own document."
                       "\n\n```ablauf\n", overview)
         self.assertIn("## The steps in detail\n\n- **Preparation.**", overview)
+        before_changelog = overview.split("## Changelog")[0]
         for absent in (":::card", "| ", "## Notes"):
-            self.assertNotIn(absent, overview)
+            self.assertNotIn(absent, before_changelog)
         self.assertIn("## Notes\n\n- `queue.milestones: order` At equal priority", issue)
         self.assertTrue(issue.startswith("# The loop in uberblick-ai/ub-agents: issue phase\n\n"
                                          "Details of **How the loop runs in uberblick-ai/ub-agents**. "))
@@ -119,7 +141,8 @@ class PageTests(unittest.TestCase):
                                     "continues": "Implementation and PR phase", "roles": ["integrator"],
                                     "gates": [merge, maintainer]})
         self.flows["pr.flow"] = self.flows["pr.flow"].replace("G4 Final", "Final")
-        self.flows["merge.flow"] = 'decision g4 tone=system "G4 Green Test on head?"\npanel p\n  strong "G5 A maintainer merges"\n'
+        self.flows["merge.flow"] = ('decision g4 tone=system "G4 Green Test on head?"\npanel p\n  strong "G5 A maintainer merges"\n'
+                                    'g4 --> p\n\nplay "A maintainer merges"\n  step g4\n  step p\n')
 
     def test_a_document_can_continue_another_ones_gate_numbers(self):
         self.split_merge_step()
@@ -137,6 +160,14 @@ class PageTests(unittest.TestCase):
             change(data)
             with self.assertRaises(ValueError):
                 page.validate(data)
+
+    def test_a_continued_document_can_repeat_the_launcher_gate(self):
+        """The merge step draws the launcher's G1 again; the numbers between it and its own gates are the PR phase's."""
+        self.split_merge_step()
+        self.data["phases"][2]["gates"].insert(0, copy.deepcopy(self.data["phases"][1]["gates"][0]))
+        self.flows["merge.flow"] = ('decision g1 tone=system "G1 Launcher: may it start?"\n'
+                                    + self.flows["merge.flow"].replace("g4 --> p", "g1 --> g4\ng4 --> p"))
+        self.assertEqual(page.validate(self.data, self.flows), [])
 
     def test_a_phase_section_comes_before_its_notes(self):
         self.data["phases"][1]["sections"] = [{"heading": "Dependabot pull requests", "text": "They enter at the integrator.",
@@ -160,6 +191,45 @@ class PageTests(unittest.TestCase):
         self.assertEqual(md.count(":::card\n"), 8)
         self.assertIn("## Implementation and PR phase", md)
         self.assertIn("### Notes", md)
+
+    def test_the_overview_ends_with_the_changelog(self):
+        """The last changes to the loop as a table: date, GitHub login, what changed with its pull request linked."""
+        changes = self.data["overview"]["changelog"]
+        changes[0]["open"] = True
+        _, title, blocks = page.documents(self.data)[0]
+        md = page.markdown(title, blocks, self.flows)
+        self.assertTrue(md.rstrip().endswith(
+            "| 2026-10-09 | uberblick-agent | Delivery reports use the published maintainer skill "
+            "([#409](https://github.com/uberblick-ai/ub-agents/pull/409)) |"))
+        self.assertIn("## Changelog\n\n| Date | Who | What |\n|---|---|---|\n| 2026-10-19 | bk-one | Pull requests "
+                      "with outside input wait for a maintainer's merge "
+                      "([#591](https://github.com/uberblick-ai/ub-agents/pull/591), open) |", md)
+        [(_, title, blocks)] = page.combined(self.data)
+        self.assertEqual(blocks[-2:], page.changelog(self.data))
+        del self.data["overview"]["changelog"]
+        self.assertEqual(page.changelog(self.data), [])
+
+    def test_the_page_shows_the_changelog_without_a_corpus(self):
+        html = page.render(page.documents(self.data), self.svgs, self.data["repository"])
+        self.assertIn("<h2>Changelog</h2>", html)
+        self.assertIn('<td>bk-one</td><td>Pull requests with outside input wait for a maintainer&#x27;s merge '
+                      '(<a href="https://github.com/uberblick-ai/ub-agents/pull/591" rel="noreferrer">#591</a>)</td>', html)
+
+    def test_the_changelog_keeps_five_changes_newest_first(self):
+        changes = self.data["overview"]["changelog"]
+        changes.append(dict(changes[-1], date="2026-10-01"))
+        self.assertIn("overview: changelog lists 6 changes; keep the last 5", page.validate(self.data, self.flows))
+        changes.reverse()
+        self.assertIn("overview: changelog must run newest first", page.validate(self.data, self.flows))
+        for bad in ({"date": "19 Oct"}, {"who": "@bk-one"}, {"who": "Ben Kubota"}, {"what": ""}, {"pr": "591"},
+                    {"open": True, "pr": None}):
+            data = copy.deepcopy(self.data)
+            entry = data["overview"]["changelog"][0]
+            entry.update(bad)
+            if entry.get("pr") is None:
+                entry.pop("pr")
+            with self.assertRaises(ValueError):
+                page.validate(data)
 
     def test_consecutive_list_items_form_one_list(self):
         self.data["overview"]["points"] = ["One.", "Two.", "Three.", "Four."]

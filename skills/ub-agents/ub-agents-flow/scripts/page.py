@@ -12,14 +12,18 @@ from pathlib import Path
 DECIDERS = {"launcher", "agent", "person"}
 GATE_ID = re.compile(r"^G\d+$")
 EDGE = re.compile(r"\s-\.?->\s")
+PLAY = re.compile(r"(?m)^play\b")
 SOURCE = re.compile(r"^([^\s:]+)(?::(\d+)(?:-(\d+))?)?$")
-# ablauf 0.2.0's light palette, forced when printing so a dark screen still prints on white.
+DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\[bot\])?$")
+CHANGES = 5  # the overview's changelog keeps the last five changes to the loop
+# ablauf 0.3.0's light palette, forced when printing so a dark screen still prints on white.
 LIGHT = {"bg": "#ffffff", "ink": "#17202c", "muted": "#5a6575", "line": "#d3d9e2", "band": "#e9eef5",
          "surface": "#ffffff", "neutral": "#59616c", "neutral-bg": "#e1e3e6", "agent": "#3e6563",
-         "agent-bg": "#e7eeed", "system": "#4f5d76", "system-bg": "#ebedf3", "rework": "#826954",
+         "agent-bg": "#e7eeed", "system": "#4f5d76", "system-bg": "#ebedf3", "rework": "#806752",
          "rework-bg": "#f3f0eb", "stop": "#815f5a", "stop-bg": "#ede6e5", "done": "#536e5a", "done-bg": "#e8ede9"}
 # Past these a document stops reading at a glance.
-BUDGET = {"summary": 60, "phase": 30, "point": 30, "does": 20, "rule": 30}
+BUDGET = {"summary": 60, "phase": 30, "point": 30, "does": 20, "rule": 30, "change": 25}
 
 
 def esc(value):
@@ -68,9 +72,48 @@ def gate_list(gates, where):
     return [int(g["id"][1:]) for g in gates]
 
 
+def changelog_warnings(changes):
+    """The overview's changelog: the last changes to the loop's config and instructions, newest first."""
+    if not isinstance(changes, list):
+        raise ValueError("overview: changelog must list the loop's last changes")
+    warnings = []
+    for n, change in enumerate(changes, 1):
+        where = f"overview: change {n}"
+        if not isinstance(change, dict):
+            raise ValueError(f"{where} must hold date, who and what")
+        if not DATE.match(str(change.get("date", ""))):
+            raise ValueError(f"{where}: date must be YYYY-MM-DD")
+        if not LOGIN.match(str(change.get("who", ""))):
+            raise ValueError(f"{where}: who must be the author's GitHub login, without @")
+        if words(text(change, "what", where)) > BUDGET["change"]:
+            warnings.append(f"{where}: what is over {BUDGET['change']} words")
+        pr = change.get("pr")
+        if pr is not None and (not isinstance(pr, int) or isinstance(pr, bool) or pr < 1):
+            raise ValueError(f"{where}: pr must be the pull request's number")
+        if "open" in change and (not isinstance(change["open"], bool) or pr is None):
+            raise ValueError(f"{where}: open marks an open pull request, so it needs pr")
+    if len(changes) > CHANGES:
+        warnings.append(f"overview: changelog lists {len(changes)} changes; keep the last {CHANGES}")
+    if [c["date"] for c in changes] != sorted((c["date"] for c in changes), reverse=True):
+        warnings.append("overview: changelog must run newest first")
+    return warnings
+
+
+def changelog(data):
+    """The changelog table: Date, Who (GitHub login), What with its pull request linked."""
+    rows = [["Date", "Who", "What"]]
+    for change in data["overview"].get("changelog", []):
+        what = change["what"]
+        if change.get("pr"):
+            url = f"https://github.com/{data['repository']}/pull/{change['pr']}"
+            what += f" ([#{change['pr']}]({url}){', open' if change.get('open') else ''})"
+        rows.append([change["date"], change["who"], what])
+    return [("h2", "Changelog"), ("table", rows)] if len(rows) > 1 else []
+
+
 def check_numbering(phases):
     """Each document counts from G1 unless it continues another; a number one document skips belongs to a document
-    that continues it, and a gate two documents share keeps its name."""
+    that continues it or that it continues, and a gate two documents share keeps its name."""
     by_name = {p["name"]: p for p in phases}
     for phase in phases:
         numbers = [int(g["id"][1:]) for g in phase["gates"]]
@@ -86,6 +129,8 @@ def check_numbering(phases):
                 if gate["id"] in earlier and earlier[gate["id"]] != gate["name"]:
                     raise ValueError(f"{phase['name']} {gate['id']}: a gate two documents share keeps its name")
         later = {int(g["id"][1:]) for p in followers for g in p["gates"]}
+        if phase.get("continues") in by_name:  # a continued document repeating G1 skips the earlier one's gates
+            later |= {int(g["id"][1:]) for g in by_name[phase["continues"]]["gates"]}
         skipped = [n for n in range(numbers[0], numbers[-1]) if n not in numbers and n not in later]
         if skipped:
             raise ValueError(f"{phase['name']}: G{skipped[0]} is in no document; number gates without gaps")
@@ -153,6 +198,7 @@ def validate(data, flows=None):
         raise ValueError("overview: points must say what each phase does in a sentence")
     warnings += [f"overview: point {n} is over {BUDGET['point']} words"
                  for n, point in enumerate(points, 1) if words(point) > BUDGET["point"]]
+    warnings += changelog_warnings(overview.get("changelog", []))
     roles = data.get("roles")
     if not isinstance(roles, list) or not roles:
         raise ValueError("roles must list every agent in ub-agents.yaml")
@@ -212,15 +258,24 @@ def validate(data, flows=None):
                          + "; ".join(filter(None, [missing and f"missing {', '.join(missing)}",
                                                    twice and f"twice {', '.join(twice)}"])))
     if flows is not None:
+        for name, flow in [("overview", overview["flow"])] + [(p["name"], p["flow"]) for p in phases]:
+            if not PLAY.search(flows.get(flow, "")):
+                warnings.append(f"{name}: {flow} has no play scenario; play its most common path")
         for phase in phases:
             # A gate is drawn as a node; a number in an edge label alone is easy to miss.
             source = flows.get(phase["flow"], "")
-            shown = {gid for line in source.splitlines() if not EDGE.search(line)
+            found = PLAY.search(source)
+            # Play sections close a flow; their captions may name a gate but do not draw it.
+            drawing, plays = (source[:found.start()], source[found.start():]) if found else (source, "")
+            shown = {gid for line in drawing.splitlines() if not EDGE.search(line)
                      for gid in re.findall(r"\bG\d+\b", line)}
             ids = [g["id"] for g in phase["gates"]]
             warnings += [f"{phase['name']}: {gid} is not in {phase['flow']}" for gid in ids if gid not in shown]
             warnings += [f"{phase['name']}: {phase['flow']} shows {gid}, which is not one of its gates"
                          for gid in sorted(shown - set(ids))]
+            named = set(re.findall(r"\bG\d+\b", plays))
+            warnings += [f"{phase['name']}: a play caption in {phase['flow']} names {gid}, which is not one of its "
+                         "gates" for gid in sorted(named - set(ids))]
     return warnings
 
 
@@ -255,7 +310,7 @@ def documents(data):
     overview, phase_titles = titles(data)
     docs = [("overview", overview, [("p", data["overview"]["summary"]), ("p", documents_line(data["phases"])),
                                     ("ablauf", data["overview"]["flow"]), ("h2", "The steps in detail")]
-             + [("li", point) for point in data["overview"]["points"]])]
+             + [("li", point) for point in data["overview"]["points"]] + changelog(data))]
     for phase in data["phases"]:
         table = [["Agent", "Starts on", "Does"]]
         table += [[f"**{name}** {roles[name].get('kind', 'any')}", ", ".join(f"`{t}`" for t in roles[name]["triggers"]),
@@ -279,9 +334,11 @@ def notes(obj):
 def combined(data):
     """All documents as one: the overview, then each phase under its own heading."""
     (_, title, out), *phases = documents(data)
+    log = changelog(data)
+    out = out[:len(out) - len(log)]
     for (_, _, blocks), phase in zip(phases, data["phases"]):
         out = out + [("phase", phase["name"])] + [("h3", v) if k == "h2" else (k, v) for k, v in blocks]
-    return [("flow", title, out)]
+    return [("flow", title, out + log)]
 
 
 def markdown(title, blocks, flows):

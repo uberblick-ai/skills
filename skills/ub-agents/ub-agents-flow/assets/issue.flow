@@ -30,3 +30,22 @@ legend
   decision tone=system "gate, numbered as in the cards"
   pill tone=done "GitHub label"
   panel tone=stop "a person decides"
+
+play "Prepared"
+  step created
+  step needs-preparation actor="A maintainer" "Adds the label"
+  step g1 "Nothing holds it"
+  step issue-preparer actor="issue-preparer" "Writes the behavior and acceptance criteria"
+  step g2 "Yes: prepared"
+  step ready
+  step delivery
+
+play "A maintainer answers"
+  step g2 "No: the intent is unclear"
+  step human 2.4s actor="A maintainer" "Answers on the issue, removes needs-human"
+  step needs-preparation
+  step g1
+  step issue-preparer actor="issue-preparer" "Prepares it with the answer"
+  step g2 "Yes: prepared"
+  step ready
+  step delivery
