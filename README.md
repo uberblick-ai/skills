@@ -54,6 +54,12 @@ Repository maintenance, with no release or delivery-loop requirement. Plugin: `m
 - **[backlog-grooming](skills/maintenance/backlog-grooming/SKILL.md)**: Review all issues, a milestone or a project against current deliveries and available product intent. Challenge duplication and excess scope, resolve decisions in chat, and produce the “Less work. More value.” report with estimates, blockers, milestone load and optional loop eligibility, grouped by milestone when most issues have one.
 - **[ci-health](skills/maintenance/ci-health/SKILL.md)**: Track CI on main from GitHub Actions for any repository: the median wall time a push waits, with its spread and P95, the number of tests, optionally coverage and the test-to-code ratio, the changes that moved CI time up or down, and the top three actions that would cut the wait. Needs only `python3` and an authenticated `gh`; with the Uberblick MCP tools or the `ub` command it stores each day in the repository's own "CI Health Report" document with charts, recommended actions and an incident changelog.
 
+### [MCP](skills/mcp/README.md)
+
+Skills for MCP servers. Plugin: `mcp`.
+
+- **[mcp-audit](skills/mcp/mcp-audit/SKILL.md)**: Review an MCP server the way PageSpeed Insights reviews a web page: five scores (protocol, agent guidance, error recovery, context cost, safety), context vitals such as tool list size, agent trials that show whether a fresh agent finds the help it needs, and ranked suggestions, in one self-contained HTML report. Works from the outside on any stdio or Streamable HTTP server, read-only unless you give it a sandbox. Needs `python3`; trials need Claude Code.
+
 ## Contributing
 
 Read [AGENTS.md](AGENTS.md) for the layout and the checks a change must pass.
