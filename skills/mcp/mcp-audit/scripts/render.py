@@ -284,7 +284,7 @@ INSTRUCTIONS_SHOWN = 2048  # bytes of startup instructions Claude Code shows the
 # Verbs common across MCP servers (files, issues, mail, chat, cloud, databases). A tool's verb is the first word of
 # its name found in these sets, so a server prefix ("github_get_label") or a noun that is also a verb ("label") does not mislead.
 READ_VERBS = set("""get list search read find fetch query describe show export lookup view count status check inspect preview
-    download browse explain diff compare validate summarize summarise watch poll tail whoami ping""".split())
+    download browse explain diff compare validate summarize summarise watch poll tail whoami ping render""".split())
 WRITE_VERBS = set("""create update delete remove set edit insert write archive restore pin unpin move send post add annotate link
     unlink upload merge close reopen toggle trigger run execute approve reject assign unassign deploy publish invite grant revoke
     transfer cancel rename import apply commit push reply forward label tag schedule book pay charge refund enable disable install
