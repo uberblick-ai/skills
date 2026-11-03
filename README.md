@@ -58,7 +58,7 @@ Repository maintenance, with no release or delivery-loop requirement. Plugin: `m
 
 Skills for MCP servers. Plugin: `mcp`.
 
-- **[mcp-insights](skills/mcp/mcp-insights/SKILL.md)**: Review an MCP server the way PageSpeed Insights reviews a web page: five scores (protocol, agent guidance, error recovery, context cost, safety), context vitals such as tool list size, agent trials that show whether a fresh agent finds the help it needs, and ranked suggestions, in one self-contained HTML report. Works from the outside on any stdio or Streamable HTTP server, read-only unless you give it a sandbox. Needs `python3`; trials need Claude Code.
+- **[mcp-audit](skills/mcp/mcp-audit/SKILL.md)**: Review an MCP server the way PageSpeed Insights reviews a web page: five scores (protocol, agent guidance, error recovery, context cost, safety), context vitals such as tool list size, agent trials that show whether a fresh agent finds the help it needs, and ranked suggestions, in one self-contained HTML report. Works from the outside on any stdio or Streamable HTTP server, read-only unless you give it a sandbox. Needs `python3`; trials need Claude Code.
 
 ## Contributing
 

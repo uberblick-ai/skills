@@ -297,8 +297,8 @@ def run(args) -> int:
         if trial.get("verify"):
             # Graded by the server's own parser or reads, not judged from the transcript. The check gets the trial's
             # id and transcript, so one script can grade every attempt or read the agent's answer.
-            venv = dict(env, MCPI_TRIAL_ID=trial["id"], MCPI_ATTEMPT=str(trial["attempt"]), MCPI_RUN_DIR=str(out.resolve()),
-                        MCPI_TRANSCRIPT=str((tdir / f"{trial['id']}.jsonl").resolve()))
+            venv = dict(env, MCPA_TRIAL_ID=trial["id"], MCPA_ATTEMPT=str(trial["attempt"]), MCPA_RUN_DIR=str(out.resolve()),
+                        MCPA_TRANSCRIPT=str((tdir / f"{trial['id']}.jsonl").resolve()))
             try:
                 v = subprocess.run(trial["verify"], shell=True, capture_output=True, text=True, timeout=120, env=venv)
                 summary["verify"] = {"command": trial["verify"], "ok": v.returncode == 0,

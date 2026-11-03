@@ -188,9 +188,9 @@ appears in the arguments), for example `ReadMcpResourceTool:mise://tasks` or
 Use names and data that exist in the server's workspace or sandbox.
 `repeat` runs the trial that many times (ids become `t3-query#1` and so
 on), and `verify` is a shell command run after each attempt whose exit code
-grades it. It gets `MCPI_TRIAL_ID`, `MCPI_ATTEMPT`, `MCPI_TRANSCRIPT` (the
+grades it. It gets `MCPA_TRIAL_ID`, `MCPA_ATTEMPT`, `MCPA_TRANSCRIPT` (the
 attempt's transcript, whose last line holds the agent's answer) and
-`MCPI_RUN_DIR`, so one script can grade every attempt. With writes allowed,
+`MCPA_RUN_DIR`, so one script can grade every attempt. With writes allowed,
 pair it with `--before-each` so every attempt starts from the same sandbox.
 
 An error is a call that failed (`isError`) or a result that reports a
