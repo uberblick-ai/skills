@@ -1,7 +1,7 @@
 {
   "question": "What should we fix first in our MCP server?",
   "short": "Review an MCP server from the outside, the way PageSpeed reviews a page: five scores, what its tools cost an agent's context, how fresh agents fare with it, and the fixes that would help most.",
-  "lede": "An agent meets an MCP server through its tool list, its help and the errors it gets back. The skill calls the server's tools and judges how they behave, above all when something goes wrong, without reading its code. Every score says how much of its category was checked and shows its evidence, so a quick run is not mistaken for a full review.",
+  "lede": "An agent meets an MCP server through its tool list, its help and the errors it gets back. The skill calls the server's tools and judges how they behave, above all when something goes wrong, without reading its code. Every score says how much of its category was checked and how much of it is judged, and shows its evidence: the scores are evidence-backed assessments, not objective measurements, and a repeat review may judge differently. It checks usability and behaviour, not security: authentication, authorization, tenant isolation and prompt injection are not tested.",
   "asks": [
     "How good is our MCP server?",
     "Why do agents struggle with this MCP?",
@@ -9,9 +9,9 @@
     "What should we fix first in our MCP server?"
   ],
   "steps": [
-    "Starts the server from its stdio command or reaches its HTTP URL. Against production, it first lists what the server offers and calls nothing.",
-    "Reads the tool list, resources and prompts, sends safe error probes and runs planned read calls. With a sandbox, it also sends deliberately wrong writes and reads back what was stored.",
-    "Gives fresh Claude Code agents a task with only the server loaded, one for each open question, to see whether they find the help they need and recover from errors.",
+    "Starts the server from its stdio command or reaches its HTTP URL. On a server with real data, it first lists what the server offers and calls nothing, then reads only what you allow: resources you name are skipped and large answers are cut.",
+    "Reads the tool list, resources and prompts, then runs only the read calls the reviewer confirmed: a server's own read-only annotation never authorizes a call. With a sandbox, it also sends deliberately wrong writes and reads back what was stored.",
+    "Gives fresh Claude Code agents a task with only the server loaded, one for each open question, to see whether they find the help they need and recover from errors. The report names the client version and the models.",
     "Judges descriptions, help topics, errors and wasted text against a written rubric, with the evidence for every score.",
     "Writes one HTML report: five scores with how much of each was checked, context vitals, where the tool list's tokens go, the trials, and suggestions ranked by their effect, those that lift a critical cap first."
   ],
@@ -22,12 +22,13 @@
     ["Error recovery", "whether a failed call tells the agent how to fix it, and whether a write ever stores something other than what was sent"],
     ["Context cost", "what the tool list costs on every turn, the largest reads, and how much of the text is waste"],
     ["Safety and trust", "whether reads only read, and whether destructive tools need a target and say what is lost"],
-    ["Trials", "what fresh agents did with the server: help read when needed, tasks done, written rules followed, errors recovered"]
+    ["Trials", "what fresh agents did with the server: help read when needed, tasks done, written rules followed, errors recovered"],
+    ["Not checked", "security: authentication, authorization, tenant isolation, prompt-injection resistance. Use a security review for those."]
   ],
   "needs": [
     ["Needs", "<code>python3</code> (standard library only) and the server's stdio command, or its URL and any auth header."],
     ["Optional", "a sandbox for write probes, and Claude Code for agent trials."],
-    ["Leaves", "<code>report.html</code> and <code>report.json</code> in a scratch directory. Secrets the server returns are redacted before they reach disk. Scores are for your team; the skill publishes none."]
+    ["Leaves", "<code>probe.json</code>, transcripts, trial sessions and the report in a scratch directory, with recognisable secrets and email addresses redacted; <code>--no-transcripts</code> leaves only <code>probe.json</code> and the report. Claude Code's unredacted copies of oversized results are deleted after the trials. Scores are for your team; the skill publishes none."]
   ],
   "shots": [
     {

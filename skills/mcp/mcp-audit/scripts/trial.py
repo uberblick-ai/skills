@@ -235,11 +235,17 @@ def run(args) -> int:
     if not claude:
         raise probe.ProbeError(f"{args.claude} not found; agent trials need Claude Code on PATH")
     server = args.server
-    reads = [t["name"] for t in record.get("tools") or [] if (t.get("annotations") or {}).get("readOnlyHint") is True]
-    reads += [t for t in plan.get("confirmed_read_only") or []]
+    # readOnlyHint is the server's claim, not a permission: the agent may call only the reads the reviewer confirmed,
+    # those that ran as confirmed reads in probe.py call and those listed in the plan.
+    reads = list(dict.fromkeys([c["tool"] for c in record.get("calls") or [] if "bytes" in c]
+                               + list(plan.get("confirmed_read_only") or [])))
     allowed = [f"mcp__{server}__{n}" for n in reads] + CLIENT_TOOLS
     if args.allow_writes:
         allowed = [f"mcp__{server}"] + CLIENT_TOOLS
+    else:
+        unconfirmed = [t["name"] for t in record.get("tools") or [] if t.get("name") not in reads]
+        print(f"the agent may call {len(reads)} confirmed reads ({', '.join(reads) or 'none'}); blocked: "
+              f"{', '.join(unconfirmed) or 'none'}. Add a read to confirmed_read_only in the plan to allow it.", file=sys.stderr)
     help_spec = plan.get("help") or {}
     if "tools" not in help_spec:
         guessed = [t["name"] for t in record.get("tools") or [] if any(fnmatch.fnmatch(t.get("name") or "", g) for g in DEFAULT_HELP_TOOLS)]
@@ -326,22 +332,35 @@ def run(args) -> int:
                         "runs": sorted(runs, key=lambda r: r["id"])}
     probe.write_record(out, record)
     shutil.rmtree(work, ignore_errors=True)
-    client_copies(runs)
+    client_copies(runs, keep=args.keep_client_copies)
     return 0
 
 
-def client_copies(runs: list[dict]) -> None:
-    """Claude Code keeps results over its output limit in full, outside the run directory and unredacted: say where."""
+def client_copies(runs: list[dict], keep: bool = False) -> list[str]:
+    """Claude Code keeps results over its output limit in full, unredacted, under ~/.claude/projects/. Delete the
+    project folders of this run's own sessions (their working directory was the run's mcp-trial- temp folder, so
+    nothing else lives there); with --keep-client-copies, only say where they are. Returns what is left behind."""
+    projects = (Path.home() / ".claude" / "projects").resolve()
     dirs = set()
     for r in runs:
         for o in r.get("oversized") or []:
             p = Path(str(o.get("saved_to") or ""))
-            # .../projects/<cwd slug>/<session>/tool-results/<file>
+            # .../projects/<cwd slug>/<session>/tool-results/<file>: keep .../projects/<cwd slug>
             if "tool-results" in p.parts[2:]:
-                dirs.add(str(Path(*p.parts[:p.parts.index("tool-results") - 1])))
-    if dirs:
+                dirs.add(Path(*p.parts[:p.parts.index("tool-results") - 1]))
+    left = []
+    for d in sorted(dirs):
+        ours = d.parent.resolve() == projects and d.name.startswith("-") and "mcp-trial-" in d.name
+        if ours and not keep:
+            shutil.rmtree(d, ignore_errors=True)
+        if d.exists():
+            left.append(str(d))
+    if dirs and not left:
+        print(f"deleted {len(dirs)} unredacted copies of oversized results that Claude Code saved for these trials", file=sys.stderr)
+    if left:
         print("note: Claude Code saved results over its output limit in full, unredacted, outside the run directory: "
-              + ", ".join(sorted(dirs)) + ". Delete them once the review is done.", file=sys.stderr)
+              + ", ".join(left) + ". Delete them once the review is done.", file=sys.stderr)
+    return left
 
 
 def main(argv=None) -> int:
@@ -360,6 +379,8 @@ def main(argv=None) -> int:
     p.add_argument("--max-budget", type=float, default=1.0, help="USD cap per trial (default 1.0)")
     p.add_argument("--timeout", type=int, default=600, help="seconds per trial (default 600)")
     p.add_argument("--claude", default="claude", help="Claude Code executable")
+    p.add_argument("--keep-client-copies", action="store_true",
+                   help="keep the unredacted copies Claude Code saves of results over its output limit (deleted by default)")
     r = sub.add_parser("summarize", help="rebuild summaries from DIR/trials/*.jsonl without running")
     r.add_argument("--server", required=True)
     r.add_argument("--plan", required=True)

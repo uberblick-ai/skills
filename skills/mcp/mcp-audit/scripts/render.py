@@ -20,7 +20,7 @@ import sys
 import webbrowser
 from pathlib import Path
 
-RENDER_VERSION = "0.3"
+RENDER_VERSION = "0.4"
 CATALOG_VERSION = "0.3"
 HERE = Path(__file__).resolve().parent
 TEMPLATE = HERE.parent / "assets" / "report.html"
@@ -284,7 +284,7 @@ INSTRUCTIONS_SHOWN = 2048  # bytes of startup instructions Claude Code shows the
 # Verbs common across MCP servers (files, issues, mail, chat, cloud, databases). A tool's verb is the first word of
 # its name found in these sets, so a server prefix ("github_get_label") or a noun that is also a verb ("label") does not mislead.
 READ_VERBS = set("""get list search read find fetch query describe show export lookup view count status check inspect preview
-    download browse explain diff compare validate summarize summarise watch poll tail whoami ping""".split())
+    download browse explain diff compare validate summarize summarise watch poll tail whoami ping render""".split())
 WRITE_VERBS = set("""create update delete remove set edit insert write archive restore pin unpin move send post add annotate link
     unlink upload merge close reopen toggle trigger run execute approve reject assign unassign deploy publish invite grant revoke
     transfer cancel rename import apply commit push reply forward label tag schedule book pay charge refund enable disable install
@@ -745,6 +745,9 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
     for x in topics:
         # Probes keep the text; without it, assume the help average of 3 bytes per token.
         x["tokens"] = estimate_tokens(x["text"]) if x.get("text") else round(x["text_bytes"] / 3)
+        if x.get("truncated") and x.get("text"):
+            # Only the head was kept: scale its estimate to the size measured on the whole answer.
+            x["tokens"] = round(x["tokens"] * x["text_bytes"] / max(1, len(x["text"].encode("utf-8"))))
     def topic_waste(x):
         return (waste.get(f"topic:{x['uri']}") or {}).get("tokens", 0)
     m["topics"] = [{"uri": x["uri"], "bytes": x["text_bytes"], "tokens": x["tokens"], "waste": topic_waste(x)} for x in topics]
@@ -1040,7 +1043,7 @@ def compute(probe: dict, findings: dict | None = None) -> tuple[dict, dict]:
             res("E03", 0, na=True)
     else:
         for code in ("E01", "E02", "E03"):
-            res(code, 0, untested=True, note="no read-only tool to probe with invalid arguments")
+            res(code, 0, untested=True, note="no confirmed read to probe with invalid arguments: run probe.py call")
     messages = [((x.get("response") or {}).get("message") or "") for x in inv]
     messages += [ut.get("message") or "", um.get("message") or ""]
     traces = [msg for msg in messages if re.search(r"\n\s+at .+:\d+:\d+|Traceback \(most recent call last\)", msg)]
@@ -1399,7 +1402,9 @@ def category_score(key: str, results: dict) -> dict:
               and (res["score"] < 0.1 or any(it.get("score") == 0 for it in res.get("items") or []))]
     if capped:
         score = min(score, 49)
-    out.update(score=score, capped_by=capped, provisional=coverage < PROVISIONAL)
+    # How much of the score is the reviewer's judgement rather than a measurement: another reviewer may judge it differently.
+    judged_w = sum(row[2] for row, _ in applicable if row[3] in ("judged", "waste"))
+    out.update(score=score, capped_by=capped, provisional=coverage < PROVISIONAL, judged_share=round(judged_w / scored_w, 2))
     return out
 
 
@@ -1695,6 +1700,9 @@ def render_html(report: dict) -> str:
                "all audits run" if c.get("coverage", 0) >= 0.995 else f'{round(c.get("coverage", 0) * 100)}% of audits run')
         if c["score"] is not None and samples_in(key, results):
             sub += " \u00b7 sampled"
+        if c["score"] is not None:
+            js = c.get("judged_share") or 0
+            sub += " \u00b7 " + ("measured" if js == 0 else "judged" if js == 1 else f"{round(js * 100)}% judged")
         gauges.append(f'<a class="gauge-link{" provisional" if c.get("provisional") else ""}" href="#{key}">{gauge_svg(c["score"])}'
                       f'<span class="gauge-name">{esc(name)}</span><span class="gauge-sub">{esc(sub)}</span>{delta}</a>')
 
@@ -1741,7 +1749,8 @@ def render_html(report: dict) -> str:
     cat_names = {k: n for k, n, _ in CATEGORIES}
     fixes = []
     for i, rec in enumerate(report["recommendations"], 1):
-        effects = [f'<span class="pill cat-{esc(k)}">+{v:g} {esc(cat_names.get(k, k))}</span>'
+        effects = [f'<span class="pill cat-{esc(k)}" title="projected: the category re-scored as if the fix were complete">'
+                   f'+{v:g} {esc(cat_names.get(k, k))}</span>'
                    for k, v in sorted((rec.get("effects") or {}).items(), key=lambda kv: -kv[1])]
         if rec.get("lifts_cap_with"):
             ranks = [str(j) for j, other in enumerate(report["recommendations"], 1) if other["title"] in rec["lifts_cap_with"]]
@@ -1846,7 +1855,8 @@ def render_html(report: dict) -> str:
 
     badges = ["seen through a client" if meta.get("via") else meta["transport"], meta.get("review_mode") or ("reviewed" if meta.get("judged") else "automatic checks only")]
     if meta.get("trial_count"):
-        badges.append(f'{meta["trial_count"]} agent trials')
+        badges.append(f'{meta["trial_count"]} agent trials in {meta.get("trial_client") or "Claude Code"}'
+                      + (f' with {", ".join(meta.get("trial_models") or [])}' if meta.get("trial_models") else ""))
     if meta.get("calls"):
         badges.append(f'{meta["calls"]} read call{"" if meta["calls"] == 1 else "s"}')
     template = TEMPLATE.read_text(encoding="utf-8")
@@ -1861,16 +1871,17 @@ def render_html(report: dict) -> str:
         "DATE": esc(pretty_date(meta["collected_at"])),
         "GAUGES": "".join(gauges),
         "VITALS": "".join(vitals),
-        "TRIALS": trials_html(report.get("trials"), results),
+        "TRIALS": trials_html(report.get("trials"), results, report.get("baseline_trials") or {}),
         "FIXES": "".join(fixes) or '<p class="empty">Nothing to suggest above the noise.</p>',
-        "FIXES_LEAD": esc("Ranked by expected effect on the scores, those that lift a cap first; the rest fold below the first five. "
+        "FIXES_LEAD": esc("Ranked by projected effect on the scores, those that lift a cap first; the rest fold below the first five. "
                           "A fix in a category capped by another audit shows its gain after the fix that lifts the cap. "
                           "Each gain is the category re-scored as if the audits the suggestion names passed, or, for a size fix "
-                          "with a stated saving, as if the text were that much smaller: what a complete fix would earn, not a forecast. "
+                          "with a stated saving, as if the text were that much smaller: what a complete fix would earn, not a forecast "
+                          "and not a measurement. To measure a fix, run the same trials on the branch and render it with --baseline. "
                           "They describe what an agent saw and what it should see instead, judged from the outside; "
                           "finding the cause and the change in code is the maintainer's part."),
         "TREEMAP": context_html(m.get("tools") or []),
-        "TREEMAP_NOTE": esc(f"{fmt_tokens(m.get('tool_list_model_tokens'))} reach the model (name, title, description and input schema of every tool"
+        "TREEMAP_NOTE": esc(f"About {fmt_tokens(m.get('tool_list_model_tokens'))} reach the model, estimated from the text (name, title, description and input schema of every tool"
                             + ("), as the client shows them; the server's own tools/list was not visible." if meta.get("via") else
                                f"). The full tools/list is {fmt_tokens(m.get('tool_list_wire_tokens'))}; output schemas and annotations stay with the client.")
                             + " Schema structure is the JSON around the prose: property names, types, enums and nesting. Long regex patterns are "
@@ -1958,6 +1969,28 @@ def audit_group(title, rows, by_code, open_=False, folded=False, hint="") -> str
     return f'<div class="group">{head}{body}</div>'
 
 
+def trial_client(probe: dict) -> str | None:
+    """The client and its version the trials ran in, e.g. "Claude Code 2.1.3"."""
+    clients = sorted({str(r.get("client")) for r in (probe.get("trials") or {}).get("runs") or [] if r.get("client")})
+    return ", ".join(c.replace("claude-code", "Claude Code") for c in clients) or None
+
+
+def trial_group(r: dict) -> str:
+    return (r.get("base_id") or r["id"]).split("@")[0].split("#")[0]
+
+
+def trial_tally(runs: list[dict]) -> dict:
+    """{trial: {model: (done, counted)}} over judged runs: the measured side of a baseline comparison."""
+    out: dict = {}
+    for r in runs or []:
+        if r.get("invalid") or not r.get("outcome") or r["outcome"] in UNCOUNTED_OUTCOMES:
+            continue
+        m_ = str(r.get("model") or "?")
+        done, n = out.setdefault(trial_group(r), {}).get(m_, (0, 0))
+        out[trial_group(r)][m_] = (done + (r["outcome"] == "done"), n + 1)
+    return out
+
+
 def trials_report(probe: dict, findings: dict) -> dict | None:
     t = probe.get("trials")
     if not t:
@@ -2042,12 +2075,13 @@ def short_command(cmd: str) -> str:
     return re.sub(r"(?<![\w.])/(?:[^\s/]+/)+([^\s/]+)", r"\1", cmd)
 
 
-def trials_html(trials: dict | None, results: dict) -> str:
+def trials_html(trials: dict | None, results: dict, base: dict | None = None) -> str:
     if not trials:
         return ('<p class="section-lead">Not run. <code>scripts/trial.py</code> gives a fresh agent a task with only this server '
                 'loaded and records what it does, so Guidance here rests on the text alone.</p>')
     runs = [r for r in trials.get("runs") or [] if not r.get("invalid")]
-    models = sorted({str(r.get("model") or "?").replace("claude-", "") for r in runs})
+    models = sorted({str(r.get("model") or "?") for r in runs})
+    client = trial_client({"trials": trials}) or "Claude Code"
     stats = []
     for code, label in (("G17", "Help read when needed"), ("G18", "Plain tasks without help"),
                         ("G19", "Runs done"), ("G20", "Written rules followed"), ("E13", "Errors recovered")):
@@ -2141,6 +2175,11 @@ def trials_html(trials: dict | None, results: dict) -> str:
                 done_, n_ = tally.get(m_, (0, 0))
                 tally[m_] = (done_ + (r["outcome"] == "done"), n_ + 1)
         rate = " \u00b7 ".join(f"{m_}: {d} of {n} done" for m_, (d, n) in sorted(tally.items()) if n > 1)
+        was = (base or {}).get(gid) or {}
+        if was:
+            # Measured, not projected: the same trial on the baseline, by model.
+            rate = (rate + " \u00b7 " if rate else "") + "baseline " + ", ".join(
+                f"{str(m_).replace('claude-', '')}: {d} of {n}" for m_, (d, n) in sorted(was.items()))
         cards.append(f'<article class="trial"><header><span class="trial-id">{esc(gid)}</span>'
                      f'<h3>{esc(first.get("question") or first.get("task"))}</h3></header>'
                      f'<p class="trial-task">Task: {esc(first.get("task"))}</p>'
@@ -2153,8 +2192,10 @@ def trials_html(trials: dict | None, results: dict) -> str:
             "Trials with a \u201ck of n\u201d line ran several times per model; the others ran once, so they show what an agent can do, "
             "not how often it succeeds. ")
     lead = (f'What a fresh agent did with only this server loaded: one trial per question the text alone cannot answer. '
-            f'Claude Code in print mode ({esc(", ".join(models))}); writes {esc(trials.get("writes", "blocked"))}. '
-            + esc(once) + "The tasks were the reviewer\u2019s choice, so they say nothing about tasks that were not tried.")
+            f'Client: <b>{esc(client)}</b> in print mode. Models: <b>{esc(", ".join(models))}</b>. '
+            f'Writes {esc(trials.get("writes", "blocked"))}. '
+            + esc(once) + "The tasks were the reviewer\u2019s choice, so they say nothing about tasks that were not tried, "
+            "and another client or model may do better or worse with the same server.")
     legend = ('<div class="tm-legend steps-legend"><span><i class="k help"></i>help read</span><span><i class="k read"></i>other call</span>'
               '<span><i class="k write"></i>the task\u2019s main call</span><span><i class="k denied"></i>blocked write</span>'
               '<span><i class="k err"></i>error</span></div>')
@@ -2254,11 +2295,21 @@ def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) ->
     init = probe.get("initialize") or {}
     info = init.get("serverInfo") or {}
     target = probe.get("target") or {}
-    baseline = {}
+    baseline, baseline_trials = {}, {}
     if baseline_path and baseline_path.exists():
         old = json.loads(baseline_path.read_text(encoding="utf-8"))
         baseline = {k: v.get("score") for k, v in (old.get("categories") or {}).items()}
         warnings += baseline_changes(old, info, metrics)
+        baseline_trials = trial_tally(((old.get("trials") or {}).get("runs")) or [])
+    skipped = [x for x in probe.get("resource_reads") or [] if x.get("skipped")]
+    if skipped:
+        warnings.append(f"{len(skipped)} resources listed but not read ({', '.join(sorted({x['skipped'] for x in skipped}))}): "
+                        "audits that read resources leave them out.")
+    cut = [x.get("uri") or x.get("name") or x.get("tool") for k in ("resource_reads", "prompt_gets", "calls")
+           for x in probe.get(k) or [] if x.get("truncated")]
+    if cut:
+        warnings.append(f"Kept only the head of {len(cut)} large answers ({', '.join(map(str, cut[:5]))}): sizes count the whole "
+                        "answer, judgements see the head.")
     warnings += metrics.get("waste_problems") or []
     warnings += [f"lead: {x}" for x in metrics.get("leads") or []]
     # A released version names the code; a placeholder such as 0.0.0 does not.
@@ -2302,6 +2353,10 @@ def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) ->
             "judged": bool(n_judged), "review_mode": review_mode, "trial_count": n_trials,
             "token_estimator": TOKEN_ESTIMATOR,
             "calls": len([c for c in probe.get("calls") or [] if "bytes" in c]),
+            "trial_client": trial_client(probe),
+            "trial_models": sorted({str(r.get("model")) for r in (probe.get("trials") or {}).get("runs") or []
+                                    if r.get("model") and not r.get("invalid")}),
+            "skipped_reads": [x["uri"] for x in probe.get("resource_reads") or [] if x.get("skipped")],
         },
         "categories": cats,
         "audits": results,
@@ -2312,6 +2367,7 @@ def build(dir_: Path, findings_path: Path | None, baseline_path: Path | None) ->
         "baseline": baseline,
         "warnings": warnings,
         "trials": trials_report(probe, findings),
+        "baseline_trials": baseline_trials,
     }
 
 
