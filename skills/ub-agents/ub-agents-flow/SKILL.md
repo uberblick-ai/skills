@@ -167,7 +167,9 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    with no edge from the step before it is a diagnostic too: the scenario
    follows the drawing's edges, so fix the step, or the drawing when it
    misses a route items take. Then look at each drawing
-   (rasterize the `.svg` at its full width and read the image), since a clean
+   (rasterize the `.svg` at its full width and read the image; macOS Quick
+   Look crops to a square, so use a headless browser sized to the `viewBox`),
+   since a clean
    render can still read badly: the passing path runs straight down, a
    side route that rejoins it runs straight across, and every label reads.
 
@@ -199,7 +201,8 @@ repository the loop runs on, `DIR` a scratch directory outside the repository.
    bold, code or a link, replace the block (`insert_block` the new one, then
    `delete_block` the old). A block that carries comments is never replaced:
    edit only its outdated words. Update a document's description when it
-   names something that changed. Check every edited block with
+   names something that changed, in at most 300 characters (the corpus
+   refuses longer ones). Check every edited block with
    `export_markdown` afterwards, and name to the maintainer any whose
    formatting you could not keep. Otherwise
    create them: the phase documents first, then the overview, with each

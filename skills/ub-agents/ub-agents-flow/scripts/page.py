@@ -71,7 +71,7 @@ def gate_list(gates, where):
 
 def check_numbering(phases):
     """Each document counts from G1 unless it continues another; a number one document skips belongs to a document
-    that continues it, and a gate two documents share keeps its name."""
+    that continues it or that it continues, and a gate two documents share keeps its name."""
     by_name = {p["name"]: p for p in phases}
     for phase in phases:
         numbers = [int(g["id"][1:]) for g in phase["gates"]]
@@ -87,6 +87,8 @@ def check_numbering(phases):
                 if gate["id"] in earlier and earlier[gate["id"]] != gate["name"]:
                     raise ValueError(f"{phase['name']} {gate['id']}: a gate two documents share keeps its name")
         later = {int(g["id"][1:]) for p in followers for g in p["gates"]}
+        if phase.get("continues") in by_name:  # a continued document repeating G1 skips the earlier one's gates
+            later |= {int(g["id"][1:]) for g in by_name[phase["continues"]]["gates"]}
         skipped = [n for n in range(numbers[0], numbers[-1]) if n not in numbers and n not in later]
         if skipped:
             raise ValueError(f"{phase['name']}: G{skipped[0]} is in no document; number gates without gaps")

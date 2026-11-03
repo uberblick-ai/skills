@@ -160,6 +160,14 @@ class PageTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 page.validate(data)
 
+    def test_a_continued_document_can_repeat_the_launcher_gate(self):
+        """The merge step draws the launcher's G1 again; the numbers between it and its own gates are the PR phase's."""
+        self.split_merge_step()
+        self.data["phases"][2]["gates"].insert(0, copy.deepcopy(self.data["phases"][1]["gates"][0]))
+        self.flows["merge.flow"] = ('decision g1 tone=system "G1 Launcher: may it start?"\n'
+                                    + self.flows["merge.flow"].replace("g4 --> p", "g1 --> g4\ng4 --> p"))
+        self.assertEqual(page.validate(self.data, self.flows), [])
+
     def test_a_phase_section_comes_before_its_notes(self):
         self.data["phases"][1]["sections"] = [{"heading": "Dependabot pull requests", "text": "They enter at the integrator.",
                                                "items": ["**Merge.** Minor updates merge."]}]

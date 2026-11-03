@@ -85,7 +85,11 @@ illustration from uberblick-ai/ub-agents, not a default.
   after them, with `"continues": "Implementation and PR phase"`: its gates
   continue that phase's numbers, and that phase's drawing ends where the step
   begins, in an `end` node saying what the item waits for. Use it when one
-  drawing would pass about 20 nodes. `flow` names the phase's ablauf source
+  drawing would pass about 20 nodes, or when a route skips an agent that has
+  both a rework and a stop edge, such as an exempt PR going around the
+  reviewer: rejoining below that agent crosses one of its edges, while in a
+  drawing of its own the skipped route is an `end` beside the gate and an
+  entry of the next one. `flow` names the phase's ablauf source
   next to `flow.json`; it goes into the document's `ablauf` block as it is,
   `play` scenarios included. An optional `title` replaces "The loop in OWNER/NAME:
   issue phase". The `summary` follows the

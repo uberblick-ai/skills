@@ -166,7 +166,9 @@ the gates.
   The controls show the node's own text above the caption, so the caption
   says what happens in this scenario, never the node's text again: what the
   agent does, or a gate's answer and why (`"No: a criterion is not met"`).
-  A step on a label needs none. `actor=` names the agent
+  A step on a label needs none, except the last step of a scenario that ends
+  on a label handing the item to another agent or document: its caption says
+  who picks it up (`"Names the failing job, back to the implementer"`). `actor=` names the agent
   as the config does, or "A maintainer" on a person's step. Give a person's
   step `2.4s`, since that is where a reader stops to read.
 - The overview plays one scenario per way work enters that the paths show,
