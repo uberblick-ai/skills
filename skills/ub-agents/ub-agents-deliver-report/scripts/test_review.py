@@ -283,6 +283,13 @@ class Tests(unittest.TestCase):
         self.assertTrue({"context_runs", "context_start_pct", "context_peak_pct", "context_peak_pct_max",
                          "context_compacted", "context_by_runtime"} <= fields.keys())
 
+    def test_document_charts_bridge_days_whose_shares_are_null(self):
+        charts = {m["title"]: m for m in (review.json.loads(b["text"]) for b in review.create_document(data())["blocks"]
+                                          if b["type"] == "chart") if m["type"] == "line"}
+        self.assertEqual({t for t, m in charts.items() if m.get("missing") == "connect"},
+                         {"Autonomy and waste", "Cycle and run time per delivery", review.CONTEXT_CHART_TITLE},
+                         "a day without loop runs stores null shares and medians, so their lines connect across it")
+
     def test_digest_says_how_much_context_the_day_used(self):
         day = data()
         day["summary"] |= {"context_runs": 3, "context_start_pct": 7.0, "context_peak_pct": 10.0,

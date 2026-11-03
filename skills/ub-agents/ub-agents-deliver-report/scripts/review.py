@@ -1242,13 +1242,14 @@ CONTEXT_CHART_TITLE = "Context used, as a share of the window"
 def context_chart():
     """Bars for the median start and lines for the median and largest peak, all percent of the window, with the
     heavy-start level as a reference line on the start series. Chart blocks have no point annotations, so
-    compactions stay a table column."""
+    compactions stay a table column. Lines bridge days without measured runs, whose shares are null."""
     return chart({"version": 1, "type": "line", "collection": "days", "title": CONTEXT_CHART_TITLE,
                   "x": {"field": "day", "type": "date", "label": "Day"},
                   "y": [{"field": "context_start_pct", "label": "Median start (call 10)", "unit": "%", "type": "bar",
                          "range": [0, 100], "reference": HEAVY_START},
                         {"field": "context_peak_pct", "label": "Median peak", "unit": "%", "range": [0, 100]},
-                        {"field": "context_peak_pct_max", "label": "Largest peak", "unit": "%", "range": [0, 100]}]})
+                        {"field": "context_peak_pct_max", "label": "Largest peak", "unit": "%", "range": [0, 100]}],
+                  "missing": "connect"})
 
 
 def create_document(data, button=True):
@@ -1270,7 +1271,8 @@ def create_document(data, button=True):
                "x": {"field": "day", "type": "date", "label": "Day"},
                "y": [{"field": "autonomous_pct", "label": "Autonomous deliveries", "unit": "%"},
                      {"field": "wasted_pct", "label": "Wasted runs", "unit": "%"},
-                     {"field": "denial_pct", "label": "Runs with denials", "unit": "%"}]}),
+                     {"field": "denial_pct", "label": "Runs with denials", "unit": "%"}],
+               "missing": "connect"}),
         chart({"version": 1, "type": "line", "collection": "days", "title": "Human stops and the wait for them",
                "x": {"field": "day", "type": "date", "label": "Day"},
                "y": [{"field": "human_stops", "label": "Human stops"},
@@ -1278,7 +1280,8 @@ def create_document(data, button=True):
         chart({"version": 1, "type": "line", "collection": "days", "title": "Cycle and run time per delivery",
                "x": {"field": "day", "type": "date", "label": "Day"},
                "y": [{"field": "loop_cycle_h_median", "label": "Cycle, median", "unit": "h"},
-                     {"field": "run_h_median", "label": "Run time, median", "unit": "h"}]}),
+                     {"field": "run_h_median", "label": "Run time, median", "unit": "h"}],
+               "missing": "connect"}),
         chart({"version": 1, "type": "line", "collection": "days", "title": "Issues in, deliveries out and the open queue",
                "x": {"field": "day", "type": "date", "label": "Day"},
                "y": [{"field": "issues_opened", "label": "Issues opened"},
