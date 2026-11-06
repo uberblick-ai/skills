@@ -58,11 +58,13 @@
   "shots": [
     {
       "image": "deliver-top",
-      "caption": "The day at a glance and what to change. uberblick-ai/ub-agents, 7 October 2026."
+      "caption": "One day at a glance and what to change. uberblick-ai/ub-agents, 31 October 2026: 19 of 23 deliveries went through the loop alone."
     },
     {
-      "image": "deliver-table",
-      "caption": "Every delivery with its runs by role: green moved forward, amber sent back, red blocked or retried."
+      "image": "deliver-uberblick",
+      "bar": "Uberblick",
+      "lead": true,
+      "caption": "The same days kept in an Uberblick document and charted over time. uberblick-ai/ub-agents, 25 to 31 October 2026: 34 of 40 deliveries alone; on the 27th both deliveries needed a person."
     }
   ]
 }

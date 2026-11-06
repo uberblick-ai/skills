@@ -71,7 +71,9 @@ npx skills@latest add . --list             # every skill listed, none missing
 page without further work. For a fuller page, add
 `site/content/skills/<name>.json` with the question it answers, example asks,
 steps, facts, requirements and screenshots (`site/img/<image>-light.webp` and
-`-dark.webp`); see the existing files for the shape. The overview's text and
+`-dark.webp`); see the existing files for the shape. A screenshot's `bar` names
+its frame (`report.html` by default), and `lead: true` shows it at the top with
+the first one instead of under "In the report". The overview's text and
 recent changes are in `site/content/home.json`, newest first; the overview
 shows the newest five. Files in `site/static/`
 (favicons, the Pages `_headers` file) are copied to the site root. Cloudflare
