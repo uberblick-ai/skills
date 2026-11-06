@@ -64,7 +64,7 @@
       "image": "deliver-uberblick",
       "bar": "Uberblick · Delivery report: uberblick-ai/ub-agents",
       "lead": true,
-      "caption": "The days kept in Uberblick, charted over time. 25 to 31 October 2026: 34 of 40 deliveries went through alone; on the 27th both deliveries needed a person."
+      "caption": "The days kept in Uberblick and charted over time: autonomous deliveries climbing to about 80% over the two weeks to 31 October 2026, with few wasted runs."
     }
   ]
 }
