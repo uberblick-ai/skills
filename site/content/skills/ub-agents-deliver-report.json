@@ -62,9 +62,9 @@
     },
     {
       "image": "deliver-uberblick",
-      "bar": "Uberblick",
+      "bar": "Uberblick · Delivery report: uberblick-ai/ub-agents",
       "lead": true,
-      "caption": "The same days kept in an Uberblick document and charted over time. uberblick-ai/ub-agents, 25 to 31 October 2026: 34 of 40 deliveries alone; on the 27th both deliveries needed a person."
+      "caption": "The days kept in Uberblick, charted over time. 25 to 31 October 2026: 34 of 40 deliveries went through alone; on the 27th both deliveries needed a person."
     }
   ]
 }
