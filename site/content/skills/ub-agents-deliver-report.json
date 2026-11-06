@@ -58,11 +58,13 @@
   "shots": [
     {
       "image": "deliver-top",
-      "caption": "The day at a glance and what to change. uberblick-ai/ub-agents, 7 October 2026."
+      "caption": "One day at a glance and what to change. uberblick-ai/ub-agents, 31 October 2026: 19 of 23 deliveries went through the loop alone."
     },
     {
-      "image": "deliver-table",
-      "caption": "Every delivery with its runs by role: green moved forward, amber sent back, red blocked or retried."
+      "image": "deliver-uberblick",
+      "bar": "Uberblick · Delivery report: uberblick-ai/ub-agents",
+      "lead": true,
+      "caption": "The days kept in Uberblick and charted over time: autonomous deliveries climbing to about 80% over the two weeks to 31 October 2026, with few wasted runs."
     }
   ]
 }

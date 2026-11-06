@@ -256,9 +256,10 @@ def update_cmds(s):
             ('glob', 'Every project', f'{UPDATE} {s["slug"]} -g', True)]
 
 
-def shot(image, caption, pre, eager=False):
+def shot(x, pre, eager=False):
+    image, caption = x['image'], x['caption']
     lazy = '' if eager else ' loading="lazy"'
-    return (f'<figure class="shot"><div class="bar"><span>report.html</span></div>'
+    return (f'<figure class="shot"><div class="bar"><span>{e(x.get("bar", "report.html"))}</span></div>'
             f'<img class="l" src="{pre}img/{image}-light.webp" alt="{e(caption)}" width="2400"{lazy}>'
             f'<img class="d" src="{pre}img/{image}-dark.webp" alt="" width="2400"{lazy}>'
             f'<figcaption>{e(caption)}</figcaption></figure>')
@@ -347,8 +348,11 @@ def skill_page(s, groups, skills):
     if nxt:
         pager += f'<a class="next" href="{nxt["slug"]}"><span>Next</span>{nxt["slug"]}</a>'
     shots = s.get('shots', [])
-    first = shot(shots[0]['image'], shots[0]['caption'], pre, eager=True) if shots else ''
-    more = ''.join(shot(x['image'], x['caption'], pre) for x in shots[1:])
+    # The first shot leads the page; later ones marked "lead" join it there, the rest go to "In the report".
+    lead = shots[:1] + [x for x in shots[1:] if x.get('lead')]
+    first = ''.join(shot(x, pre, eager=True) for x in lead)
+    first = f'<div class="shots">{first}</div>' if len(lead) > 1 else first
+    more = ''.join(shot(x, pre) for x in shots if x not in lead)
     secs = []
     if s.get('asks') or s.get('steps'):
         asks = ''.join(f'<li>"{e(a)}"</li>' for a in s.get('asks', []))
