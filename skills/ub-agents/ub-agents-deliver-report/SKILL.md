@@ -17,7 +17,7 @@ compatibility: >-
   writes the page only.
 metadata:
   author: uberblick-ai
-  version: "1.14"
+  version: "1.15"
 ---
 
 # Deliver report
