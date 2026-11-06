@@ -510,7 +510,7 @@ def collect(repo, day, zone, since, until):
         took = cycle(runs, done)
         issues.append({
             "repo": repo, "day": day.isoformat(), "number": key, "title": head["title"], "url": head["html_url"],
-            "delivered": delivered, "loop": loop,
+            "delivered": delivered, "loop": loop, "done": done if delivered else None,
             "autonomous": bool(loop and any(p["by_loop"] for p in pulls) and not stops and all(
                 r["class"] == "forward" or (r["class"] == "back" and l in REVIEWERS) for l, r in zip(letters, runs))),
             "prs": pulls, "runs": runs,
@@ -569,6 +569,23 @@ def collect(repo, day, zone, since, until):
         "context": context,
         "retrospectives": {"errors": errors, "in_window": retrospectives},
         "issues": issues}
+
+
+LAST_DELIVERIES = 10
+
+
+def last_ten(data, stored):
+    """Average and median run time of the last ten loop deliveries, counting back from the day's last one. Run time
+    leaves out queueing and human waits, so the direction of these two says whether the work itself takes longer.
+    Left out until ten are known. Items stored before 1.16 carry no `done`, so they count in day order."""
+    today = [d | {"day": data["day"]} for d in data["issues"] if d["delivered"] and d["loop"]]
+    earlier = [d | {"day": day} for day, items in stored.items() if day < data["day"] for d in items]
+    known = [d for d in earlier + today if d.get("run_h") is not None]
+    if len(known) < LAST_DELIVERIES:
+        return {}
+    window = sorted(known, key=lambda d: (d["day"], d.get("done") or ""))[-LAST_DELIVERIES:]
+    return {"run_min_last10_avg": round(statistics.mean(d["run_h"] for d in window) * 60, 1),
+            "run_min_last10_median": round(statistics.median(d["run_h"] for d in window) * 60, 1)}
 
 
 def offset(data):
@@ -721,8 +738,10 @@ def refs(repo, numbers):
     return " ".join(f'<a href="https://github.com/{repo}/issues/{n}">#{n}</a>' for n in numbers)
 
 
-def figures(t):
-    """The tiles as (value, label, detail, the field read against a target or None)."""
+def figures(t, before=None):
+    """The tiles as (value, label, detail, the field read against a target or None). `before` is the newest earlier
+    day with the last-ten run time, so that tile shows which way it moved."""
+    moved = f' · was {span(before["run_min_last10_avg"])}, {span(before["run_min_last10_median"])}' if before else ""
     goal = lambda field: f' · target {TARGETS[field][1]}'
     return [(f'{t["autonomous"]}/{t["deliveries"]}', "autonomous",
              f'{pct(t["autonomous_pct"])} of loop deliveries' + goal("autonomous_pct"), "autonomous_pct"),
@@ -731,6 +750,8 @@ def figures(t):
             (t["human_stops"], "human stops", f'{spanh(t["human_wait_h"])} waited', None),
             (spanh(t["loop_cycle_h_median"]), "cycle", f'median without human wait · {spanh(t["cycle_h_median"])} with', None),
             (spanh(t["run_h_median"]), "run time", f'median per delivery · {spanh(t["run_h"])} all runs', None),
+            (span(t.get("run_min_last10_avg")), "run time, last 10",
+             f'average · median {span(t.get("run_min_last10_median"))}{moved}', None),
             (pct(t["denial_pct"]), "runs with denials",
              f'{t["runs_with_denials"]} of {t["claude_runs"]} Claude runs' + goal("denial_pct"), "denial_pct"),
             (t["prs_merged"], "PRs merged", f'+{t["additions"]:,} −{t["deletions"]:,} · {t["files"]} files', None),
@@ -849,8 +870,10 @@ def report(data, days=None):
            f'<header><div class="label">{esc(repo)} · {esc(data["day"])} · {esc(data["timezone"])}</div>'
            f'<h1>Delivery report</h1><p>{esc(summary["headline"])}</p></header><section class="grid">']
     tone = {True: " hit", False: " miss", None: ""}
+    earlier = [(day, d) for day, d in (days or {}).items() if day < data["day"] and d.get("run_min_last10_avg") is not None]
+    before = max(earlier, key=lambda pair: pair[0])[1] if earlier else None
     out += [f'<div class="box"><div class="label">{l}</div><div class="num{tone[on_target(f, summary.get(f))]}">{esc(v)}</div>'
-            f'<div class="label">{esc(s)}</div></div>' for v, l, s, f in figures(summary)]
+            f'<div class="label">{esc(s)}</div></div>' for v, l, s, f in figures(summary, before)]
     out.append("</section><section><h2>What to change</h2>")
     out += [f'<div class="box"><div class="label">{esc(LEVERS[l["lever"]])}</div><h3>{esc(l["title"])}</h3>'
             f'<p>{esc(l["change"])}</p><div class="label">{esc(l.get("where", ""))} · {esc(l.get("cost", ""))} · '
@@ -980,11 +1003,12 @@ SCHEMAS = {
                 **dict.fromkeys(["runs", "compacted"], COUNT),
                 **dict.fromkeys(["start_pct", "peak_pct", "peak_pct_max"], PERCENT)}})},
         **dict.fromkeys(["run_h", "human_wait_h", "human_stops_per_delivery", "review_rounds_per_delivery",
-                         "lead_h_median", "cycle_h_median", "loop_cycle_h_median", "run_h_median"], HOURS)),
+                         "lead_h_median", "cycle_h_median", "loop_cycle_h_median", "run_h_median",
+                         "run_min_last10_avg", "run_min_last10_median"], HOURS)),
     "items": collection(["day", "items"], day=DAY, items={"type": "array", "items": {
         "type": "object", "required": ITEM_REQUIRED, "properties": {
             "number": COUNT, "title": TEXT, "autonomous": {"type": "boolean"}, "sequence": TEXT, "prs": NUMBERS,
-            "note": TEXT,
+            "note": TEXT, "done": TEXT,
             **dict.fromkeys(["attempts", "wasted_runs", "review_rounds", "human_stops", "denials", "runs_with_denials",
                              "lines"], COUNT),
             **dict.fromkeys(["human_wait_h", "lead_h", "cycle_h", "loop_cycle_h", "run_h"], HOURS)}}}),
@@ -1004,7 +1028,7 @@ SCHEMAS = {
 }
 ITEM_FIELDS = ["number", "title", "autonomous", "sequence", "attempts", "wasted_runs", "review_rounds", "human_stops",
                "human_wait_h", "lead_h", "cycle_h", "loop_cycle_h", "run_h", "denials", "runs_with_denials", "lines",
-               "note"]
+               "note", "done"]
 
 
 def item(d):
@@ -1221,7 +1245,8 @@ def document(dataset, data, doc=None, button=True, first=None):
     changes = values(dataset.get("changes")) | {c["ref"]: c for c in data.get("changes", [])}
     latest = sorted(changes, key=lambda ref: (changes[ref]["day"], ref), reverse=True)[:5]
     return {"actions": actions, "changelog": changelog(changes),
-            "context_chart": {"title": CONTEXT_CHART_TITLE, "block": context_chart()},
+            "context_chart": {"title": CONTEXT_CHART_TITLE, "blocks": context_blocks()},
+            "run_time_chart": {"title": RUN_TIME_CHART_TITLE, "blocks": [run_time_chart(), RUN_TIME_NOTE]},
             "cards": [{"lesson": key, "title": inline(lessons[key]["title"]), "changed": key in today}
                       for key in current]
                      + [{"lesson": key, "title": f"~~{inline(lessons[key]['title'])}~~", "changed": key in today,
@@ -1240,6 +1265,20 @@ def column(field, label, fmt="number", **extra):
 
 
 CONTEXT_CHART_TITLE = "Context used, as a share of the window"
+RUN_TIME_CHART_TITLE = "Run time of the last 10 deliveries"
+RUN_TIME_NOTE = {"type": "paragraph", "text": "How long the agents ran per delivery, from preparation to merge, over the "
+                 "last ten loop deliveries counting back from each day's last one. Queueing and human waits don't count, "
+                 "so a rising line means the work itself is taking longer. The average sits above the median when a few "
+                 "deliveries took much longer, usually through review rounds."}
+
+
+def run_time_chart():
+    """Whether the work itself gets shorter: the rolling average and median, without queueing or human waits."""
+    return chart({"version": 1, "type": "line", "collection": "days", "title": RUN_TIME_CHART_TITLE,
+                  "x": {"field": "day", "type": "date", "label": "Day"},
+                  "y": [{"field": "run_min_last10_avg", "label": "Average", "unit": "min"},
+                        {"field": "run_min_last10_median", "label": "Median", "unit": "min"}],
+                  "missing": "connect"})
 
 
 def context_chart():
@@ -1253,6 +1292,17 @@ def context_chart():
                         {"field": "context_peak_pct", "label": "Median peak", "unit": "%", "range": [0, 100]},
                         {"field": "context_peak_pct_max", "label": "Largest peak", "unit": "%", "range": [0, 100]}],
                   "missing": "connect"})
+
+
+def context_blocks():
+    """The context chart under its own heading, after the day figures and before the actions."""
+    return [{"type": "heading", "level": 2, "text": "Context usage"},
+            {"type": "paragraph", "text": "How much of its context window each run uses, as a share of that run's own "
+             "window. The bars show the median after a run's first ten calls: how heavy runs start, with a line at the "
+             "20% that counts as a heavy start. The lines show the median and the largest peak. A run that fills its "
+             "window compacts and can lose what it read, so a rising peak is the early warning. Runs before ub-agents "
+             "0.5.0 recorded no context, so those days stay empty."},
+            context_chart()]
 
 
 def create_document(data, button=True):
@@ -1276,15 +1326,8 @@ def create_document(data, button=True):
                      {"field": "wasted_pct", "label": "Wasted runs", "unit": "%"},
                      {"field": "denial_pct", "label": "Runs with denials", "unit": "%"}],
                "missing": "connect"}),
-        chart({"version": 1, "type": "line", "collection": "days", "title": "Human stops and the wait for them",
-               "x": {"field": "day", "type": "date", "label": "Day"},
-               "y": [{"field": "human_stops", "label": "Human stops"},
-                     {"field": "human_wait_h", "label": "Hours waited", "unit": "h"}]}),
-        chart({"version": 1, "type": "line", "collection": "days", "title": "Cycle and run time per delivery",
-               "x": {"field": "day", "type": "date", "label": "Day"},
-               "y": [{"field": "loop_cycle_h_median", "label": "Cycle, median", "unit": "h"},
-                     {"field": "run_h_median", "label": "Run time, median", "unit": "h"}],
-               "missing": "connect"}),
+        run_time_chart(),
+        RUN_TIME_NOTE,
         chart({"version": 1, "type": "line", "collection": "days", "title": "Issues in, deliveries out and the open queue",
                "x": {"field": "day", "type": "date", "label": "Day"},
                "y": [{"field": "issues_opened", "label": "Issues opened"},
@@ -1298,7 +1341,6 @@ def create_document(data, button=True):
                "x": {"field": "day", "type": "date", "label": "Day"},
                "y": [{"field": "machines", "label": "Machines"}, {"field": "loops", "label": "Loops"},
                      {"field": "peak_runs", "label": "Peak parallel runs"}]}),
-        context_chart(),
         chart({"version": 1, "type": "table", "collection": "days", "title": "Recent days",
                "columns": [column("day", "Day", "date"), column("deliveries", "Deliveries"),
                            column("autonomous", "Autonomous"), column("wasted_pct", "Wasted runs", **percent),
@@ -1309,6 +1351,7 @@ def create_document(data, button=True):
                            column("context_peak_pct_max", "Largest context", **percent),
                            column("context_compacted", "Compacted")],
                "sort": {"field": "day", "direction": "desc"}, "limit": RECENT_DAYS}),
+        *context_blocks(),
         {"type": "heading", "level": 2, "text": "Recommended Actions"},
         *sections["actions"],
         {"type": "heading", "level": 2, "text": "Changelog"},
@@ -1334,6 +1377,23 @@ def stored_days(paths):
     return days
 
 
+def stored_items(paths):
+    """Loop deliveries by day, from get_data output or earlier report.json files; a missing file adds none."""
+    items = {}
+    for path in map(Path, paths):
+        if not path.exists():
+            continue
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError as e:
+            sys.exit(f"{path}: {e}")
+        if isinstance(loaded, dict) and "issues" in loaded:
+            items[loaded["day"]] = [d for d in loaded["issues"] if d["delivered"] and d["loop"]]
+        else:
+            items |= {day: v["items"] for day, v in values(loaded).items() if "items" in v}
+    return items
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
@@ -1348,6 +1408,8 @@ def main():
     r.add_argument("--days", action="append", default=[],
                    help="stored days for the context chart: the days collection as get_data returned it, or an "
                         "earlier day's report.json; repeat for several")
+    r.add_argument("--items", action="append", default=[],
+                   help="stored deliveries for the last-ten run time: the items collection as get_data returned it")
     q = commands.add_parser("queue", help="only the open-queue figures for a day: issue lists and events, no run records")
     q.add_argument("--repo", required=True)
     q.add_argument("--day", help="calendar day, YYYY-MM-DD, UTC (default yesterday)")
@@ -1395,6 +1457,7 @@ def main():
                                   args.doc, not args.no_button, args.since), separators=(",", ":"), ensure_ascii=False))
     else:
         data = merge(json.loads(Path(args.data).read_text(encoding="utf-8")), json.loads(Path(args.notes).read_text(encoding="utf-8")))
+        data["summary"] |= last_ten(data, stored_items(args.items + args.days))
         out = Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
         page = out / "report.html"

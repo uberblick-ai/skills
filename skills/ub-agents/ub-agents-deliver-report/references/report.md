@@ -37,6 +37,7 @@ session, is shown but not counted.
 | Human stops | down | | Action-needed notices on loop deliveries, and the hours from each to the next run on the item. | `human_stops`, `human_stops_per_delivery`, `human_wait_h` |
 | Cycle | down | | First run to delivery, without the human wait. | `loop_cycle_h_median` (`cycle_h_median` with the wait) |
 | Run time | down | | Run minutes summed per delivery, the touch time. | `run_h_median` (`run_h` for all runs on the day) |
+| Run time, last 10 | down | | The same, over the last ten loop deliveries counting back from the day's last one: no queueing or human waits, so its direction shows whether the work itself takes longer. Left out until ten are known; only the last 14 days' items are kept. | `run_min_last10_avg`, `run_min_last10_median` |
 | Runs with denials | down | under 10% | Claude runs on the day with a permission denial. ub-agents records denials from Claude output only, at most ten a run, and records before about 5 October 2026 carry none, so `denial_pct` is null for those days rather than zero. | `denial_pct`, `runs_with_denials`, `claude_runs` |
 
 A target is guidance for reading a day, not a gate: the page colors a share
@@ -122,8 +123,9 @@ same gap recurring is worth fixing.
 1. **Header.** Repository, the day and its time zone, the title "Delivery
    report", then the headline: one sentence saying how the day went and the
    biggest lesson. The headline is the only thing many readers take in.
-2. **Figures.** Ten tiles: autonomous deliveries, wasted runs, human stops
-   with the hours waited, cycle with and without the wait, run time, runs with
+2. **Figures.** Eleven tiles: autonomous deliveries, wasted runs, human stops
+   with the hours waited, cycle with and without the wait, run time, run time
+   of the last ten deliveries with its value on the day before, runs with
    denials, PRs merged with lines and files, issues closed and opened, the open
    queue split into to-prepare and prepared, and machines with loops and peak
    parallel runs.
@@ -224,12 +226,13 @@ rather than runs has `runs: 0` and says so in `cost`.
              "human_stops": 2, "human_stops_per_delivery": 0.4, "human_wait_h": 26.92,
              "review_rounds_per_delivery": 1.4, "lead_h_median": 55.05, "cycle_h_median": 20.13,
              "loop_cycle_h_median": 3.83, "run_h_median": 1.76,
+             "run_min_last10_avg": 115.2, "run_min_last10_median": 100.8,
              "claude_runs": 40, "runs_with_denials": 28, "denial_pct": 70, "denials": 54,
              "prs_merged": 7, "prs_merged_by_loop": 6, "additions": 4346, "deletions": 735, "files": 106,
              "issues_closed": 8, "issues_opened": 11, "retrospectives": 10},
  "issues": [{"number": 1281, "title": "...", "url": "...", "delivered": true, "loop": true, "autonomous": true,
              "sequence": "P Q< P I R< I R G", "attempts": 8, "wasted_runs": 0, "review_rounds": 2,
-             "human_stops": 0, "human_wait_h": 0, "lead_h": 55.05, "cycle_h": 1.85, "loop_cycle_h": 1.85,
+             "human_stops": 0, "human_wait_h": 0, "done": "2026-10-07T14:02:11Z", "lead_h": 55.05, "cycle_h": 1.85, "loop_cycle_h": 1.85,
              "run_h": 1.55, "denials": 4, "runs_with_denials": 3, "lines": 889, "note": "...",
              "prs": [], "runs": [], "retrospectives": [],
              "evidence": {"commits": [], "events": [], "ci": [], "errors": []}}],
@@ -238,7 +241,8 @@ rather than runs has `runs: 0` and says so in `cost`.
 ```
 
 `sequence` writes the runs as role letters, marking `<` sent back, `x` wasted,
-`!` stopped and `?` pending. Durations are hours.
+`!` stopped and `?` pending. Durations are hours, except the `run_min_` figures,
+which are minutes so their chart reads as minutes.
 
 An item that needs a cause (a send-back, a stop or a wasted run, or a loop
 delivery that was not autonomous) carries `evidence`, which its run summaries
@@ -276,8 +280,10 @@ derivable fields, and storing a day deletes `items` records older than 14 days.
 
 1. **Intro.** What the loop is, what the report measures, and where the skill
    lives.
-2. **Data.** Line charts bound to `days`, then a "Recent days" table, newest
-   first. Both are `chart` blocks holding a version-1 mapping, for example:
+2. **Data.** Line charts bound to `days`: autonomy, run time of the last ten
+   deliveries, issues against deliveries and the queue, and capacity. Then a
+   "Recent days" table, newest first, and a "Context usage" section with its
+   explanation and chart. Both are `chart` blocks holding a version-1 mapping, for example:
 
    ```json
    {"version": 1, "type": "line", "collection": "days", "title": "Autonomy and waste",
@@ -290,7 +296,7 @@ derivable fields, and storing a day deletes `items` records older than 14 days.
 
    A day without loop runs stores its shares and medians as null, not zero,
    since a share of no deliveries is undefined. The charts that plot them
-   (autonomy, cycle and run time, context) set `"missing": "connect"`, so
+   (autonomy, run time, context) set `"missing": "connect"`, so
    their lines bridge such a day instead of breaking at it.
 
    ```json
@@ -316,7 +322,7 @@ derivable fields, and storing a day deletes `items` records older than 14 days.
     "missing": "connect"}
    ```
 
-   `document` returns the same block as `context_chart`, so a document
+   `document` returns the same chart in `context_chart`, so a document
    created before it gets the chart once.
 
 3. **Recommended Actions.** The day's `actions`, each a card: the lever as
