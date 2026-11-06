@@ -17,7 +17,7 @@ compatibility: >-
   writes the page only.
 metadata:
   author: uberblick-ai
-  version: "1.14"
+  version: "1.16"
 ---
 
 # Deliver report
@@ -34,7 +34,8 @@ notes, page and records.
 1. **Find the days.** With an Uberblick MCP server connected, whatever its
    name (load its tools first; with several servers, search each), find the
    "Delivery report" document holding `days`, `causes` and `lessons`: `DOC`.
-   Read those three with `get_data`, save `days` as `DIR/days.json`, and run
+   Read those three and `items` with `get_data`, save `days` as `DIR/days.json`
+   and `items` as `DIR/items.json`, and run
    `python3 scripts/review.py missing DIR/days.json`. It lists the days to
    report, oldest first, or yesterday when none is missing.
    - No `DOC`: ask once whether to create it, and carry on meanwhile; a no
@@ -83,7 +84,7 @@ notes, page and records.
 5. **Render.** Write `DIR/DAY/notes.json` as report.md shows, then:
 
    ```sh
-   python3 scripts/review.py render DIR/DAY/data.json DIR/DAY/notes.json DIR/DAY --days DIR/days.json
+   python3 scripts/review.py render DIR/DAY/data.json DIR/DAY/notes.json DIR/DAY --days DIR/days.json --items DIR/items.json
    ```
 
    During a backfill, add `--days DIR/EARLIER/report.json` for each day
@@ -122,8 +123,8 @@ notes, page and records.
      or after the intro.
    - **Changelog**: insert the first `changelog_new` items after the heading
      and delete those past the fifth.
-   - Without a chart titled `context_chart.title`, insert
-     `context_chart.block` after the last chart before "Recent days".
+   - Without a chart titled `context_chart.title` or `run_time_chart.title`,
+     insert its `block` after the last chart before "Recent days".
 
    If Uberblick refuses a card with `invalid_card`, run `create` or
    `document` again with `--no-button`. If it refuses the context chart,
@@ -137,6 +138,7 @@ notes, page and records.
    ```text
    14 October: 6 of 8 deliveries went through alone; the preparer asked twice about scope the corpus already settles.
    Autonomous 75% (target 75% or more), wasted runs 12% (under 10%), runs with denials 4% (under 10%).
+   Run time, last 10 deliveries: average 41m (was 44m), median 29m (was 31m).
    Context: median peak 12% of the window, largest 56% (#2195 implementer, Codex), none compacted.
    Changes: acme/app#2201, the preparer reads the corpus before asking, ends 3 wasted runs a day.
    Stored 12 to 14 October in the Delivery report.

@@ -270,6 +270,22 @@ class Tests(unittest.TestCase):
         self.assertEqual(sorted(review.stored_days([folder / "days.json", folder / "report.json", folder / "none"])),
                          ["2026-10-12", "2026-10-13"])
 
+    def test_last_ten_counts_back_from_the_days_last_delivery(self):
+        today = [{"delivered": True, "loop": True, "run_h": 3, "done": "2026-10-14T09:00:00Z"},
+                 {"delivered": True, "loop": True, "run_h": 1, "done": "2026-10-14T08:00:00Z"},
+                 {"delivered": True, "loop": False, "run_h": 99, "done": "2026-10-14T10:00:00Z"}]
+        stored = {"2026-10-13": [{"run_h": 1}] * 8, "2026-10-12": [{"run_h": 50}], "2026-10-15": [{"run_h": 70}]}
+        self.assertEqual(review.last_ten(data(today), stored), {"run_h_last10_avg": 1.2, "run_h_last10_median": 1})
+        self.assertEqual(review.last_ten(data(today), {}), {}, "left out until ten are known")
+
+    def test_stored_items_read_get_data_and_earlier_reports(self):
+        folder = Path(self.enterContext(__import__("tempfile").TemporaryDirectory()))
+        (folder / "items.json").write_text('{"records": [{"id": "2026-10-12", "value": {"day": "2026-10-12", "items": [{"run_h": 1}]}}]}')
+        (folder / "report.json").write_text('{"day": "2026-10-13", "summary": {}, "issues": ['
+                                            '{"delivered": true, "loop": true, "run_h": 2}, {"delivered": true, "loop": false}]}')
+        self.assertEqual(review.stored_items([folder / "items.json", folder / "report.json", folder / "none"]),
+                         {"2026-10-12": [{"run_h": 1}], "2026-10-13": [{"delivered": True, "loop": True, "run_h": 2}]})
+
     def test_documents_chart_context_with_a_heavy_start_line(self):
         chart = next(b for b in review.create_document(data())["blocks"]
                      if b["type"] == "chart" and review.CONTEXT_CHART_TITLE in b["text"])
@@ -287,7 +303,8 @@ class Tests(unittest.TestCase):
         charts = {m["title"]: m for m in (review.json.loads(b["text"]) for b in review.create_document(data())["blocks"]
                                           if b["type"] == "chart") if m["type"] == "line"}
         self.assertEqual({t for t, m in charts.items() if m.get("missing") == "connect"},
-                         {"Autonomy and waste", "Cycle and run time per delivery", review.CONTEXT_CHART_TITLE},
+                         {"Autonomy and waste", "Cycle and run time per delivery", review.CONTEXT_CHART_TITLE,
+                          review.RUN_TIME_CHART_TITLE},
                          "a day without loop runs stores null shares and medians, so their lines connect across it")
 
     def test_digest_says_how_much_context_the_day_used(self):

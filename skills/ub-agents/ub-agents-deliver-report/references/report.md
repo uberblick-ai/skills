@@ -37,6 +37,7 @@ session, is shown but not counted.
 | Human stops | down | | Action-needed notices on loop deliveries, and the hours from each to the next run on the item. | `human_stops`, `human_stops_per_delivery`, `human_wait_h` |
 | Cycle | down | | First run to delivery, without the human wait. | `loop_cycle_h_median` (`cycle_h_median` with the wait) |
 | Run time | down | | Run minutes summed per delivery, the touch time. | `run_h_median` (`run_h` for all runs on the day) |
+| Run time, last 10 | down | | The same, over the last ten loop deliveries counting back from the day's last one: no queueing or human waits, so its direction shows whether the work itself takes longer. Left out until ten are known; only the last 14 days' items are kept. | `run_h_last10_avg`, `run_h_last10_median` |
 | Runs with denials | down | under 10% | Claude runs on the day with a permission denial. ub-agents records denials from Claude output only, at most ten a run, and records before about 5 October 2026 carry none, so `denial_pct` is null for those days rather than zero. | `denial_pct`, `runs_with_denials`, `claude_runs` |
 
 A target is guidance for reading a day, not a gate: the page colors a share
@@ -122,8 +123,9 @@ same gap recurring is worth fixing.
 1. **Header.** Repository, the day and its time zone, the title "Delivery
    report", then the headline: one sentence saying how the day went and the
    biggest lesson. The headline is the only thing many readers take in.
-2. **Figures.** Ten tiles: autonomous deliveries, wasted runs, human stops
-   with the hours waited, cycle with and without the wait, run time, runs with
+2. **Figures.** Eleven tiles: autonomous deliveries, wasted runs, human stops
+   with the hours waited, cycle with and without the wait, run time, run time
+   of the last ten deliveries with its value on the day before, runs with
    denials, PRs merged with lines and files, issues closed and opened, the open
    queue split into to-prepare and prepared, and machines with loops and peak
    parallel runs.
@@ -224,12 +226,13 @@ rather than runs has `runs: 0` and says so in `cost`.
              "human_stops": 2, "human_stops_per_delivery": 0.4, "human_wait_h": 26.92,
              "review_rounds_per_delivery": 1.4, "lead_h_median": 55.05, "cycle_h_median": 20.13,
              "loop_cycle_h_median": 3.83, "run_h_median": 1.76,
+             "run_h_last10_avg": 1.92, "run_h_last10_median": 1.68,
              "claude_runs": 40, "runs_with_denials": 28, "denial_pct": 70, "denials": 54,
              "prs_merged": 7, "prs_merged_by_loop": 6, "additions": 4346, "deletions": 735, "files": 106,
              "issues_closed": 8, "issues_opened": 11, "retrospectives": 10},
  "issues": [{"number": 1281, "title": "...", "url": "...", "delivered": true, "loop": true, "autonomous": true,
              "sequence": "P Q< P I R< I R G", "attempts": 8, "wasted_runs": 0, "review_rounds": 2,
-             "human_stops": 0, "human_wait_h": 0, "lead_h": 55.05, "cycle_h": 1.85, "loop_cycle_h": 1.85,
+             "human_stops": 0, "human_wait_h": 0, "done": "2026-10-07T14:02:11Z", "lead_h": 55.05, "cycle_h": 1.85, "loop_cycle_h": 1.85,
              "run_h": 1.55, "denials": 4, "runs_with_denials": 3, "lines": 889, "note": "...",
              "prs": [], "runs": [], "retrospectives": [],
              "evidence": {"commits": [], "events": [], "ci": [], "errors": []}}],
