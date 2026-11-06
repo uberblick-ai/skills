@@ -18,6 +18,7 @@
     {"label": "Contribute", "question": "How do I write a skill for this repository?", "links": [["Guide", "AGENTS.md", "https://github.com/uberblick-ai/skills/blob/main/AGENTS.md"], ["Spec", "Agent Skills specification", "https://agentskills.io/specification"]]}
   ],
   "changes": [
+    ["2026-11-06", "Skill", "ub-agents-deliver-report 1.15: creating a new delivery report document works again; Uberblick had refused the stored days schema over context_by_runtime."],
     ["2026-11-03", "Skill", "ub-agents-flow 0.2: each drawing plays the paths items most often take, counted from the loop's recent runs, as ablauf scenarios a reader steps through in Uberblick."],
     ["2026-11-06", "Skill", "ub-agents-deliver-report 1.16: a chart of the average and median run time of the last ten deliveries, without queueing or human waits, and context usage in its own section before the actions."],
     ["2026-11-03", "Skill", "ub-agents-deliver-report 1.14: the autonomy, cycle time and context charts bridge a day without loop runs instead of breaking their lines there."],

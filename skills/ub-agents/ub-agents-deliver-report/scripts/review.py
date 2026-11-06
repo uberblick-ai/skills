@@ -996,9 +996,12 @@ SCHEMAS = {
         **dict.fromkeys(["autonomous_pct", "wasted_pct", "denial_pct", "context_start_pct", "context_peak_pct",
                          "context_peak_pct_max"], PERCENT),
         **dict.fromkeys(["context_runs", "context_compacted"], COUNT),
-        context_by_runtime={"type": "object", "additionalProperties": {"type": "object", "properties": {
-            **dict.fromkeys(["runs", "compacted"], COUNT),
-            **dict.fromkeys(["start_pct", "peak_pct", "peak_pct_max"], PERCENT)}}},
+        # Uberblick's schema vocabulary takes additionalProperties only as false, so each known runtime is a
+        # property; a runtime outside RUNTIMES stays allowed, unchecked.
+        context_by_runtime={"type": "object", "properties": dict.fromkeys(
+            [k for k in RUNTIMES if k != "all"], {"type": "object", "properties": {
+                **dict.fromkeys(["runs", "compacted"], COUNT),
+                **dict.fromkeys(["start_pct", "peak_pct", "peak_pct_max"], PERCENT)}})},
         **dict.fromkeys(["run_h", "human_wait_h", "human_stops_per_delivery", "review_rounds_per_delivery",
                          "lead_h_median", "cycle_h_median", "loop_cycle_h_median", "run_h_median",
                          "run_min_last10_avg", "run_min_last10_median"], HOURS)),

@@ -305,6 +305,31 @@ class Tests(unittest.TestCase):
         self.assertTrue({"context_runs", "context_start_pct", "context_peak_pct", "context_peak_pct_max",
                          "context_compacted", "context_by_runtime"} <= fields.keys())
 
+    def test_schemas_stay_inside_uberblicks_closed_vocabulary(self):
+        """Uberblick refuses a whole data write over one keyword outside its version 1 vocabulary
+        (packages/schema/src/data-schema.ts in uberblick-ai/uberblick-2), so every stored schema keeps to it."""
+        keywords = {"type", "properties", "required", "additionalProperties", "items", "enum", "const", "minimum",
+                    "maximum", "minLength", "maxLength", "minItems", "maxItems"}
+
+        def refusals(node, path):
+            out = [f"{path}/{k}: unsupported keyword" for k in node if k not in keywords]
+            if "additionalProperties" in node and node["additionalProperties"] is not False:
+                out.append(f"{path}/additionalProperties: only false or omission is supported")
+            for name, sub in node.get("properties", {}).items():
+                out += refusals(sub, f"{path}/properties/{name}")
+            if "items" in node:
+                out += refusals(node["items"], f"{path}/items")
+            return out
+
+        for name, value in review.SCHEMAS.items():
+            self.assertEqual(set(value), {"version", "schema"}, name)
+            self.assertEqual(value["version"], 1, name)
+            self.assertEqual(value["schema"]["type"], "object", name)
+            self.assertEqual(refusals(value["schema"], "/schema"), [], name)
+        runtimes = review.SCHEMAS["days"]["schema"]["properties"]["context_by_runtime"]
+        self.assertEqual(sorted(runtimes["properties"]), ["claude", "codex"])
+        self.assertNotIn("additionalProperties", runtimes, "a runtime the chart does not name still stores")
+
     def test_document_charts_bridge_days_whose_shares_are_null(self):
         charts = {m["title"]: m for m in (review.json.loads(b["text"]) for b in review.create_document(data())["blocks"]
                                           if b["type"] == "chart") if m["type"] == "line"}
