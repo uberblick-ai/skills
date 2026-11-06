@@ -15,7 +15,7 @@ README.md, plugins from .claude-plugin/marketplace.json, the overview's text
 from site/content/home.json. Files in site/static (favicons, the Pages _headers
 file) are copied to the site root as they are.
 """
-import html, json, re, shutil, sys
+import functools, hashlib, html, json, re, shutil, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -256,12 +256,19 @@ def update_cmds(s):
             ('glob', 'Every project', f'{UPDATE} {s["slug"]} -g', True)]
 
 
+@functools.cache
+def img(name):
+    """An image's path with a content hash, so a replaced screenshot is not served from a stale cache."""
+    digest = hashlib.sha256((ROOT / 'img' / name).read_bytes()).hexdigest()[:10]
+    return f'img/{name}?v={digest}'
+
+
 def shot(x, pre, eager=False):
     image, caption = x['image'], x['caption']
     lazy = '' if eager else ' loading="lazy"'
     return (f'<figure class="shot"><div class="bar"><span>{e(x.get("bar", "report.html"))}</span></div>'
-            f'<img class="l" src="{pre}img/{image}-light.webp" alt="{e(caption)}" width="2400"{lazy}>'
-            f'<img class="d" src="{pre}img/{image}-dark.webp" alt="" width="2400"{lazy}>'
+            f'<img class="l" src="{pre}{img(f'{image}-light.webp')}" alt="{e(caption)}" width="2400"{lazy}>'
+            f'<img class="d" src="{pre}{img(f'{image}-dark.webp')}" alt="" width="2400"{lazy}>'
             f'<figcaption>{e(caption)}</figcaption></figure>')
 
 def example(x):
