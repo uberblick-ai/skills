@@ -123,8 +123,10 @@ notes, page and records.
      or after the intro.
    - **Changelog**: insert the first `changelog_new` items after the heading
      and delete those past the fifth.
-   - Without a chart titled `context_chart.title` or `run_time_chart.title`,
-     insert its `block` after the last chart before "Recent days".
+   - Without a chart titled `run_time_chart.title`, insert its `blocks` after
+     the first chart under "Data".
+   - Without a chart titled `context_chart.title`, insert its `blocks` before
+     "Recommended Actions".
 
    If Uberblick refuses a card with `invalid_card`, run `create` or
    `document` again with `--no-button`. If it refuses the context chart,

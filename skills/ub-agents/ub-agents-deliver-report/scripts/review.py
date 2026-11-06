@@ -98,11 +98,6 @@ def median(values):
     return round(statistics.median(values), 2) if values else None
 
 
-def mean(values):
-    values = [v for v in values if v is not None]
-    return round(statistics.mean(values), 2) if values else None
-
-
 def share(part, whole):
     return round(part / whole, 2) if whole else None
 
@@ -589,7 +584,8 @@ def last_ten(data, stored):
     if len(known) < LAST_DELIVERIES:
         return {}
     window = sorted(known, key=lambda d: (d["day"], d.get("done") or ""))[-LAST_DELIVERIES:]
-    return {"run_h_last10_avg": mean(d["run_h"] for d in window), "run_h_last10_median": median(d["run_h"] for d in window)}
+    return {"run_min_last10_avg": round(statistics.mean(d["run_h"] for d in window) * 60, 1),
+            "run_min_last10_median": round(statistics.median(d["run_h"] for d in window) * 60, 1)}
 
 
 def offset(data):
@@ -745,7 +741,7 @@ def refs(repo, numbers):
 def figures(t, before=None):
     """The tiles as (value, label, detail, the field read against a target or None). `before` is the newest earlier
     day with the last-ten run time, so that tile shows which way it moved."""
-    moved = f' · was {spanh(before["run_h_last10_avg"])}, {spanh(before["run_h_last10_median"])}' if before else ""
+    moved = f' · was {span(before["run_min_last10_avg"])}, {span(before["run_min_last10_median"])}' if before else ""
     goal = lambda field: f' · target {TARGETS[field][1]}'
     return [(f'{t["autonomous"]}/{t["deliveries"]}', "autonomous",
              f'{pct(t["autonomous_pct"])} of loop deliveries' + goal("autonomous_pct"), "autonomous_pct"),
@@ -754,8 +750,8 @@ def figures(t, before=None):
             (t["human_stops"], "human stops", f'{spanh(t["human_wait_h"])} waited', None),
             (spanh(t["loop_cycle_h_median"]), "cycle", f'median without human wait · {spanh(t["cycle_h_median"])} with', None),
             (spanh(t["run_h_median"]), "run time", f'median per delivery · {spanh(t["run_h"])} all runs', None),
-            (spanh(t.get("run_h_last10_avg")), "run time, last 10",
-             f'average · median {spanh(t.get("run_h_last10_median"))}{moved}', None),
+            (span(t.get("run_min_last10_avg")), "run time, last 10",
+             f'average · median {span(t.get("run_min_last10_median"))}{moved}', None),
             (pct(t["denial_pct"]), "runs with denials",
              f'{t["runs_with_denials"]} of {t["claude_runs"]} Claude runs' + goal("denial_pct"), "denial_pct"),
             (t["prs_merged"], "PRs merged", f'+{t["additions"]:,} −{t["deletions"]:,} · {t["files"]} files', None),
@@ -874,7 +870,7 @@ def report(data, days=None):
            f'<header><div class="label">{esc(repo)} · {esc(data["day"])} · {esc(data["timezone"])}</div>'
            f'<h1>Delivery report</h1><p>{esc(summary["headline"])}</p></header><section class="grid">']
     tone = {True: " hit", False: " miss", None: ""}
-    earlier = [(day, d) for day, d in (days or {}).items() if day < data["day"] and d.get("run_h_last10_avg") is not None]
+    earlier = [(day, d) for day, d in (days or {}).items() if day < data["day"] and d.get("run_min_last10_avg") is not None]
     before = max(earlier, key=lambda pair: pair[0])[1] if earlier else None
     out += [f'<div class="box"><div class="label">{l}</div><div class="num{tone[on_target(f, summary.get(f))]}">{esc(v)}</div>'
             f'<div class="label">{esc(s)}</div></div>' for v, l, s, f in figures(summary, before)]
@@ -1005,7 +1001,7 @@ SCHEMAS = {
             **dict.fromkeys(["start_pct", "peak_pct", "peak_pct_max"], PERCENT)}}},
         **dict.fromkeys(["run_h", "human_wait_h", "human_stops_per_delivery", "review_rounds_per_delivery",
                          "lead_h_median", "cycle_h_median", "loop_cycle_h_median", "run_h_median",
-                         "run_h_last10_avg", "run_h_last10_median"], HOURS)),
+                         "run_min_last10_avg", "run_min_last10_median"], HOURS)),
     "items": collection(["day", "items"], day=DAY, items={"type": "array", "items": {
         "type": "object", "required": ITEM_REQUIRED, "properties": {
             "number": COUNT, "title": TEXT, "autonomous": {"type": "boolean"}, "sequence": TEXT, "prs": NUMBERS,
@@ -1246,8 +1242,8 @@ def document(dataset, data, doc=None, button=True, first=None):
     changes = values(dataset.get("changes")) | {c["ref"]: c for c in data.get("changes", [])}
     latest = sorted(changes, key=lambda ref: (changes[ref]["day"], ref), reverse=True)[:5]
     return {"actions": actions, "changelog": changelog(changes),
-            "context_chart": {"title": CONTEXT_CHART_TITLE, "block": context_chart()},
-            "run_time_chart": {"title": RUN_TIME_CHART_TITLE, "block": run_time_chart()},
+            "context_chart": {"title": CONTEXT_CHART_TITLE, "blocks": context_blocks()},
+            "run_time_chart": {"title": RUN_TIME_CHART_TITLE, "blocks": [run_time_chart(), RUN_TIME_NOTE]},
             "cards": [{"lesson": key, "title": inline(lessons[key]["title"]), "changed": key in today}
                       for key in current]
                      + [{"lesson": key, "title": f"~~{inline(lessons[key]['title'])}~~", "changed": key in today,
@@ -1267,14 +1263,18 @@ def column(field, label, fmt="number", **extra):
 
 CONTEXT_CHART_TITLE = "Context used, as a share of the window"
 RUN_TIME_CHART_TITLE = "Run time of the last 10 deliveries"
+RUN_TIME_NOTE = {"type": "paragraph", "text": "How long the agents ran per delivery, from preparation to merge, over the "
+                 "last ten loop deliveries counting back from each day's last one. Queueing and human waits don't count, "
+                 "so a rising line means the work itself is taking longer. The average sits above the median when a few "
+                 "deliveries took much longer, usually through review rounds."}
 
 
 def run_time_chart():
     """Whether the work itself gets shorter: the rolling average and median, without queueing or human waits."""
     return chart({"version": 1, "type": "line", "collection": "days", "title": RUN_TIME_CHART_TITLE,
                   "x": {"field": "day", "type": "date", "label": "Day"},
-                  "y": [{"field": "run_h_last10_avg", "label": "Average", "unit": "h"},
-                        {"field": "run_h_last10_median", "label": "Median", "unit": "h"}],
+                  "y": [{"field": "run_min_last10_avg", "label": "Average", "unit": "min"},
+                        {"field": "run_min_last10_median", "label": "Median", "unit": "min"}],
                   "missing": "connect"})
 
 
@@ -1289,6 +1289,17 @@ def context_chart():
                         {"field": "context_peak_pct", "label": "Median peak", "unit": "%", "range": [0, 100]},
                         {"field": "context_peak_pct_max", "label": "Largest peak", "unit": "%", "range": [0, 100]}],
                   "missing": "connect"})
+
+
+def context_blocks():
+    """The context chart under its own heading, after the day figures and before the actions."""
+    return [{"type": "heading", "level": 2, "text": "Context usage"},
+            {"type": "paragraph", "text": "How much of its context window each run uses, as a share of that run's own "
+             "window. The bars show the median after a run's first ten calls: how heavy runs start, with a line at the "
+             "20% that counts as a heavy start. The lines show the median and the largest peak. A run that fills its "
+             "window compacts and can lose what it read, so a rising peak is the early warning. Runs before ub-agents "
+             "0.5.0 recorded no context, so those days stay empty."},
+            context_chart()]
 
 
 def create_document(data, button=True):
@@ -1312,16 +1323,8 @@ def create_document(data, button=True):
                      {"field": "wasted_pct", "label": "Wasted runs", "unit": "%"},
                      {"field": "denial_pct", "label": "Runs with denials", "unit": "%"}],
                "missing": "connect"}),
-        chart({"version": 1, "type": "line", "collection": "days", "title": "Human stops and the wait for them",
-               "x": {"field": "day", "type": "date", "label": "Day"},
-               "y": [{"field": "human_stops", "label": "Human stops"},
-                     {"field": "human_wait_h", "label": "Hours waited", "unit": "h"}]}),
-        chart({"version": 1, "type": "line", "collection": "days", "title": "Cycle and run time per delivery",
-               "x": {"field": "day", "type": "date", "label": "Day"},
-               "y": [{"field": "loop_cycle_h_median", "label": "Cycle, median", "unit": "h"},
-                     {"field": "run_h_median", "label": "Run time, median", "unit": "h"}],
-               "missing": "connect"}),
         run_time_chart(),
+        RUN_TIME_NOTE,
         chart({"version": 1, "type": "line", "collection": "days", "title": "Issues in, deliveries out and the open queue",
                "x": {"field": "day", "type": "date", "label": "Day"},
                "y": [{"field": "issues_opened", "label": "Issues opened"},
@@ -1335,7 +1338,6 @@ def create_document(data, button=True):
                "x": {"field": "day", "type": "date", "label": "Day"},
                "y": [{"field": "machines", "label": "Machines"}, {"field": "loops", "label": "Loops"},
                      {"field": "peak_runs", "label": "Peak parallel runs"}]}),
-        context_chart(),
         chart({"version": 1, "type": "table", "collection": "days", "title": "Recent days",
                "columns": [column("day", "Day", "date"), column("deliveries", "Deliveries"),
                            column("autonomous", "Autonomous"), column("wasted_pct", "Wasted runs", **percent),
@@ -1346,6 +1348,7 @@ def create_document(data, button=True):
                            column("context_peak_pct_max", "Largest context", **percent),
                            column("context_compacted", "Compacted")],
                "sort": {"field": "day", "direction": "desc"}, "limit": RECENT_DAYS}),
+        *context_blocks(),
         {"type": "heading", "level": 2, "text": "Recommended Actions"},
         *sections["actions"],
         {"type": "heading", "level": 2, "text": "Changelog"},
